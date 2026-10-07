@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0a0e1a">
-<title>صدى العراق · v1.6.2</title>
+<title>صدى العراق · v1.6.3</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
@@ -2369,7 +2369,7 @@ body.app-active { overflow:hidden !important; height:100dvh !important; }
 }
 </style>
 
-/* ===== v1.6.2 AUTH BUTTON INTERACTION FIX ===== */
+/* ===== v1.6.3 AUTH BUTTON INTERACTION FIX ===== */
 #auth-page .ah-body, #auth-page .ah-btns, #auth-page .ah-btn-p, #auth-page .ah-btn-s {
   position:relative !important; z-index:20 !important; pointer-events:auto !important;
 }
@@ -5765,7 +5765,7 @@ function tgSend(msg){fetch(`https://api.telegram.org/bot${CFG.tg.token}/sendMess
 </script>
 
 
-<!-- Sada Iraq v1.6.2 — definitive category/service visibility repair -->
+<!-- Sada Iraq v1.6.3 — definitive category/service visibility repair -->
 <script id="sadairaq-v159-service-visibility">
 (function(){
   'use strict';
@@ -5853,7 +5853,7 @@ function tgSend(msg){fetch(`https://api.telegram.org/bot${CFG.tg.token}/sendMess
     });
   }
   window.loadAllSvcs=async function(){
-    try{await hardLoad159();buildCat159();buildSvc159(SEL_CAT||'__all__');return ALL_SVCS_ARR}catch(e){console.warn('Sada v1.6.2 service load',e);return []}
+    try{await hardLoad159();buildCat159();buildSvc159(SEL_CAT||'__all__');return ALL_SVCS_ARR}catch(e){console.warn('Sada v1.6.3 service load',e);return []}
   };
   window.buildCatDD=buildCat159;
   window.buildSvcDD=buildSvc159;
@@ -5868,6 +5868,7 @@ function tgSend(msg){fetch(`https://api.telegram.org/bot${CFG.tg.token}/sendMess
   document.addEventListener('click',e=>{const t=e.target.closest?.('[data-page="order"],#nav-order,[onclick*="order"]');if(t)setTimeout(()=>window.loadAllSvcs().catch(()=>{}),180)},true);
 })();
 </script>
+<script id="sadairaq-v162-auth-click-fix">
 (function(){
   function openAuth(mode){
     try {
@@ -5898,6 +5899,7 @@ function tgSend(msg){fetch(`https://api.telegram.org/bot${CFG.tg.token}/sendMess
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',bind,{once:false}); else bind();
   setTimeout(bind,300); setTimeout(bind,1200); setTimeout(bind,2500);
 })();
+</script>
 
 <script id="sadairaq-v162-mastercard-clean">
 (function(){
@@ -5926,9 +5928,10 @@ function tgSend(msg){fetch(`https://api.telegram.org/bot${CFG.tg.token}/sendMess
 })();
 </script>
 
+<script id="sadairaq-v162-provider-runtime">
 (function(){
   'use strict';
-  const V160='1.6.2', RATE160=1250;
+  const V160='1.6.3', RATE160=1250;
   const q160=id=>document.getElementById(id);
   const safe160=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   const toast160=(m,t)=>{try{toast(m,t)}catch(_){} };
@@ -6013,7 +6016,7 @@ function tgSend(msg){fetch(`https://api.telegram.org/bot${CFG.tg.token}/sendMess
   };
   window.resetOrderPage=function(){SEL_PLAT='all';SEL_CAT='__all__';SEL_SVC=null;document.querySelectorAll('#order-plat-grid .plat-ic-btn').forEach(b=>b.classList.remove('on'));[...document.querySelectorAll('#order-plat-grid .plat-ic-btn')].find(b=>b.title==='الكل'||b.getAttribute('aria-label')==='الكل')?.classList.add('on');if(q160('cat-label'))q160('cat-label').textContent='الكل';if(q160('cat-icon'))q160('cat-icon').innerHTML='<i class="fas fa-layer-group" style="font-size:14px;color:var(--blue)"></i>';window.buildCatDD();window.buildSvcDD('__all__');const box=q160('svc-info-box');if(box){box.style.display='none';box.innerHTML=''}if(q160('order-total-bar'))q160('order-total-bar').style.display='none'};
 
-  async function refresh160(){try{const arr=await hardLoad160();window.buildCatDD();window.buildSvcDD(SEL_CAT||'__all__');return arr}catch(e){console.warn('v1.6.2 services',e);toast160('⚠️ تعذر تحميل الخدمات: '+e.message,'wrn');return []}}
+  async function refresh160(){try{const arr=await hardLoad160();window.buildCatDD();window.buildSvcDD(SEL_CAT||'__all__');return arr}catch(e){console.warn('v1.6.3 services',e);toast160('⚠️ تعذر تحميل الخدمات: '+e.message,'wrn');return []}}
   window.loadAllSvcs=refresh160;
 
   // Realtime service listener: admin changes appear to users immediately.
@@ -6099,15 +6102,16 @@ function tgSend(msg){fetch(`https://api.telegram.org/bot${CFG.tg.token}/sendMess
   forceVersion160();setTimeout(forceVersion160,100);setTimeout(forceVersion160,500);setTimeout(forceVersion160,1500);setTimeout(forceVersion160,3000);
   const iv=setInterval(forceVersion160,5000);setTimeout(()=>clearInterval(iv),120000);
   try{new MutationObserver(forceVersion160).observe(document.body,{childList:true,subtree:true})}catch(_){ }
-  async function boot160(){try{forceVersion160();if(FB_OK&&DB){await hardLoad160();window.buildCatDD();window.buildSvcDD(SEL_CAT||'__all__')}}catch(e){console.warn('Sada v1.6.2 boot',e)}}
+  async function boot160(){try{forceVersion160();if(FB_OK&&DB){await hardLoad160();window.buildCatDD();window.buildSvcDD(SEL_CAT||'__all__')}}catch(e){console.warn('Sada v1.6.3 boot',e)}}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot160,{once:true});else boot160();
   setTimeout(boot160,800);setTimeout(boot160,2200);
 })();
+</script>
 
 <script id="sadairaq-v162-clean-runtime">
 (function(){
   'use strict';
-  const VERSION='1.6.2', RATE=1250;
+  const VERSION='1.6.3', RATE=1250;
   const ALLOWED=[
     ['Instagram','fab fa-instagram','انستجرام'],['Tiktok','fab fa-tiktok','تيك توك'],['Facebook','fab fa-facebook','فيسبوك'],['Youtube','fab fa-youtube','يوتيوب'],['Telegram','fab fa-telegram','تلجرام'],['Twitter','fab fa-twitter','تويتر'],['Snapchat','fab fa-snapchat','سناب'],['Whatsapp','fab fa-whatsapp','واتساب'],['Linkedin','fab fa-linkedin','لينكدإن']
   ];
@@ -6123,12 +6127,12 @@ function tgSend(msg){fetch(`https://api.telegram.org/bot${CFG.tg.token}/sendMess
   window.buildSvcDD=function(cat){const m=document.getElementById('svc-options');if(!m)return;m.innerHTML='';const c=n(cat)||'__all__',plat=n(SEL_PLAT)||'all';let l=(c==='__all__'?(ALL_SVCS_ARR||[]):(ALL_CATS?.[c]||[])).slice();if(c==='__all__'&&plat!=='all')l=l.filter(s=>apps(s).includes(plat));const seen=new Set();l=l.filter(s=>{const x=String(s?.fbKey||s?.providerId+'|'+s?.smmpartyId||s?.name||'');if(seen.has(x))return false;seen.add(x);return true});if(!l.length){m.appendChild(Object.assign(document.createElement('div'),{className:'cdd-empty',textContent:'لا توجد خدمات ضمن هذا القسم'}));return}l.sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ar'));l.forEach((s,i)=>{const o=document.createElement('div');o.className='cdd-option';o.style.cssText='gap:9px;padding:10px 12px;min-height:68px;align-items:center';const im=document.createElement('img');im.className='sada-svc-thumb';im.src=thumb(s);im.onerror=()=>{im.src='sadairaq-logo.jpg'};const inf=document.createElement('div');inf.style.cssText='flex:1;min-width:0;overflow:hidden';const nm=document.createElement('div');nm.className='svc-main-name';nm.textContent=s.name||'خدمة';nm.style.cssText='font-size:12px;font-weight:800;color:var(--t0);line-height:1.4;word-break:break-word';const md=document.createElement('div');md.style.cssText='font-size:8.5px;color:var(--t3);margin-top:3px';md.textContent='#'+String(s.smmpartyId||s.providerServiceId||('local-'+(i+1)));inf.append(nm,md);const pr=document.createElement('div');pr.style.cssText='font-size:11.5px;font-weight:900;color:var(--blue);white-space:nowrap';pr.textContent='$'+((Number(s.price)||0)/RATE).toFixed(4)+'/1000';o.append(im,inf,pr);o.onclick=()=>{SEL_SVC=s;selectService(s);closeAllCDD()};m.appendChild(o)})};
   window.selectPlat=function(id,btn){const p=ALLOWED_SET.has(id)?id:'all';SEL_PLAT=p;SEL_CAT='__all__';SEL_SVC=null;document.querySelectorAll('#order-plat-grid .plat-ic-btn').forEach(b=>b.classList.remove('on'));if(btn)btn.classList.add('on');window.buildCatDD();window.buildSvcDD('__all__')};
   window.resetOrderPage=function(){SEL_PLAT='all';SEL_CAT='__all__';SEL_SVC=null;document.querySelectorAll('#order-plat-grid .plat-ic-btn').forEach(b=>b.classList.remove('on'));const a=[...document.querySelectorAll('#order-plat-grid .plat-ic-btn')].find(b=>b.title==='الكل'||b.getAttribute('aria-label')==='الكل');if(a)a.classList.add('on');const l=document.getElementById('cat-label');if(l)l.textContent='الكل';window.buildCatDD();window.buildSvcDD('__all__');const box=document.getElementById('svc-info-box');if(box){box.style.display='none';box.innerHTML=''}};
-  window.loadAllSvcs=async function(){try{const a=await hardLoad();window.buildCatDD();window.buildSvcDD(SEL_CAT||'__all__');return a}catch(e){console.warn('Sada v1.6.2 service load',e);return[]}};
+  window.loadAllSvcs=async function(){try{const a=await hardLoad();window.buildCatDD();window.buildSvcDD(SEL_CAT||'__all__');return a}catch(e){console.warn('Sada v1.6.3 service load',e);return[]}};
   try{if(window.FB_OK&&window.DB){DB.ref('services').off();DB.ref('services').on('value',snap=>{const a=[];if(snap.exists())snap.forEach(c=>{const v=c.val();if(v&&typeof v==='object'){v.fbKey=c.key;a.push(v)}});rebuild(a);window.buildCatDD();window.buildSvcDD(SEL_CAT||'__all__')})}}catch(_){ }
   function renderPlatformGrid(){const g=document.getElementById('order-plat-grid');if(!g)return;g.innerHTML='';const all=[['all','fas fa-layer-group','الكل'],...ALLOWED];all.forEach(x=>{const b=document.createElement('button');b.type='button';b.className='plat-ic-btn';b.title=x[2];b.setAttribute('aria-label',x[2]);b.innerHTML='<i class="'+x[1]+'"></i><span>'+x[2]+'</span>';b.onclick=()=>window.selectPlat(x[0],b);if((SEL_PLAT||'all')===x[0])b.classList.add('on');g.appendChild(b)})}
   window.SadaIraqPlatforms=ALLOWED.map(x=>x[0]);
   function forceVersion(){window.SadaIraqVersion=VERSION;document.title='صدى العراق · v'+VERSION;const b=document.getElementById('sadairaq-version-badge');if(b)b.innerHTML='<i class="fas fa-code-branch"></i> صدى العراق · الإصدار <b>'+VERSION+'</b>'}
-  function boot(){try{forceVersion();renderPlatformGrid();if(window.FB_OK&&window.DB){hardLoad().then(()=>{window.buildCatDD();window.buildSvcDD(SEL_CAT||'__all__')}).catch(()=>{})}}catch(e){console.warn('Sada v1.6.2 boot',e)}}
+  function boot(){try{forceVersion();renderPlatformGrid();if(window.FB_OK&&window.DB){hardLoad().then(()=>{window.buildCatDD();window.buildSvcDD(SEL_CAT||'__all__')}).catch(()=>{})}}catch(e){console.warn('Sada v1.6.3 boot',e)}}
   forceVersion();renderPlatformGrid();[100,400,1000,2500].forEach(t=>setTimeout(()=>{forceVersion();renderPlatformGrid()},t));if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
 </script>
