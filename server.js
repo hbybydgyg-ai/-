@@ -10,8 +10,8 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = process.env.APP_VERSION || '1.5.16';
-const BUILD_ID = process.env.BUILD_ID || 'SADA-1.5.16-REAL-ORDER-SESSION-FIX-20261007';
+const APP_VERSION = process.env.APP_VERSION || '1.5.17';
+const BUILD_ID = process.env.BUILD_ID || 'SADA-1.5.17-ORDER-AUTH-PROVIDER-FIX-20261007';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
@@ -21,6 +21,7 @@ const sessions = new Map(); // legacy sessions kept only during rolling deployme
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || 'sadairaq-session-secret-change-me');
 const SESSION_COOKIE = 'sadairaq_sid';
+const SESSION_TOKEN_HEADER = 'x-sada-session';
 const RATE_BUCKETS = new Map();
 const RATE_RULES = { auth:{window:60_000,max:12}, provider:{window:60_000,max:20}, order:{window:60_000,max:20}, general:{window:60_000,max:60} };
 function clientIp(req){ return String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim(); }
@@ -77,7 +78,13 @@ function parseCookies(req){
   }
   return out;
 }
-function sid(req){ return parseCookies(req)[SESSION_COOKIE] || ''; }
+function sid(req){
+  const header=String(req.headers[SESSION_TOKEN_HEADER]||'').trim();
+  if(header) return header;
+  const auth=String(req.headers.authorization||'').trim();
+  if(/^Bearer\s+/i.test(auth)) return auth.replace(/^Bearer\s+/i,'').trim();
+  return parseCookies(req)[SESSION_COOKIE] || '';
+}
 function sessionSig(payload){ return crypto.createHmac('sha256',SESSION_SECRET).update(payload).digest('base64url'); }
 function encodeSession(value){
   const payload=Buffer.from(JSON.stringify({...value,iat:Date.now()}),'utf8').toString('base64url');
@@ -97,11 +104,10 @@ function session(req){
   const token=sid(req); if(!token)return null;
   const stateless=decodeSession(token);
   if(stateless){
+    if(!/^[a-zA-Z0-9_@.\-]+$/.test(String(stateless.username||''))) return null;
     if(stateless.role==='admin' && String(stateless.username)!==String(ADMIN_USER)) return null;
-    if(stateless.role==='user'){
-      const store=readJSON('users.json',{users:{}});
-      if(!store.users?.[String(stateless.username)]) return null;
-    }
+    // v1.5.17: do NOT require users.json for an already signed user session.
+    // Firebase/custom-app users may outlive Railway's ephemeral local filesystem.
     return stateless;
   }
   const v=sessions.get(token);
@@ -115,6 +121,8 @@ function setSession(res, value){
   const forwarded=String(res._forwardedProto||'').toLowerCase();
   const secure=(String(process.env.COOKIE_SECURE||'auto').toLowerCase()==='true' || (String(process.env.COOKIE_SECURE||'auto').toLowerCase()==='auto' && forwarded==='https'))?'Secure; ':'';
   res.setHeader('Set-Cookie',`${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; ${secure}Max-Age=86400`);
+  res.setHeader('X-Sada-Session',token);
+  return token;
 }
 async function bodyJSON(req){
   const limit=256*1024; let raw='';
@@ -457,15 +465,25 @@ async function routeAPI(req,res,urlObj){
       if(u===ADMIN_USER) return json(res,409,{ok:false,error:'اسم المستخدم محجوز'});
       const store=readJSON('users.json',{users:{}}); if(store.users[u]) return json(res,409,{ok:false,error:'اسم المستخدم موجود مسبقاً'});
       const user={name:u,passwordHash:hashPassword(pw),balance:0,level:'مبتدئ',telegram:String(b.telegram||''),phone:String(b.phone||''),joined:new Date().toISOString(),totalSpent:0,totalOrders:0,role:'user'};
-      store.users[u]=user; writeJSON('users.json',store); setSession(res,{role:'user',username:u});
-      const safeUser={...user}; delete safeUser.password; delete safeUser.passwordHash; return json(res,200,{ok:true,role:'user',username:u,user:safeUser});
+      store.users[u]=user; writeJSON('users.json',store); const sessionToken=setSession(res,{role:'user',username:u});
+      const safeUser={...user}; delete safeUser.password; delete safeUser.passwordHash; return json(res,200,{ok:true,role:'user',username:u,user:safeUser,sessionToken});
     }
-    if(u===ADMIN_USER && adminPasswordValid(pw)){ setSession(res,{role:'admin',username:ADMIN_USER}); return json(res,200,{ok:true,role:'admin',username:ADMIN_USER}); }
+    if(u===ADMIN_USER && adminPasswordValid(pw)){ const sessionToken=setSession(res,{role:'admin',username:ADMIN_USER}); return json(res,200,{ok:true,role:'admin',username:ADMIN_USER,sessionToken}); }
     const store=readJSON('users.json',{users:{}}); const user=store.users?.[u];
-    if(user && verifyPassword(pw,user.passwordHash || user.password || '')){ const role=user.role==='admin'?'admin':'user'; setSession(res,{role,username:u}); const clean={...user}; delete clean.password; delete clean.passwordHash; return json(res,200,{ok:true,role,username:u,user:clean}); }
+    if(user && verifyPassword(pw,user.passwordHash || user.password || '')){ const role=user.role==='admin'?'admin':'user'; const sessionToken=setSession(res,{role,username:u}); const clean={...user}; delete clean.password; delete clean.passwordHash; return json(res,200,{ok:true,role,username:u,user:clean,sessionToken}); }
     return json(res,401,{ok:false,error:'بيانات الدخول غير صحيحة'});
   }
-  if(p==='/api/session' && req.method==='GET'){ const s=session(req); if(!s)return json(res,200,{ok:false,authenticated:false}); if(s.role==='admin')return json(res,200,{ok:true,authenticated:true,role:'admin',username:s.username}); const store=readJSON('users.json',{users:{}}); const u=store.users?.[s.username]; if(!u)return json(res,200,{ok:false,authenticated:false}); const clean={...u}; delete clean.password; delete clean.passwordHash; return json(res,200,{ok:true,authenticated:true,role:'user',username:s.username,user:clean}); }
+  if(p==='/api/session' && req.method==='GET'){
+    const token=sid(req); const s=session(req);
+    if(!s)return json(res,200,{ok:false,authenticated:false});
+    // Re-issue a fresh signed token/header so the browser can keep using a header even
+    // when a Railway proxy/browser drops HttpOnly cookie state.
+    const fresh=setSession(res,{role:s.role,username:s.username});
+    if(s.role==='admin')return json(res,200,{ok:true,authenticated:true,role:'admin',username:s.username,sessionToken:fresh});
+    const store=readJSON('users.json',{users:{}}); const u=store.users?.[s.username]||null;
+    const clean=u?{...u}:{}; delete clean.password; delete clean.passwordHash;
+    return json(res,200,{ok:true,authenticated:true,role:'user',username:s.username,user:Object.keys(clean).length?clean:null,sessionToken:fresh,localUserRecord:!!u});
+  }
   if(p==='/api/settings' && req.method==='GET'){ const cfg=readJSON('settings.json',{}); const waUrl=normalizeWhatsAppUrl(cfg.waUrl||cfg.waNum||'https://wa.me/9647762267959'); return json(res,200,{ok:true,settings:{waUrl,waNum:normalizeWhatsAppNumber(waUrl)}}); }
   if(p==='/api/settings' && req.method==='POST'){ if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'}); const b=await bodyJSON(req); const cfg=readJSON('settings.json',{}); if(b.waUrl!==undefined) cfg.waUrl=normalizeWhatsAppUrl(b.waUrl); else if(b.waNum!==undefined) cfg.waUrl=normalizeWhatsAppUrl(b.waNum); cfg.waNum=normalizeWhatsAppNumber(cfg.waUrl); writeJSON('settings.json',cfg); return json(res,200,{ok:true,settings:{waUrl:cfg.waUrl,waNum:cfg.waNum}}); }
   if(p==='/api/mastercard' && req.method==='GET'){
@@ -531,8 +549,12 @@ async function routeAPI(req,res,urlObj){
   if(p==='/api/order/create' && req.method==='POST'){
     const wait=rateLimit(req,'order'); if(wait)return json(res,429,{ok:false,error:'طلبات كثيرة، أعد المحاولة بعد قليل'},{'Retry-After':String(wait)});
     const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'});
-    const b=await bodyJSON(req); const providerId=String(b.providerId||'').trim(); const serviceId=String(b.serviceId||'').trim(); const link=String(b.link||'').trim(); const quantity=Number(b.quantity);
+    const b=await bodyJSON(req); const providerId=String(b.providerId||'').trim(); const serviceId=String(b.serviceId||'').trim(); const link=String(b.link||'').trim(); const quantity=Number(b.quantity); const localId=String(b.localId||'').trim();
     if(!providerId||!serviceId||!link||!Number.isInteger(quantity)||quantity<=0)return json(res,422,{ok:false,error:'بيانات الطلب غير مكتملة',stage:'validate'});
+    if(localId){
+      const existing=readJSON('orders.json',[]).find(x=>String(x.user||'')===username&&String(x.localId||'')===localId&&String(x.providerOrderId||''));
+      if(existing) return json(res,200,{ok:true,idempotent:true,providerId:String(existing.providerId||providerId),providerName:String(existing.providerName||''),providerOrderId:String(existing.providerOrderId),providerRaw:existing.providerRaw||null,createdAt:existing.createdAt||new Date().toISOString()});
+    }
     const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود المرتبط بالخدمة غير موجود. أعد حفظ المزود الحقيقي أو ثبّته بمتغيرات Railway',stage:'provider_lookup',providerId});
     try{
       // The balance endpoint is informational only. A provider may allow add while its
@@ -548,7 +570,7 @@ async function routeAPI(req,res,urlObj){
         return json(res,502,{ok:false,error:'المزود لم يرجع رقم طلب واضح بعد عملية الإرسال. لا تعاود الضغط لتجنب التكرار.',stage:'provider_response',uncertain:true,providerResponse:safeProviderResponse(d)});
       }
       const createdAt=new Date().toISOString();
-      appendJsonLedger('orders.json',{localId:String(b.localId||''),user:username,providerId,providerOrderId,serviceId,link,quantity,status:'pending',providerBalanceBefore,createdAt});
+      appendJsonLedger('orders.json',{localId,user:username,providerId,providerName:prov.name||providerId,providerOrderId,serviceId,link,quantity,status:'pending',providerBalanceBefore,providerRaw:safeProviderResponse(d),createdAt});
       return json(res,200,{ok:true,providerId,providerName:prov.name||providerId,providerOrderId,providerRaw:safeProviderResponse(d),providerBalanceBefore,createdAt});
     }catch(e){
       const rejected=!!e.providerRejected;
