@@ -10,13 +10,13 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.24';
-const BUILD_ID = 'SADA-1.5.24-FINAL-API-PROVIDER-SECURITY-20261008';
+const APP_VERSION = '1.5.25';
+const BUILD_ID = 'SADA-1.5.25-API-KEY-ORDERS-TELEGRAM-20261008';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
 const FIXED_RATE = 1250; // 1 USD = 1,250 IQD
-// v1.5.24: signed stateless sessions survive Railway restarts/instance changes.
+// v1.5.25: signed stateless sessions survive Railway restarts/instance changes.
 const sessions = new Map(); // legacy sessions kept only during rolling deployments
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || 'sadairaq-session-secret-change-me');
@@ -27,6 +27,16 @@ const RATE_RULES = { auth:{window:60_000,max:12}, provider:{window:60_000,max:20
 function clientIp(req){ return String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim(); }
 function rateLimit(req,bucket='general'){ const r=RATE_RULES[bucket]||RATE_RULES.general; const key=clientIp(req)+'|'+bucket; const now=Date.now(); let x=RATE_BUCKETS.get(key); if(!x||now-x.started>r.window)x={started:now,count:0}; x.count++; RATE_BUCKETS.set(key,x); if(x.count>r.max){ return Math.ceil((x.started+r.window-now)/1000); } return 0; }
 setInterval(()=>{ const now=Date.now(); for(const [k,v] of RATE_BUCKETS) if(now-v.started>120_000) RATE_BUCKETS.delete(k); for(const [k,v] of sessions) if(now-(v.createdAt||0)>SESSION_TTL_MS) sessions.delete(k); }, 120_000).unref();
+
+
+function ensureTelegramDefaults(){
+  const cfg=readJSON('settings.json',{});
+  const tg=cfg.telegram&&typeof cfg.telegram==='object'?{...cfg.telegram}:{};
+  if(tg.enabled===undefined) tg.enabled=true;
+  if(!tg.token) tg.token=String(process.env.TELEGRAM_BOT_TOKEN||'');
+  if(!tg.chat) tg.chat=String(process.env.TELEGRAM_CHAT_ID||'');
+  if(tg.token||tg.chat||cfg.telegram) { cfg.telegram=tg; writeJSON('settings.json',cfg); }
+}
 
 function ensureData() {
   if (!fs.existsSync(DATA)) fs.mkdirSync(DATA, {recursive:true});
@@ -111,7 +121,7 @@ function session(req){
   if(stateless){
     if(!/^[a-zA-Z0-9_@.\-]+$/.test(String(stateless.username||''))) return null;
     if(stateless.role==='admin' && String(stateless.username)!==String(ADMIN_USER)) return null;
-    // v1.5.24: do NOT require users.json for an already signed user session.
+    // v1.5.25: do NOT require users.json for an already signed user session.
     // Firebase/custom-app users may outlive Railway's ephemeral local filesystem.
     return stateless;
   }
@@ -343,6 +353,17 @@ async function providerRequest(prov,params,timeoutMs=30000){
 
 function userFromSession(req){ const s=session(req); return s?.role==='user' ? String(s.username||'') : ''; }
 function appendJsonLedger(file,entry){ const arr=readJSON(file,[]); const next=Array.isArray(arr)?arr:[]; next.push(entry); writeJSON(file,next.slice(-5000)); }
+
+let SITE_ORDER_LOCK=Promise.resolve();
+function withSiteOrderLock(fn){ const run=SITE_ORDER_LOCK.catch(()=>{}).then(fn); SITE_ORDER_LOCK=run.finally(()=>{}); return run; }
+async function nextSiteOrderId(){
+  return withSiteOrderLock(async()=>{
+    const cfg=readJSON('settings.json',{}); const n=Math.max(0,Number(cfg.orderCounter||0))+1;
+    cfg.orderCounter=n; writeJSON('settings.json',cfg); return String(n);
+  });
+}
+function siteOrderById(id){ return readJSON('orders.json',[]).find(o=>String(o.id||'')===String(id||''))||null; }
+
 function normalizedPath(p){
   if (p.endsWith('.php')) return p.slice(0,-4);
   return p;
@@ -542,6 +563,14 @@ async function sendTelegram(text){
     }); clearTimeout(timer); return r.ok;
   }catch(_){ return false; }
 }
+
+async function notifyOrderStatusChange(order, oldStatus, newStatus){
+  if(!order || String(oldStatus||'')===String(newStatus||'')) return false;
+  const labels={processing:'🔄 Processing',completed:'✅ Completed',partial:'⚠️ Partial',cancelled:'❌ Canceled',failed:'❌ Failed',refunded:'💰 Refunded',pending:'⏳ Pending'};
+  const msg=`تحديث حالة طلب\n🆔 رقم الطلب: #${order.id}\n👤 المستخدم: ${order.user||'—'}\n📦 الخدمة: ${order.serviceName||'—'}\n🔢 الكمية: ${Number(order.quantity||0).toLocaleString('en-US')}\n💰 السعر: $${Number(order.chargeUsd||Number(order.total||0)/FIXED_RATE).toFixed(2)}\n📊 الحالة: ${labels[newStatus]||newStatus}\n🕐 الوقت: ${new Date().toLocaleString('en-GB',{hour12:false})}`;
+  return sendTelegram(msg);
+}
+
 function providerSafeName(p){return String(p?.name||p?.id||'مزود');}
 async function authoritativeWebsiteService(providerId, serviceId, firebaseServiceKey){
   const pid=String(providerId||'').trim(), sid=String(serviceId||'').trim(), fkey=String(firebaseServiceKey||'').trim();
@@ -820,7 +849,7 @@ async function routeAPI(req,res,urlObj){
     });
     if(result?.insufficient)return json(res,402,{ok:false,error:'رصيد المستخدم غير كافٍ',balanceUsd:result.balanceUsd});
     if(result?.error)return json(res,502,{ok:false,error:result.error,uncertain:!!result.uncertain,authFailure:!!result.authFailure});
-    if(result?.ok){sendTelegram(`🆕 طلب جديد\n🆔 رقم المزود: #${result.order.providerOrderId}\n👤 المستخدم: ${username}\n📦 الخدمة: ${result.order.serviceName}\n🔗 الرابط: ${link}\n🔢 الكمية: ${quantity.toLocaleString('en-US')}\n💰 السعر: $${chargeUsd.toFixed(2)}\n📊 الحالة: Pending\n🕐 الوقت: ${new Date().toLocaleString('en-GB',{hour12:false})}`).catch(()=>{});return json(res,200,{ok:true,providerId,providerName:prov.name||providerId,providerOrderId:String(result.order.providerOrderId),providerRaw:result.order.providerRaw,providerBalanceBefore:null,chargeUsd,totalIQD:chargeIqd,discountPct:userDiscount,createdAt:result.order.createdAt});}
+    if(result?.ok){sendTelegram(`🆕 طلب جديد\n🆔 رقم المزود: #${result.order.providerOrderId}\n👤 المستخدم: ${username}\n📦 الخدمة: ${result.order.serviceName}\n🔗 الرابط: ${link}\n🔢 الكمية: ${quantity.toLocaleString('en-US')}\n💰 السعر: $${chargeUsd.toFixed(2)}\n📊 الحالة: Pending\n🕐 الوقت: ${new Date().toLocaleString('en-GB',{hour12:false})}`).catch(()=>{});return json(res,200,{ok:true,siteOrderId:String(result.order.id||localId||''),providerId,providerName:prov.name||providerId,providerOrderId:String(result.order.providerOrderId),providerRaw:result.order.providerRaw,providerBalanceBefore:null,chargeUsd,totalIQD:chargeIqd,discountPct:userDiscount,createdAt:result.order.createdAt});}
     return json(res,500,{ok:false,error:'تعذر إنشاء الطلب'});
   }
 
@@ -839,6 +868,39 @@ async function routeAPI(req,res,urlObj){
   if(p==='/api/logout'){
     const id=sid(req); if(id) sessions.delete(id); res.setHeader('Set-Cookie',`${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`); return json(res,200,{ok:true});
   }
+
+  if(p==='/api/admin/orders' && req.method==='GET'){
+    if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
+    const q=String(urlObj.searchParams.get('q')||'').trim().toLowerCase();
+    const st=String(urlObj.searchParams.get('status')||'').trim().toLowerCase();
+    const rows=readJSON('orders.json',[]).filter(o=>{
+      const hay=[o.id,o.user,o.link,o.serviceName,o.providerOrderId].map(v=>String(v||'').toLowerCase()).join(' ');
+      const norm=normalizeProviderStatus(o.status||'pending');
+      return (!q||hay.includes(q))&&(!st||st==='all'||norm===st);
+    }).sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0)).slice(0,500);
+    return json(res,200,{ok:true,orders:rows});
+  }
+  if(p==='/api/admin/order-status' && req.method==='POST'){
+    if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
+    const b=await bodyJSON(req); const siteId=String(b.orderId||'').trim();
+    if(!siteId) return json(res,422,{ok:false,error:'رقم طلب الموقع مطلوب'});
+    const rows=readJSON('orders.json',[]); const idx=rows.findIndex(o=>String(o.id||'')===siteId);
+    if(idx<0) return json(res,404,{ok:false,error:'طلب الموقع غير موجود'});
+    const order=rows[idx]; if(!order.providerId||!order.providerOrderId) return json(res,409,{ok:false,error:'هذا الطلب لا يملك طلباً مرتبطاً بالمزود'});
+    const {prov}=getProviderById(order.providerId); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
+    try{
+      const d=await providerRequest(prov,{action:'status',order:String(order.providerOrderId)});
+      const oldStatus=normalizeProviderStatus(order.status||'pending'); const newStatus=normalizeProviderStatus(d.status||order.status||'pending');
+      order.providerStatus=String(d.status||''); order.status=newStatus==='unknown'?(order.status||'pending'):newStatus;
+      order.remains=d.remains; order.startCount=d.start_count??d.startCount; order.lastCheckedAt=nowISO(); order.providerRaw=safeProviderResponse(d);
+      rows[idx]=order; writeJSON('orders.json',rows); notifyOrderStatusChange(order,oldStatus,order.status).catch(()=>{});
+      return json(res,200,{ok:true,siteOrderId:siteId,providerOrderId:String(order.providerOrderId),status:order.status,providerStatus:order.providerStatus,remains:order.remains,startCount:order.startCount,checkedAt:order.lastCheckedAt});
+    }catch(e){
+      appendJsonLedger('provider_failures.json',{stage:'admin_order_status',siteOrderId:siteId,providerId:order.providerId,providerOrderId:order.providerOrderId,error:String(e.message||e),createdAt:nowISO()});
+      return json(res,502,{ok:false,error:String(e.message||e)});
+    }
+  }
+
   if(p==='/api/admin/data-summary' && req.method==='GET'){
     if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
     const users=readJSON('users.json',{users:{}})?.users||{};
@@ -935,6 +997,7 @@ function serveStatic(req,res,urlObj){
 }
 
 ensureData();
+ensureTelegramDefaults();
 const server=http.createServer(async (req,res)=>{
   try{
     res._forwardedProto=String(req.headers['x-forwarded-proto']||'').split(',')[0].trim();
