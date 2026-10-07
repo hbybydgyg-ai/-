@@ -8,7 +8,7 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.1';
+const APP_VERSION = '1.5.2';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
@@ -119,7 +119,7 @@ async function providerRequest(prov,params,timeoutMs=30000){
       const controller=new AbortController();
       const timer=setTimeout(()=>controller.abort(),timeoutMs);
       try{
-        const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8','Accept':'application/json,text/plain,*/*','User-Agent':'SadaIraq/1.5.0'},body:payload.toString(),redirect:'follow',signal:controller.signal});
+        const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8','Accept':'application/json,text/plain,*/*','User-Agent':'SadaIraq/1.5.2'},body:payload.toString(),redirect:'follow',signal:controller.signal});
         const text=await r.text();
         let d={};
         try{d=text?JSON.parse(text):{};}catch(_){d={raw:text};}
@@ -134,6 +134,28 @@ async function providerRequest(prov,params,timeoutMs=30000){
         if(retryable&&attempt<3){await new Promise(r=>setTimeout(r,250*attempt));continue;}
         break;
       }finally{clearTimeout(timer);}
+    }
+  }
+  // Compatibility fallbacks for READ operations only. Never retry order creation here,
+  // because a provider could accept an order even when the response is unusual.
+  if(['balance','services'].includes(String(params?.action||''))){
+    for(const endpoint of endpoints){
+      const variants = [
+        {method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json,text/plain,*/*','User-Agent':'SadaIraq/1.5.2'}, body:JSON.stringify(Object.fromEntries(payload.entries()))},
+        {method:'GET', headers:{'Accept':'application/json,text/plain,*/*','User-Agent':'SadaIraq/1.5.2'}, body:null, url:endpoint+'?'+payload.toString()}
+      ];
+      for(const v of variants){
+        const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),timeoutMs);
+        try{
+          const r=await fetch(v.url||endpoint,{method:v.method,headers:v.headers,body:v.body,redirect:'follow',signal:controller.signal});
+          const t=await r.text(); let d={}; try{d=t?JSON.parse(t):{};}catch(_){d={raw:t};}
+          if(!r.ok) continue;
+          if(d&&typeof d==='object'&&d.error) continue;
+          return d;
+        }catch(_){
+          // keep trying compatible read formats
+        }finally{clearTimeout(timer);}
+      }
     }
   }
   if(lastError?.name==='AbortError') throw lastError;
@@ -397,14 +419,17 @@ async function routeAPI(req,res,urlObj){
     }
     if(req.method==='POST'){
       if(!isAdmin(req)) return json(res,403,{error:'غير مصرح'});
-      const b=await bodyJSON(req); const list=Array.isArray(b.providers)?b.providers:[]; const out={};
+      const b=await bodyJSON(req); const list=Array.isArray(b.providers)?b.providers:[];
+      const incoming={};
       for(const item of list){
         if(!item||typeof item!=='object') continue;
         const id=String(item.id||'').replace(/[^a-zA-Z0-9_-]/g,''); const name=String(item.name||'').trim(); const apiUrl=String(item.url||'').trim(); const key=String(item.key||'').trim();
-        if(id&&name&&/^https?:\/\//i.test(apiUrl)&&key) out[id]={name,url:apiUrl,key};
+        if(id&&name&&/^https?:\/\//i.test(apiUrl)&&key) incoming[id]={name,url:apiUrl,key};
       }
-      writeJSON('providers.json',{activeProvider:String(b.activeProvider||''),providers:out,updatedAt:new Date().toISOString()});
-      return json(res,200,{ok:true,count:Object.keys(out).length});
+      const out = b.mode==='merge' ? {...(store.providers||{}), ...incoming} : incoming;
+      const active = String(b.activeProvider!==undefined ? b.activeProvider : (store.activeProvider||''));
+      writeJSON('providers.json',{activeProvider:active,providers:out,updatedAt:new Date().toISOString()});
+      return json(res,200,{ok:true,count:Object.keys(out).length,activeProvider:active});
     }
   }
   if(p==='/api/smm') return apiSmm(req,res,urlObj);
