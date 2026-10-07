@@ -10,13 +10,13 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = process.env.APP_VERSION || '1.5.17';
-const BUILD_ID = process.env.BUILD_ID || 'SADA-1.5.17-ORDER-AUTH-PROVIDER-FIX-20261007';
+const APP_VERSION = process.env.APP_VERSION || '1.5.18';
+const BUILD_ID = process.env.BUILD_ID || 'SADA-1.5.18-PROVIDER-DELETE-UNIFIED-20261008';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
 const FIXED_RATE = 1250; // 1 USD = 1,250 IQD
-// v1.5.16: signed stateless sessions survive Railway restarts/instance changes.
+// v1.5.18: signed stateless sessions survive Railway restarts/instance changes.
 const sessions = new Map(); // legacy sessions kept only during rolling deployments
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || 'sadairaq-session-secret-change-me');
@@ -106,7 +106,7 @@ function session(req){
   if(stateless){
     if(!/^[a-zA-Z0-9_@.\-]+$/.test(String(stateless.username||''))) return null;
     if(stateless.role==='admin' && String(stateless.username)!==String(ADMIN_USER)) return null;
-    // v1.5.17: do NOT require users.json for an already signed user session.
+    // v1.5.18: do NOT require users.json for an already signed user session.
     // Firebase/custom-app users may outlive Railway's ephemeral local filesystem.
     return stateless;
   }
@@ -145,12 +145,14 @@ function envProvider(){
   return {id,name,url,key,source:'environment'};
 }
 function providerStore(){
-  const local=readJSON('providers.json',{activeProvider:'',providers:{}});
+  const local=readJSON('providers.json',{activeProvider:'',providers:{},deletedProviderIds:[]});
   const providers={...(local&&local.providers&&typeof local.providers==='object'?local.providers:{})};
+  const deleted=new Set(Array.isArray(local?.deletedProviderIds)?local.deletedProviderIds.map(String):[]);
   const env=envProvider();
-  if(env) providers[env.id]={...(providers[env.id]||{}),...env};
-  const active=String(local?.activeProvider||env?.id||'');
-  return {activeProvider:active,providers};
+  if(env && !deleted.has(env.id)) providers[env.id]={...(providers[env.id]||{}),...env};
+  let active=String(local?.activeProvider||'');
+  if(!active || !providers[active]) active=Object.keys(providers)[0]||'';
+  return {activeProvider:active,providers,deletedProviderIds:deleted,envProvider:env};
 }
 function getProviderById(id){ const store=providerStore(); const pid=String(id||store.activeProvider||''); return {store,pid,prov:(store.providers||{})[pid]||null}; }
 function normalizeProviderStatus(v){ const x=String(v||'').trim().toLowerCase(); const map={pending:'pending',queued:'pending',processing:'processing','in progress':'processing',completed:'completed',complete:'completed',partial:'partial',canceled:'cancelled',cancelled:'cancelled',failed:'failed',error:'failed',refunded:'refunded'}; return map[x]||'unknown'; }
@@ -625,6 +627,21 @@ async function routeAPI(req,res,urlObj){
     const id=String(urlObj.searchParams.get('provider')||''); const {prov}=getProviderById(id); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
     return json(res,200,{ok:true,providerId:id,key:String(prov.key||'')});
   }
+  if(p.startsWith('/api/providers/') && req.method==='DELETE'){
+    if(!isAdmin(req)) return json(res,403,{error:'غير مصرح'});
+    const pid=decodeURIComponent(p.slice('/api/providers/'.length)).trim();
+    if(!pid) return json(res,400,{error:'معرف المزود مفقود'});
+    const store=providerStore();
+    if(!store.providers[pid]) return json(res,404,{error:'المزود غير موجود'});
+    const out={...(store.providers||{})};
+    delete out[pid];
+    const deletedIds=new Set(store.deletedProviderIds||[]);
+    if(store.envProvider?.id===pid) deletedIds.add(pid); else deletedIds.delete(pid);
+    let active=String(store.activeProvider||'');
+    if(active===pid) active=Object.keys(out)[0]||'';
+    writeJSON('providers.json',{activeProvider:active,providers:out,deletedProviderIds:[...deletedIds],updatedAt:new Date().toISOString()});
+    return json(res,200,{ok:true,deleted:pid,activeProvider:active,count:Object.keys(out).length});
+  }
   if(p==='/api/providers'){
     const store=providerStore();
     if(req.method==='GET'){
@@ -639,11 +656,16 @@ async function routeAPI(req,res,urlObj){
       for(const item of list){
         if(!item||typeof item!=='object') continue;
         const id=String(item.id||'').replace(/[^a-zA-Z0-9_-]/g,''); const name=String(item.name||'').trim(); const apiUrl=String(item.url||'').trim(); const key=String(item.key||'').trim();
-        const preserved=String((store.providers||{})[id]?.key||''); if(id&&name&&/^https?:\/\//i.test(apiUrl)&&(key||preserved)) incoming[id]={name,url:apiUrl,key:key||preserved};
+        const preserved=String((store.providers?.[id]?.key) || (store.envProvider?.id===id ? (envProvider()?.key || '') : ''));
+        if(id&&name&&/^https?:\/\//i.test(apiUrl)&&(key||preserved)) incoming[id]={name,url:apiUrl,key:key||preserved};
       }
       const out = b.mode==='replace' ? incoming : {...(store.providers||{}), ...incoming};
-      const active = String(b.activeProvider!==undefined ? b.activeProvider : (store.activeProvider||''));
-      writeJSON('providers.json',{activeProvider:active,providers:out,updatedAt:new Date().toISOString()});
+      const deletedIds=new Set(store.deletedProviderIds||[]);
+      for(const id of Object.keys(incoming)) deletedIds.delete(id);
+      if(b.mode==='replace' && store.envProvider?.id && !incoming[store.envProvider.id]) deletedIds.add(store.envProvider.id);
+      const activeCandidate=String(b.activeProvider!==undefined ? b.activeProvider : (store.activeProvider||''));
+      const active=activeCandidate && out[activeCandidate] ? activeCandidate : (Object.keys(out)[0]||'');
+      writeJSON('providers.json',{activeProvider:active,providers:out,deletedProviderIds:[...deletedIds],updatedAt:new Date().toISOString()});
       return json(res,200,{ok:true,count:Object.keys(out).length,activeProvider:active});
     }
   }
