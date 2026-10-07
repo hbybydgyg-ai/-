@@ -10,13 +10,13 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = process.env.APP_VERSION || '1.5.21';
-const BUILD_ID = process.env.BUILD_ID || 'SADA-1.5.21-FREEZE-USD-REAL-ORDER-20261008';
+const APP_VERSION = process.env.APP_VERSION || '1.5.22';
+const BUILD_ID = process.env.BUILD_ID || 'SADA-1.5.22-FREEZE-USD-REAL-ORDER-20261008';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
 const FIXED_RATE = 1250; // 1 USD = 1,250 IQD
-// v1.5.21: signed stateless sessions survive Railway restarts/instance changes.
+// v1.5.22: signed stateless sessions survive Railway restarts/instance changes.
 const sessions = new Map(); // legacy sessions kept only during rolling deployments
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || 'sadairaq-session-secret-change-me');
@@ -106,7 +106,7 @@ function session(req){
   if(stateless){
     if(!/^[a-zA-Z0-9_@.\-]+$/.test(String(stateless.username||''))) return null;
     if(stateless.role==='admin' && String(stateless.username)!==String(ADMIN_USER)) return null;
-    // v1.5.21: do NOT require users.json for an already signed user session.
+    // v1.5.22: do NOT require users.json for an already signed user session.
     // Firebase/custom-app users may outlive Railway's ephemeral local filesystem.
     return stateless;
   }
@@ -251,6 +251,15 @@ function isPrivateAddress(address){
   if(net.isIPv6(a)){ return a==='::1'||a.startsWith('fc')||a.startsWith('fd')||a.startsWith('fe8')||a.startsWith('fe9')||a.startsWith('fea')||a.startsWith('feb'); }
   return false;
 }
+function normalizeProviderApiUrl(raw){
+  const u=new URL(String(raw||'').trim());
+  const host=u.hostname.toLowerCase();
+  // YlaFollow documents https://ylafollow.com/api/v2. Accept the older/common typo /apiv2.
+  if(host==='ylafollow.com' && /^\/apiv2\/?$/i.test(u.pathname)) u.pathname='/api/v2';
+  // Keep the documented v2 path normalized for YlaFollow.
+  return u.toString().replace(/\/$/,'');
+}
+
 async function validateProviderUrl(raw){
   const u=new URL(String(raw||'').trim());
   if(!/^https?:$/.test(u.protocol)) throw new Error('API URL يجب أن يبدأ بـ http:// أو https://');
@@ -264,7 +273,7 @@ async function validateProviderUrl(raw){
 
 async function providerRequest(prov,params,timeoutMs=30000){
   if(!prov?.url||!prov?.key) throw new Error('بيانات المزود غير مكتملة');
-  const rawUrl=String(prov.url).trim();
+  const rawUrl=normalizeProviderApiUrl(String(prov.url).trim());
   await validateProviderUrl(rawUrl);
   const base=rawUrl.replace(/\/+$/,'');
   const action=String(params?.action||'');
@@ -559,7 +568,7 @@ async function routeAPI(req,res,urlObj){
     }
     const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود المرتبط بالخدمة غير موجود. أعد حفظ المزود الحقيقي أو ثبّته بمتغيرات Railway',stage:'provider_lookup',providerId});
     try{
-      // v1.5.21: send ADD directly; balance is informational and must not block order creation.
+      // v1.5.22: send ADD directly; balance is informational and must not block order creation.
       const providerBalanceBefore=null;
 
       // IMPORTANT: order creation is exactly one outbound call. No automatic retry.
@@ -653,7 +662,8 @@ async function routeAPI(req,res,urlObj){
       const incoming={};
       for(const item of list){
         if(!item||typeof item!=='object') continue;
-        const id=String(item.id||'').replace(/[^a-zA-Z0-9_-]/g,''); const name=String(item.name||'').trim(); const apiUrl=String(item.url||'').trim(); const key=String(item.key||'').trim();
+        const id=String(item.id||'').replace(/[^a-zA-Z0-9_-]/g,''); const name=String(item.name||'').trim(); let apiUrl=String(item.url||'').trim(); const key=String(item.key||'').trim();
+        try{apiUrl=normalizeProviderApiUrl(apiUrl);}catch(_){}
         const preserved=String((store.providers?.[id]?.key) || (store.envProvider?.id===id ? (envProvider()?.key || '') : ''));
         if(id&&name&&/^https?:\/\//i.test(apiUrl)&&(key||preserved)) incoming[id]={name,url:apiUrl,key:key||preserved};
       }
