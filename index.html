@@ -2281,6 +2281,29 @@ body { padding-top: 0 !important; }
 @keyframes sadaSbFloat{0%{transform:translate3d(-2%,-1%,0) scale(1)}100%{transform:translate3d(3%,2%,0) scale(1.06)}}
 @keyframes sadaSbGrid{0%{background-position:0 0}100%{background-position:56px 56px}}
 </style>
+
+<style id="sadairaq-v131-layout-fix">
+/* v1.3.1 — FINAL MOBILE APP LAYOUT/SCROLL FIX
+   The authenticated app owns the viewport; only .pc scrolls.
+   This prevents the auth page/document scroll position from pushing the app below the fold. */
+html, body { height:100%; min-height:100%; }
+body { overflow:hidden !important; }
+#app { height:100dvh !important; min-height:100vh !important; overflow:hidden !important; position:fixed !important; inset:0 !important; width:100% !important; }
+#app.on { display:flex !important; }
+#auth-page { position:fixed !important; inset:0 !important; }
+#auth-page[style*="display: none"] { display:none !important; pointer-events:none !important; }
+.ma { min-width:0 !important; min-height:0 !important; overflow:hidden !important; }
+.pc { min-width:0 !important; min-height:0 !important; height:auto !important; overflow-y:auto !important; overflow-x:hidden !important; -webkit-overflow-scrolling:touch !important; overscroll-behavior:contain; touch-action:pan-y; }
+.pg { min-height:0 !important; }
+@media (max-width:768px){
+  #app.on { flex-direction:column !important; }
+  .ma { flex:1 1 auto !important; height:auto !important; }
+  .pc { flex:1 1 auto !important; }
+  .tb { flex:0 0 52px !important; }
+  .sb { max-height:100dvh !important; }
+}
+</style>
+
 </head>
 <body>
 <!-- WhatsApp Float Button -->
@@ -3403,7 +3426,7 @@ function checkSavedAuth() {
 
 function logout() {
   CU=null; BAL=0; localStorage.removeItem("tz_u");
-  $("app").classList.remove("on"); $("auth-page").style.display="";
+  $("app").classList.remove("on"); $("auth-page").style.display=""; document.documentElement.scrollTop=0; document.body.scrollTop=0;
   document.body.classList.remove("app-active"); // إيقاف حماية النسخ
   showHero(); closeModal(); toast("تم تسجيل الخروج","inf");
 }
@@ -3413,7 +3436,8 @@ async function purgeLegacyServicesOnce(){ return; }
 
 // ── LAUNCH APP ───────────────────────────────────────────
 function launchApp() {
-  $("auth-page").style.display="none"; $("app").classList.add("on"); showHero();
+  $("auth-page").style.display="none"; $("auth-page").style.pointerEvents="none";
+  $("app").classList.add("on"); document.documentElement.scrollTop=0; document.body.scrollTop=0;
   document.body.classList.add("app-active"); // تفعيل حماية النسخ
   updateUI(); loadAllSvcs(); loadHomeStats(); buildPms(); pollNotifs(); loadPmsFromFirebase();
   // Realtime version tracking (يكتشف لو الأدمن استورد خدمات جديدة)
