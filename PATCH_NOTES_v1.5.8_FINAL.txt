@@ -1,0 +1,10 @@
+صدى العراق v1.5.8
+
+- Fix Firebase-safe user profile before order submission (email usernames with dots no longer create invalid Firebase paths).
+- Order page defaults to الكل and renders categories/services immediately; platform switching resets correctly.
+- Provider restore: selected services, whole provider category, or all services; whole-category mode shows provider categories first, with lowest/highest price sorting and local target section.
+- Imported provider catalog remains separate under providerServices; only selected services enter local services.
+- Existing duplicate service gets linked to the selected local section instead of duplicated.
+- Recharge order: Asiacell, Athir, Mastercard. Mastercard is Arabic, fixed number 3494089927, no in-site image upload; proof goes through WhatsApp.
+- Multiple provider list preserved.
+- Version unified to 1.5.8.
