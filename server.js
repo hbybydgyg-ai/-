@@ -23,7 +23,29 @@ function clientIp(req){ return String(req.headers['x-forwarded-for']||req.socket
 function rateLimit(req,bucket='general'){ const r=RATE_RULES[bucket]||RATE_RULES.general; const key=clientIp(req)+'|'+bucket; const now=Date.now(); let x=RATE_BUCKETS.get(key); if(!x||now-x.started>r.window)x={started:now,count:0}; x.count++; RATE_BUCKETS.set(key,x); if(x.count>r.max){ return Math.ceil((x.started+r.window-now)/1000); } return 0; }
 setInterval(()=>{ const now=Date.now(); for(const [k,v] of RATE_BUCKETS) if(now-v.started>120_000) RATE_BUCKETS.delete(k); for(const [k,v] of sessions) if(now-(v.createdAt||0)>SESSION_TTL_MS) sessions.delete(k); }, 120_000).unref();
 
-function ensureData() { if (!fs.existsSync(DATA)) fs.mkdirSync(DATA, {recursive:true}); }
+function ensureData() {
+  if (!fs.existsSync(DATA)) fs.mkdirSync(DATA, {recursive:true});
+  const defaults={
+    'users.json':{users:{}},
+    'orders.json':[],
+    'payments.json':[],
+    'notifications.json':[],
+    'notification_seen.json':{},
+    'providers.json':{activeProvider:'',providers:{}},
+    'settings.json':{}
+  };
+  for(const [file,def] of Object.entries(defaults)){
+    const full=path.join(DATA,file);
+    let cur=null, ok=true;
+    try{cur=JSON.parse(fs.readFileSync(full,'utf8'));}catch(_){ok=false;}
+    if(file==='users.json') ok=!!(cur&&typeof cur==='object'&&cur.users&&typeof cur.users==='object'&&!Array.isArray(cur.users));
+    else if(file==='orders.json'||file==='payments.json'||file==='notifications.json') ok=Array.isArray(cur);
+    else if(file==='notification_seen.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
+    else if(file==='providers.json') ok=!!(cur&&typeof cur==='object'&&cur.providers&&typeof cur.providers==='object'&&!Array.isArray(cur.providers));
+    else if(file==='settings.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
+    if(!ok){ fs.writeFileSync(full,JSON.stringify(def,null,2),'utf8'); }
+  }
+}
 function readJSON(file, fallback) {
   try { return JSON.parse(fs.readFileSync(path.join(DATA,file), 'utf8')); }
   catch (_) { return fallback; }
