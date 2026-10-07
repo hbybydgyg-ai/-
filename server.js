@@ -10,14 +10,17 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = process.env.APP_VERSION || '1.5.15';
-const BUILD_ID = process.env.BUILD_ID || 'SADA-1.5.15-REAL-ORDER-BALANCE-20261007';
+const APP_VERSION = process.env.APP_VERSION || '1.5.16';
+const BUILD_ID = process.env.BUILD_ID || 'SADA-1.5.16-REAL-ORDER-SESSION-FIX-20261007';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
 const FIXED_RATE = 1250; // 1 USD = 1,250 IQD
-const sessions = new Map();
+// v1.5.16: signed stateless sessions survive Railway restarts/instance changes.
+const sessions = new Map(); // legacy sessions kept only during rolling deployments
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || 'sadairaq-session-secret-change-me');
+const SESSION_COOKIE = 'sadairaq_sid';
 const RATE_BUCKETS = new Map();
 const RATE_RULES = { auth:{window:60_000,max:12}, provider:{window:60_000,max:20}, order:{window:60_000,max:20}, general:{window:60_000,max:60} };
 function clientIp(req){ return String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim(); }
@@ -70,17 +73,48 @@ function parseCookies(req){
   const out={};
   for(const part of String(req.headers.cookie||'').split(';')){
     const i=part.indexOf('='); if(i<0) continue;
-    out[part.slice(0,i).trim()] = decodeURIComponent(part.slice(i+1).trim());
+    try{ out[part.slice(0,i).trim()] = decodeURIComponent(part.slice(i+1).trim()); }catch(_){}
   }
   return out;
 }
-function sid(req){ return parseCookies(req).sadairaq_sid || ''; }
-function session(req){ const id=sid(req); if(!id) return null; const v=sessions.get(id); if(!v) return null; if(Date.now()-(v.createdAt||0)>SESSION_TTL_MS){sessions.delete(id);return null;} return v;}
+function sid(req){ return parseCookies(req)[SESSION_COOKIE] || ''; }
+function sessionSig(payload){ return crypto.createHmac('sha256',SESSION_SECRET).update(payload).digest('base64url'); }
+function encodeSession(value){
+  const payload=Buffer.from(JSON.stringify({...value,iat:Date.now()}),'utf8').toString('base64url');
+  return payload+'.'+sessionSig(payload);
+}
+function decodeSession(token){
+  const [payload,sig]=String(token||'').split('.');
+  if(!payload||!sig) return null;
+  if(!safeEqual(sig,sessionSig(payload))) return null;
+  try{
+    const v=JSON.parse(Buffer.from(payload,'base64url').toString('utf8'));
+    if(!v||!v.username||Date.now()-Number(v.iat||0)>SESSION_TTL_MS)return null;
+    return v;
+  }catch(_){return null;}
+}
+function session(req){
+  const token=sid(req); if(!token)return null;
+  const stateless=decodeSession(token);
+  if(stateless){
+    if(stateless.role==='admin' && String(stateless.username)!==String(ADMIN_USER)) return null;
+    if(stateless.role==='user'){
+      const store=readJSON('users.json',{users:{}});
+      if(!store.users?.[String(stateless.username)]) return null;
+    }
+    return stateless;
+  }
+  const v=sessions.get(token);
+  if(!v)return null;
+  if(Date.now()-(v.createdAt||0)>SESSION_TTL_MS){sessions.delete(token);return null;}
+  return v;
+}
 function setSession(res, value){
-  const id=crypto.randomBytes(24).toString('hex');
-  sessions.set(id,{...value,createdAt:Date.now()});
-  const secure = (String(process.env.COOKIE_SECURE||'auto').toLowerCase()==='true' || (String(process.env.COOKIE_SECURE||'auto').toLowerCase()==='auto' && String(res._forwardedProto||'').toLowerCase()==='https')) ? 'Secure; ' : '';
-  res.setHeader('Set-Cookie',`sadairaq_sid=${encodeURIComponent(id)}; Path=/; HttpOnly; SameSite=Lax; ${secure}Max-Age=86400`);
+  const token=encodeSession(value);
+  sessions.set(token,{...value,createdAt:Date.now()});
+  const forwarded=String(res._forwardedProto||'').toLowerCase();
+  const secure=(String(process.env.COOKIE_SECURE||'auto').toLowerCase()==='true' || (String(process.env.COOKIE_SECURE||'auto').toLowerCase()==='auto' && forwarded==='https'))?'Secure; ':'';
+  res.setHeader('Set-Cookie',`${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; ${secure}Max-Age=86400`);
 }
 async function bodyJSON(req){
   const limit=256*1024; let raw='';
@@ -537,7 +571,7 @@ async function routeAPI(req,res,urlObj){
     catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});}
   }
   if(p==='/api/logout'){
-    const id=sid(req); if(id) sessions.delete(id); res.setHeader('Set-Cookie','sadairaq_sid=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0'); return json(res,200,{ok:true});
+    const id=sid(req); if(id) sessions.delete(id); res.setHeader('Set-Cookie',`${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`); return json(res,200,{ok:true});
   }
   if(p==='/api/admin/data-summary' && req.method==='GET'){
     if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
