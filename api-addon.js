@@ -1,1 +1,2 @@
-window.SadraIraqAddon=window.SadraIraqAddon||{version:"2.0.0"};
+// صدى العراق - توافق إضافي. جميع واجهات API الرئيسية موجودة في server.js.
+window.SadaIraqAPI = window.SadaIraqAPI || {version:'1.0.0'};
