@@ -8,7 +8,7 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.3.3';
+const APP_VERSION = '1.3.4';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
@@ -66,10 +66,15 @@ function providerStore(){ return readJSON('providers.json',{activeProvider:'',pr
 function getProviderById(id){ const store=providerStore(); const pid=String(id||store.activeProvider||''); return {store,pid,prov:(store.providers||{})[pid]||null}; }
 function normalizeProviderStatus(v){ const x=String(v||'').trim().toLowerCase(); const map={pending:'pending',queued:'pending',processing:'processing','in progress':'processing',completed:'completed',complete:'completed',partial:'partial',canceled:'cancelled',cancelled:'cancelled',failed:'failed',error:'failed',refunded:'refunded'}; return map[x]||'unknown'; }
 function normalizeProviderBalance(d){
-  const candidates=[d?.balance,d?.data?.balance,d?.result?.balance,d?.response?.balance,d?.account?.balance];
+  const candidates=[
+    d?.balance, d?.data?.balance, d?.result?.balance, d?.response?.balance, d?.account?.balance,
+    d?.credits, d?.data?.credits, d?.result?.credits, d?.account?.credits,
+    d?.credit, d?.data?.credit, d?.result?.credit, d?.account?.credit
+  ];
   for(const v of candidates){
     if(v!==undefined && v!==null && String(v).trim()!==''){
-      const n=Number(String(v).replace(/[^0-9+\-.eE]/g,''));
+      const raw=String(v).trim();
+      const n=Number(raw.replace(/,/g,''));
       if(Number.isFinite(n)) return n;
     }
   }
@@ -203,8 +208,15 @@ async function apiSmm(req,res,urlObj){
   if(!['balance','services','add','status','cancel'].includes(action))return json(res,422,{error:'عملية غير مدعومة'});
   if(!isAdmin(req))return json(res,403,{error:'غير مصرح'});
   const payload={action}; for(const k of ['service','link','quantity','order']){if(urlObj.searchParams.has(k))payload[k]=urlObj.searchParams.get(k);}
-  try{return json(res,200,await providerRequest(prov,payload));}
-  catch(e){return json(res,502,{error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});}
+  try{
+    const d=await providerRequest(prov,payload);
+    if(action==='balance'){
+      const balance=normalizeProviderBalance(d);
+      if(balance===null) return json(res,502,{error:'المزود لم يرجع رصيداً رقمياً صالحاً',providerResponse:d});
+      return json(res,200,{ok:true,balance,currency:normalizeProviderCurrency(d),providerId,providerName:prov.name||providerId,raw:d,checkedAt:new Date().toISOString()});
+    }
+    return json(res,200,d);
+  }catch(e){return json(res,502,{error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});}
 }
 
 async function routeAPI(req,res,urlObj){
@@ -230,6 +242,18 @@ async function routeAPI(req,res,urlObj){
   if(p==='/api/settings' && req.method==='GET'){ const cfg=readJSON('settings.json',{}); const waUrl=normalizeWhatsAppUrl(cfg.waUrl||cfg.waNum||'https://wa.me/9647762267959'); return json(res,200,{ok:true,settings:{waUrl,waNum:normalizeWhatsAppNumber(waUrl)}}); }
   if(p==='/api/settings' && req.method==='POST'){ if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'}); const b=await bodyJSON(req); const cfg=readJSON('settings.json',{}); if(b.waUrl!==undefined) cfg.waUrl=normalizeWhatsAppUrl(b.waUrl); else if(b.waNum!==undefined) cfg.waUrl=normalizeWhatsAppUrl(b.waNum); cfg.waNum=normalizeWhatsAppNumber(cfg.waUrl); writeJSON('settings.json',cfg); return json(res,200,{ok:true,settings:{waUrl:cfg.waUrl,waNum:cfg.waNum}}); }
   if(p==='/api/provider/balance' && req.method==='GET'){ if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'}); const {prov,pid}=getProviderById(urlObj.searchParams.get('provider')); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'}); try{const d=await providerRequest(prov,{action:'balance'}); const balance=normalizeProviderBalance(d); if(balance===null)return json(res,502,{ok:false,error:'المزود لم يرجع قيمة رصيد صالحة',raw:d}); return json(res,200,{ok:true,providerId:pid,providerName:prov.name||pid,balance,currency:normalizeProviderCurrency(d),raw:d,checkedAt:new Date().toISOString()});}catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});} }
+  if(p==='/api/provider/test' && req.method==='POST'){
+    if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
+    const b=await bodyJSON(req);
+    const prov={name:String(b.name||'مزود مؤقت'),url:String(b.url||'').trim(),key:String(b.key||'').trim()};
+    if(!/^https?:\/\//i.test(prov.url)||!prov.key) return json(res,422,{ok:false,error:'رابط API أو مفتاح API غير صالح'});
+    try{
+      const d=await providerRequest(prov,{action:'balance'});
+      const balance=normalizeProviderBalance(d);
+      if(balance===null) return json(res,502,{ok:false,error:'تم الوصول إلى المزود لكنه لم يرجع رصيداً رقمياً',providerResponse:d});
+      return json(res,200,{ok:true,balance,currency:normalizeProviderCurrency(d),providerName:prov.name,checkedAt:new Date().toISOString(),raw:d});
+    }catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});}
+  }
   if(p==='/api/order/create' && req.method==='POST'){
     const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'});
     const b=await bodyJSON(req); const providerId=String(b.providerId||''); const serviceId=String(b.serviceId||''); const link=String(b.link||'').trim(); const quantity=Number(b.quantity);

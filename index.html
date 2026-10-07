@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0a0e1a">
-<title>صدى العراق · v1.3.3</title>
+<title>صدى العراق · v1.3.4</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
@@ -5488,9 +5488,31 @@ function tgSend(msg){fetch(`https://api.telegram.org/bot${CFG.tg.token}/sendMess
       const defs=[['prov-id','معرف المزود','مثال: provider1'],['prov-name','اسم المزود','مثال: المزود الرئيسي'],['prov-url','رابط API المزود','https://example.com/api/v2'],['prov-key','مفتاح API','أدخل API Key']];
       defs.forEach((d,i)=>{const f=mk('div','fld');f.appendChild(mk('label','',d[1]));const inp=mk('input','inp');inp.id=d[0];inp.type=d[0]==='prov-key'?'password':'text';inp.placeholder=d[2];inp.value=editProv?(editProv[d[0]==='prov-id'?'id':d[0]==='prov-name'?'name':d[0]==='prov-url'?'url':'key']||''):'';if(isEdit&&d[0]==='prov-id')inp.readOnly=true;f.appendChild(inp);body.appendChild(f);});
       const row=mk('div'); row.style.cssText='display:flex;gap:8px;margin-top:8px';
-      const test=mk('button','btn bs2','');test.innerHTML='<i class="fas fa-wifi"></i> اختبار الاتصال';
-      test.addEventListener('click',async()=>{const url=document.getElementById('prov-url')?.value.trim(),key=document.getElementById('prov-key')?.value.trim();if(!url||!key){toast('أدخل رابط API ومفتاح API أولاً','wrn');return;}test.disabled=true;test.innerHTML='<i class="fas fa-spinner fa-spin"></i> اختبار...';try{const q=new URLSearchParams({action:'balance',_url:url,_key:key});const r=await fetch('/api/smm?'+q.toString(),{credentials:'include'});const d=await r.json().catch(()=>({}));if(!r.ok||d.error)throw new Error(d.error||('HTTP '+r.status));toast('✅ اتصال ناجح — الرصيد $'+Number(d.balance||0).toFixed(2),'ok');}catch(e){toast('❌ '+e.message,'err')}finally{test.disabled=false;test.innerHTML='<i class="fas fa-wifi"></i> اختبار الاتصال'}});
-      const save=mk('button','btn bp','');save.innerHTML='<i class="fas fa-floppy-disk"></i> حفظ';save.addEventListener('click',async()=>{const id=document.getElementById('prov-id')?.value.trim().replace(/\s+/g,'_'),name=document.getElementById('prov-name')?.value.trim(),url=document.getElementById('prov-url')?.value.trim(),key=document.getElementById('prov-key')?.value.trim();if(!id||!name||!url||!key){toast('أكمل الحقول الأربعة','wrn');return;}let arr=(CFG.smm.providers||[]).map(p=>({...p}));const idx=arr.findIndex(p=>p.id===id);const obj={id,name,url,key};if(idx>=0)arr[idx]=obj;else arr.push(obj);CFG.smm.providers=arr;if(!CFG.smm.activeProvider)CFG.smm.activeProvider=id;try{await window.saveSmmProvidersToFB();toast('✅ تم حفظ المزود','ok');closeModal();onDone?.()}catch(e){toast('❌ '+e.message,'err')}});
+      let verifiedBalance=null, verifiedCurrency='USD';
+      const setTestLabel=(html)=>{test.innerHTML=html;};
+      const test=mk('button','btn bs2','');setTestLabel('<i class="fas fa-wifi"></i> اختبار الاتصال');
+      test.addEventListener('click',async()=>{
+        const url=document.getElementById('prov-url')?.value.trim(),key=document.getElementById('prov-key')?.value.trim();
+        if(!url||!key){toast('أدخل رابط API ومفتاح API أولاً','wrn');return;}
+        test.disabled=true; save.disabled=true; verifiedBalance=null;
+        setTestLabel('<i class="fas fa-spinner fa-spin"></i> اختبار فعلي...');
+        try{
+          const r=await fetch('/api/provider/test',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.getElementById('prov-name')?.value.trim()||'مزود مؤقت',url,key})});
+          const d=await r.json().catch(()=>({}));
+          if(!r.ok||d.error) throw new Error(d.error||('HTTP '+r.status));
+          verifiedBalance=Number(d.balance); verifiedCurrency=String(d.currency||'USD').toUpperCase();
+          setTestLabel('<i class="fas fa-circle-check"></i> تم التحقق · '+(verifiedCurrency==='USD'?'$':'')+verifiedBalance.toFixed(4)+(verifiedCurrency!=='USD'?' '+verifiedCurrency:''));
+          toast('✅ المزود حقيقي والاتصال ناجح — الرصيد '+(verifiedCurrency==='USD'?'$':'')+verifiedBalance.toFixed(4)+' '+(verifiedCurrency==='USD'?'USD':verifiedCurrency),'ok');
+        }catch(e){setTestLabel('<i class="fas fa-wifi"></i> اختبار الاتصال');toast('❌ '+e.message,'err');}
+        finally{test.disabled=false;save.disabled=false;}
+      });
+      const save=mk('button','btn bp','');save.innerHTML='<i class="fas fa-floppy-disk"></i> حفظ';save.addEventListener('click',async()=>{
+        const id=document.getElementById('prov-id')?.value.trim().replace(/\s+/g,'_'),name=document.getElementById('prov-name')?.value.trim(),url=document.getElementById('prov-url')?.value.trim(),key=document.getElementById('prov-key')?.value.trim();
+        if(!id||!name||!url||!key){toast('أكمل الحقول الأربعة','wrn');return;}
+        if(verifiedBalance===null){toast('اختبر الاتصال أولاً للتأكد أن المزود يرجع الرصيد الحقيقي','wrn');return;}
+        let arr=(CFG.smm.providers||[]).map(p=>({...p}));const idx=arr.findIndex(p=>p.id===id);const obj={id,name,url,key};if(idx>=0)arr[idx]=obj;else arr.push(obj);CFG.smm.providers=arr;if(!CFG.smm.activeProvider)CFG.smm.activeProvider=id;
+        try{await window.saveSmmProvidersToFB();toast('✅ تم حفظ المزود بعد التحقق الحقيقي · الرصيد '+(verifiedCurrency==='USD'?'$':'')+verifiedBalance.toFixed(4),'ok');closeModal();onDone?.()}catch(e){toast('❌ '+e.message,'err')}
+      });
       row.appendChild(test);row.appendChild(save);body.appendChild(row);
     });
   };
@@ -5609,6 +5631,75 @@ function tgSend(msg){fetch(`https://api.telegram.org/bot${CFG.tg.token}/sendMess
   });
 })();
 </script>
+
+<style id="sadairaq-v134-admin-background-restore">
+/* v1.3.4 — restore the original moving background and original admin navigation presentation. */
+#app.on { background: transparent !important; }
+#app.on .pc { background: rgba(8,17,31,.72) !important; }
+#app.on .adm-main { background: transparent !important; }
+#ks-particles { z-index: 0 !important; opacity: 1 !important; }
+.ks-particle { filter: saturate(1.05); }
+
+/* Return admin navigation to its original layout; only spacing/hover remain touch friendly. */
+.adm-sb { width:205px !important; flex-direction:column !important; overflow-y:auto !important; overflow-x:hidden !important; max-height:calc(100vh - 54px) !important; }
+.adm-sb-sec { display:block !important; }
+.adm-sb-item { display:flex !important; flex-direction:row !important; min-width:0 !important; padding:9px 14px !important; margin:0 !important; border-right:2px solid transparent !important; border-bottom:0 !important; border-radius:0 !important; }
+.adm-sb-item.on { border-right-color:var(--blue) !important; border-bottom-color:transparent !important; }
+.adm-main { max-height:calc(100vh - 54px) !important; overflow-y:auto !important; }
+.sada-admin-menu { display:none !important; }
+#adm-panel .adm-sub { display:none !important; }
+#adm-panel .adm-sub.on { display:block !important; }
+#adm-panel #adm-sub-overview,
+#adm-panel #adm-sub-messages { display:block !important; }
+#adm-panel #adm-sub-overview:not(.on),
+#adm-panel #adm-sub-messages:not(.on) { display:none !important; }
+
+/* Buttons: consistent, larger touch targets without changing their existing visual language. */
+#adm-panel .btn { min-height:36px; touch-action:manipulation; }
+#adm-panel .btn-sm { min-height:32px; }
+#adm-panel .adm-sb-item { min-height:42px !important; }
+@media(max-width:768px){
+  .adm-sb { width:100% !important; max-height:none !important; flex-direction:row !important; overflow-x:auto !important; overflow-y:hidden !important; }
+  .adm-sb-sec { display:none !important; }
+  .adm-sb-item { flex-direction:column !important; min-width:72px !important; min-height:58px !important; padding:8px 10px !important; border-right:0 !important; border-bottom:2px solid transparent !important; border-radius:0 !important; margin:0 !important; }
+  .adm-sb-item.on { border-bottom-color:var(--blue) !important; }
+  .adm-main { max-height:none !important; }
+}
+</style>
+<script>
+/* v1.3.4 — restore native admin navigation logic, keeping the requested real API tools. */
+(function(){
+  'use strict';
+  function showAdminSection(sub,el){
+    document.querySelectorAll('#adm-panel .adm-sub').forEach(p=>p.classList.remove('on'));
+    document.querySelectorAll('#adm-panel .adm-sb-item').forEach(i=>i.classList.remove('on'));
+    const p=document.getElementById('adm-sub-'+sub);
+    if(p)p.classList.add('on');
+    const item=el||document.querySelector('#adm-panel .adm-sb-item[data-sub="'+sub+'"]');
+    if(item)item.classList.add('on');
+    if(sub==='overview')refreshAdmDashboard();
+    else if(sub==='payments')loadAdmPaysFull();
+    else if(sub==='orders')loadAdmOrdersFull();
+    else if(sub==='users')loadAdmUsersFull();
+    else if(sub==='services')loadAdmSvcsFull();
+    else if(sub==='smmparty'){loadSmmProviders().then(()=>window.loadSmmBal()).catch(()=>{});}
+    else if(sub==='cats')loadAdmCatsFull();
+    else if(sub==='messages')loadAdmMsgs();
+    else if(sub==='settings')renderAdmSettings();
+  }
+  window.admNavTo=showAdminSection;
+  function restore(){
+    const panel=document.getElementById('adm-panel');
+    if(!panel || typeof CU==='undefined' || CU?.role!=='admin')return;
+    panel.querySelectorAll('.sada-admin-menu').forEach(x=>x.remove());
+    panel.querySelectorAll('.adm-sb-item').forEach(x=>{x.style.removeProperty('display');});
+    showAdminSection('overview',panel.querySelector('.adm-sb-item[data-sub="overview"]'));
+  }
+  document.addEventListener('DOMContentLoaded',()=>setTimeout(restore,250),{once:true});
+  window.addEventListener('load',()=>setTimeout(restore,350),{once:true});
+})();
+</script>
+
 </body>
 </html>
 <script>
@@ -7143,7 +7234,7 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
       if(FB_OK&&DB){await Promise.all(['users','orders','payments','chats','notifications','services','categoryMeta','providerServices','asiacellTransfers'].map(k=>DB.ref(k).remove()));await DB.ref('settings/orderCounter').set(0);await DB.ref('settings/svcsVersion').set(String(Date.now()));}
       try{await api('/api/admin/reset',{method:'POST',body:'{}'})}catch(_){ }
       localStorage.removeItem('tz_svcs_v1');localStorage.removeItem(CACHE_KEY);localStorage.removeItem(CACHE_VER);localStorage.removeItem('sadairaq_services_enabled');
-      if(CU?.role==='admin'){BAL=999999;CU.bal=BAL;localStorage.setItem('tz_u',JSON.stringify(CU));}
+      if(CU?.role==='admin'){BAL=0;CU.bal=0;localStorage.setItem('tz_u',JSON.stringify(CU));}
       toast('✅ تم تنظيف جميع البيانات وإعادة الإحصائيات للصفر','ok');setTimeout(()=>location.reload(),900);
     }catch(e){toast('❌ فشل التنظيف: '+e.message,'err')}
   };
