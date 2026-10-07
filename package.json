@@ -1,8 +1,12 @@
 {
   "name": "sadairaq-railway",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": true,
   "description": "صدى العراق - Railway deployment",
-  "scripts": {"start": "node server.js"},
-  "engines": {"node": ">=20"}
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
 }
