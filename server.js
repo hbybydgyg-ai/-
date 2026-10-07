@@ -10,13 +10,13 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = process.env.APP_VERSION || '1.5.20';
-const BUILD_ID = process.env.BUILD_ID || 'SADA-1.5.20-CATEGORY-SERVICE-ADMIN-BALANCE-DISCOUNT-20261008';
+const APP_VERSION = process.env.APP_VERSION || '1.5.21';
+const BUILD_ID = process.env.BUILD_ID || 'SADA-1.5.21-FREEZE-USD-REAL-ORDER-20261008';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
 const FIXED_RATE = 1250; // 1 USD = 1,250 IQD
-// v1.5.20: signed stateless sessions survive Railway restarts/instance changes.
+// v1.5.21: signed stateless sessions survive Railway restarts/instance changes.
 const sessions = new Map(); // legacy sessions kept only during rolling deployments
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || 'sadairaq-session-secret-change-me');
@@ -106,7 +106,7 @@ function session(req){
   if(stateless){
     if(!/^[a-zA-Z0-9_@.\-]+$/.test(String(stateless.username||''))) return null;
     if(stateless.role==='admin' && String(stateless.username)!==String(ADMIN_USER)) return null;
-    // v1.5.20: do NOT require users.json for an already signed user session.
+    // v1.5.21: do NOT require users.json for an already signed user session.
     // Firebase/custom-app users may outlive Railway's ephemeral local filesystem.
     return stateless;
   }
@@ -559,10 +559,8 @@ async function routeAPI(req,res,urlObj){
     }
     const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود المرتبط بالخدمة غير موجود. أعد حفظ المزود الحقيقي أو ثبّته بمتغيرات Railway',stage:'provider_lookup',providerId});
     try{
-      // The balance endpoint is informational only. A provider may allow add while its
-      // balance endpoint is restricted, differently formatted, or temporarily unavailable.
-      let providerBalanceBefore=null;
-      try{ const bd=await providerRequest(prov,{action:'balance'}); providerBalanceBefore=normalizeProviderBalance(bd); }catch(_){ }
+      // v1.5.21: send ADD directly; balance is informational and must not block order creation.
+      const providerBalanceBefore=null;
 
       // IMPORTANT: order creation is exactly one outbound call. No automatic retry.
       const d=await providerRequest(prov,{action:'add',service:serviceId,link,quantity});
