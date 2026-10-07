@@ -2235,6 +2235,12 @@ body { padding-top: 0 !important; }
   z-index: 1;
 }
 
+
+/* صدى العراق — الشعار الرسمي */
+.sada-logo-auth{width:64px;height:64px;object-fit:cover;border-radius:16px;display:block;box-shadow:0 8px 28px rgba(0,0,0,.35);pointer-events:none}
+.sada-logo-sidebar{width:34px;height:34px;object-fit:cover;border-radius:9px;display:block;flex-shrink:0;box-shadow:0 4px 14px rgba(0,0,0,.25);pointer-events:none}
+.afp-logo{align-items:center}
+@media(max-width:768px){.sada-logo-auth{width:58px;height:58px}}
 </style>
 
 </head>
@@ -2479,10 +2485,7 @@ body { padding-top: 0 !important; }
   </div>
   <div class="auth-form-panel" id="auth-form-panel">
     <div class="auth-form-inner">
-      <div class="afp-logo">
-        <svg width="34" height="34" viewBox="0 0 34 34" fill="none"><rect width="34" height="34" rx="9" fill="url(#logo-g1)"/><path d="M8 17C8 12.029 12.029 8 17 8C21.971 8 26 12.029 26 17" stroke="white" stroke-width="1.8" stroke-linecap="round"/><path d="M11 17C11 13.686 13.686 11 17 11C20.314 11 23 13.686 23 17" stroke="rgba(255,255,255,.5)" stroke-width="1.8" stroke-linecap="round"/><circle cx="17" cy="17" r="2.8" fill="white"/><path d="M17 19.8V26" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>
-        <div class="afp-logo-name"><span class="ks-letter">K</span><span class="ks-letter">i</span><span class="ks-letter">n</span><span class="ks-letter">g</span><span class="ks-letter"> </span><span class="ks-letter">S</span><span class="ks-letter">o</span><span class="ks-letter">c</span><span class="ks-letter">i</span><span class="ks-letter">a</span><span class="ks-letter">l</span></div>
-      </div>
+      <div class="afp-logo"><img class="sada-logo-auth" src="sadairaq-logo.jpg" alt="صدى العراق"><div class="afp-logo-name">صدى العراق</div></div>
       <div id="box-login">
         <div class="form-title">تسجيل الدخول</div>
         <div class="form-sub">أدخل بياناتك للوصول إلى حسابك</div>
@@ -2534,16 +2537,7 @@ body { padding-top: 0 !important; }
   <div class="sb" id="sb">
     <!-- Close button (mobile only) -->
     <div class="sb-top" style="justify-content:space-between">
-      <div class="sb-logo-wrap">
-        <svg class="sb-logo-svg" viewBox="0 0 28 28" fill="none">
-          <rect width="28" height="28" rx="8" fill="url(#logo-g1)"/>
-          <path d="M7 14C7 10.134 10.134 7 14 7C17.866 7 21 10.134 21 14" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
-          <path d="M9.5 14C9.5 11.515 11.515 9.5 14 9.5C16.485 9.5 18.5 11.515 18.5 14" stroke="rgba(255,255,255,0.55)" stroke-width="1.8" stroke-linecap="round"/>
-          <circle cx="14" cy="14" r="2.5" fill="white"/>
-          <path d="M14 16.5V21" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
-        </svg>
-        <span class="sb-logo-name"><span class="ks-letter">K</span><span class="ks-letter">i</span><span class="ks-letter">n</span><span class="ks-letter">g</span>&nbsp;<span class="ks-letter">S</span><span class="ks-letter">o</span><span class="ks-letter">c</span><span class="ks-letter">i</span><span class="ks-letter">a</span><span class="ks-letter">l</span></span>
-      </div>
+      <div class="sb-logo-wrap"><img class="sada-logo-sidebar" src="sadairaq-logo.jpg" alt="صدى العراق"><span class="sb-logo-name">صدى العراق</span></div>
       <button onclick="closeSB()" class="sb-close-btn" title="إغلاق"><i class="fas fa-times"></i></button>
     </div>
 
@@ -2729,6 +2723,12 @@ body { padding-top: 0 !important; }
       <!-- WALLET PAGE -->
       <div id="pg-wallet" class="pg">
         <div class="pg-hd"><h1>المحفظة والشحن</h1><p>إدارة رصيدك وطرق الدفع</p></div>
+        <div class="card" style="background:linear-gradient(135deg,rgba(61,232,160,.08),rgba(91,164,255,.08));border-color:rgba(61,232,160,.2);margin-bottom:14px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:38px;height:38px;border-radius:10px;background:var(--gs);display:flex;align-items:center;justify-content:center;color:var(--grn)"><i class="fas fa-coins"></i></div>
+            <div><div style="font-weight:900;color:var(--t0)">سعر الصرف الثابت</div><div style="font-size:12px;color:var(--grn);margin-top:2px">5,000 د.ع = 4 USD · 1 USD = 1,250 د.ع</div></div>
+          </div>
+        </div>
         <div class="g2" style="align-items:start">
           <div>
             <div class="bal-card" style="margin-bottom:12px">
@@ -3018,8 +3018,9 @@ const CFG = {
     walletNum: "01000000000",
     tgLink: "https://t.me/sadairaq_support",
     waNum: "201000000000",
-    usdRate: 30,
-    minCharge: 5,
+    usdRate: 1250,
+    iqdPerUsd: 1250,
+    minCharge: 4,
     markup: 30,
     svcLimit: 20000,
     importEnabled: true,
@@ -3058,6 +3059,7 @@ const CFG = {
 
 // ── STATE ────────────────────────────────────────────────
 let CU = null, BAL = 0, SVCS = {}, NOTES = [];
+const FIXED_IQD_PER_USD = 1250;
 let CUR = "USD";
 let SEL_PM = "vodafone", ORD_F = "all";
 let SEL_PLAT = "all", SEL_CAT = null, SEL_SVC = null;
@@ -3108,6 +3110,7 @@ async function loadServerConfig() {
     const cfg = await res.json();
     // تم تعطيل تحميل حساب الأدمن القديم: الحساب الوحيد هو حساب صدى العراق المحلي المحدد أعلاه.
     if (cfg.smmKey) CFG.smm.key = cfg.smmKey;
+    CFG.settings.usdRate = FIXED_IQD_PER_USD; CFG.settings.iqdPerUsd = FIXED_IQD_PER_USD;
     if (cfg.tgToken) CFG.tg.token = cfg.tgToken;
     if (cfg.tgChat) CFG.tg.chat = cfg.tgChat;
     _configLoaded = true;
@@ -3134,7 +3137,8 @@ let fbReady = (async function() {
     DB.ref("config/paymentMethods").once("value").then(s => {
       if (!s.exists()) DB.ref("config/paymentMethods").set(CFG.pms);
     }).catch(()=>{});
-    DB.ref("settings").once("value").then(s => { if (s.exists()) Object.assign(CFG.settings, s.val()); buildPms(); });
+    DB.ref("settings").once("value").then(s => { if (s.exists()) Object.assign(CFG.settings, s.val()); CFG.settings.usdRate=FIXED_IQD_PER_USD; CFG.settings.iqdPerUsd=FIXED_IQD_PER_USD; buildPms(); });
+    DB.ref("config/paymentMethods").once("value").then(s => { if (s.exists()) { const data=s.val(); if(Array.isArray(data)&&data.length) CFG.pms=data; buildPms(); } else { savePmsToFirebase(); } }).catch(()=>{});
     DB.ref("config/smm").once("value").then(s => { if (s.exists() && s.val().key) CFG.smm.key = s.val().key; });
   } catch(e) { console.warn("Firebase unavailable:", e.message); }
 })();
@@ -3667,9 +3671,9 @@ function buildSvcDD(cat) {
   if (!svcs.length) { menu.appendChild(mk("div","cdd-empty","لا توجد خدمات في هذه الفئة")); return; }
   svcs.forEach((s,idx)=>{
     const dispId = s.smmpartyId ? String(s.smmpartyId) : String(100+idx);
-    const priceEgp = s.price || 0;
+    const priceUsd = s.price || 0;
     const curObj = CFG.curs.find(x=>x.c===CUR)||{r:1,c:"USD"};
-    const priceFmt = (priceEgp/curObj.r).toFixed(priceEgp/curObj.r>=10?2:4) + " " + CUR;
+    const priceFmt = (priceUsd/curObj.r).toFixed(priceUsd/curObj.r>=10?2:4) + " " + CUR;
 
     // Row: [icon] [name (flex)] [id badge] [price]
     const opt = mk("div","cdd-option");
@@ -4008,11 +4012,10 @@ function renderPmForm(pmId) {
   const acc = accs[pmId] || {l:pmObj?.nm||pmId, v:pmObj?.acct||"—", s:pmObj?.nm||pmId, cur:"USD", icon:"💳"};
 
   // ── حساب الأسعار ──
-  const usdRate  = parseFloat(S.usdRate)||50;                          // كام جنيه في الدولار (سعر المنصة الداخلي)
-  const userCur  = CFG.curs.find(x=>x.c===CUR) || {c:"USD",r:1,n:"دولار أمريكي",f:"🇪🇬"};
-  // userCur.r = كام جنيه في وحدة عملة المستخدم (مثلاً USD: r=30 يعني 1$=30ج)
-  // نحول: الدولار الواحد = usdRate جنيه = usdRate/userCur.r من عملة المستخدم
-  const usdInCur = (usdRate / userCur.r).toFixed(userCur.r>=1?2:4);
+  const usdRate  = FIXED_IQD_PER_USD;
+  const userCur  = {c:"USD",r:1,n:"دولار أمريكي",f:"🇺🇸"};
+  // العملة الوحيدة للمستخدم هي الدولار، وسعر الصرف الثابت يُعرض للدينار العراقي فقط.
+  const usdInCur = (usdRate / userCur.r).toFixed(2);
 
   // ── بطاقة العنوان/الرقم مع زر نسخ ──
   const wb = mk("div");
@@ -4043,16 +4046,12 @@ function renderPmForm(pmId) {
   // سعر الدولار بالـ USD
   const egpChip = mk("div");
   egpChip.style.cssText = "display:flex;align-items:center;gap:5px;background:rgba(91,164,255,.1);border:1px solid rgba(91,164,255,.2);border-radius:20px;padding:3px 10px";
-  egpChip.innerHTML = `<i class="fas fa-dollar-sign" style="font-size:10px;color:var(--blue)"></i><span style="font-size:11px;font-weight:700;color:var(--blue)">1$ = ${usdRate} USD</span>`;
+  egpChip.innerHTML = `<i class="fas fa-dollar-sign" style="font-size:10px;color:var(--blue)"></i><span style="font-size:11px;font-weight:700;color:var(--blue)">1$ = ${FIXED_IQD_PER_USD.toLocaleString("en-US")} دينار عراقي</span>`;
 
-  // سعر الدولار بعملة المستخدم (لو مش USD)
+  // سعر الصرف الثابت بالدينار العراقي
   const curChip = mk("div");
   curChip.style.cssText = "display:flex;align-items:center;gap:5px;background:rgba(61,232,160,.1);border:1px solid rgba(61,232,160,.2);border-radius:20px;padding:3px 10px";
-  if (CUR !== "USD") {
-    curChip.innerHTML = `<span style="font-size:13px">${userCur.f||""}</span><span style="font-size:11px;font-weight:700;color:var(--grn)">1$ = ${usdInCur} ${CUR}</span>`;
-  } else {
-    curChip.innerHTML = `<i class="fas fa-coins" style="font-size:10px;color:var(--grn)"></i><span style="font-size:11px;font-weight:700;color:var(--grn)">${acc.s}</span>`;
-  }
+  curChip.innerHTML = `<span style="font-size:13px">🇮🇶</span><span style="font-size:11px;font-weight:700;color:var(--grn)">1$ = ${FIXED_IQD_PER_USD.toLocaleString("en-US")} د.ع</span>`;
 
   // نوع العملة المطلوبة
   const payInChip = mk("div");
@@ -4068,11 +4067,11 @@ function renderPmForm(pmId) {
 
   // ── أزرار المبالغ السريعة مع عرض القيمة بعملة المستخدم ──
   const qa=mk("div","qa");
-  [50,100,200,500].forEach(a=>{
+  [4,8,16,20].forEach(a=>{
     const b=mk("button","qa-b");
-    const inCurVal = a/userCur.r;
-    const inCur = inCurVal.toFixed(inCurVal>=100?0:inCurVal>=10?1:2);
-    b.innerHTML = `<div style="font-size:12px;font-weight:800">${a}</div><div style="font-size:9px;color:var(--t2);margin-top:1px">${CUR!=="USD"?`≈${inCur} ${CUR}`:""}</div>`;
+    const inCurVal = a*FIXED_IQD_PER_USD;
+    const inCur = inCurVal.toLocaleString("en-US");
+    b.innerHTML = `<div style="font-size:12px;font-weight:800">$${a}</div><div style="font-size:9px;color:var(--t2);margin-top:1px">≈ ${inCur} د.ع</div>`;
     b.style.cssText = "background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);padding:7px;text-align:center;cursor:pointer;font-family:var(--font);transition:var(--tr)";
     b.addEventListener("click",()=>{const el=$("pay-amt");if(el){el.value=a;el.focus();}});
     qa.appendChild(b);
@@ -4084,13 +4083,24 @@ function renderPmForm(pmId) {
   if (pmObj?.senderLabel) sndlbls[pmId]=pmObj.senderLabel;
 
   [
-    ["pay-amt", acc.cur==="USD"?"المبلغ بالدولار (USD)":"المبلغ (USD)", "number", ""],
+    ["pay-amt", "المبلغ بالدولار (USD)", "number", ""],
     ["pay-snd", sndlbls[pmId]||"معلومات المرسل", "text", ""],
     ["pay-tid", "رقم الإيصال (اختياري)", "text", ""]
   ].forEach(([id,lbl,type,ph])=>{
     const f=mk("div","fld"); f.appendChild(mk("label","",lbl));
     const i=mk("input","inp"); i.type=type; i.id=id; i.placeholder=ph||lbl;
-    f.appendChild(i); form.appendChild(f);
+    f.appendChild(i);
+    if(id === "pay-amt") {
+      const cv=mk("div","","سعر الصرف ثابت: 5,000 د.ع = 4 USD");
+      cv.id="pay-iqd-preview";
+      cv.style.cssText="font-size:11px;color:var(--grn);margin-top:5px;text-align:center;font-weight:700";
+      f.appendChild(cv);
+      i.addEventListener("input",()=>{
+        const usd=parseFloat(i.value)||0;
+        cv.textContent=`سعر الصرف ثابت: 1 USD = ${FIXED_IQD_PER_USD.toLocaleString("en-US")} د.ع · المبلغ يعادل ${(usd*FIXED_IQD_PER_USD).toLocaleString("en-US")} د.ع`;
+      });
+    }
+    form.appendChild(f);
   });
 }
 function submitPay() {
@@ -4101,8 +4111,10 @@ function submitPay() {
   if (!snd) { toast("أدخل معلومات المرسل","wrn"); return; }
   if (!FB_OK) { toast("تعذر الاتصال","err"); return; }
   const pid=gid("PAY");
-  DB.ref("payments").push({id:pid,user:CU.u,amount:parseFloat(amt),sender:snd,transactionId:($("pay-tid")?.value||""),method:SEL_PM,methodName:pm?.nm||SEL_PM,status:"pending",createdAt:new Date().toISOString()}).then(()=>{
-    tgSend(`💰 طلب شحن جديد\n#${pid}\n👤 ${CU.u}\n💵 ${amt} USD\n${pm?.nm||SEL_PM}\n📱 ${snd}`);
+  const amountUsd=parseFloat(amt);
+  const amountIqd=Math.round(amountUsd*FIXED_IQD_PER_USD);
+  DB.ref("payments").push({id:pid,user:CU.u,amount:amountUsd,amountUsd,amountIqd,exchangeRate:FIXED_IQD_PER_USD,sender:snd,transactionId:($('pay-tid')?.value||""),method:SEL_PM,methodName:pm?.nm||SEL_PM,status:"pending",createdAt:new Date().toISOString()}).then(()=>{
+    tgSend(`💰 طلب شحن جديد\n#${pid}\n👤 ${CU.u}\n💵 ${amountUsd} USD\n💴 ${amountIqd.toLocaleString("en-US")} د.ع\n${pm?.nm||SEL_PM}\n📱 ${snd}`);
     toast("✅ تم إرسال طلب الشحن #"+pid,"ok");
     $("pay-amt").value=""; $("pay-snd").value=""; $("pay-tid").value="";
     loadPayHist();
@@ -4397,10 +4409,9 @@ function modalAddSmmProvider(onDone, editProv){
   var isEdit=!!editProv;
   openModal((isEdit?'تعديل مزود':'إضافة مزود SMM جديد'), function(body){
     var fields=[
-      ['prov-id','معرف فريد (بالإنجليزية)',editProv?.id||'','text','مثال: smmparty'],
       ['prov-name','اسم المزود',editProv?.name||'','text','مثال: SMMParty'],
-      ['prov-url','API URL',editProv?.url||'','text','https://example.com/api/v2'],
-      ['prov-key','API Key',editProv?.key||'','password','أدخل الـ key هنا'],
+      ['prov-url','رابط API المزود',editProv?.url||'','url','https://example.com/api/v2'],
+      ['prov-key','مفتاح API',editProv?.key||'','password','أدخل مفتاح المزود هنا'],
     ];
     fields.forEach(function(f){
       var fld=mk('div','fld');fld.appendChild(mk('label','',f[1]));
@@ -4433,11 +4444,12 @@ function modalAddSmmProvider(onDone, editProv){
     });
     var saveBtn=mk('button','btn bp','');saveBtn.innerHTML='<i class="fas fa-floppy-disk"></i> '+(isEdit?'حفظ التعديلات':'إضافة');
     saveBtn.addEventListener('click',async function(){
-      var id2=document.getElementById('prov-id')?.value.trim().replace(/\s+/g,'_');
       var nm2=document.getElementById('prov-name')?.value.trim();
       var ur2=document.getElementById('prov-url')?.value.trim();
       var ky2=document.getElementById('prov-key')?.value.trim();
-      if(!id2||!nm2||!ur2||!ky2){toast('كل الحقول مطلوبة','err');return;}
+      var id2=isEdit ? editProv.id : ('prov_' + Date.now());
+      if(!nm2||!ur2||!ky2){toast('اسم المزود ورابط API والمفتاح كلها مطلوبة','err');return;}
+      try { new URL(ur2); } catch(e) { toast('رابط API غير صالح','err'); return; }
       var addedNew=false, prevSnapshot=CFG.smm.providers.slice();
       if(isEdit){
         var ex=CFG.smm.providers.find(function(p){return p.id===id2;});
@@ -4501,7 +4513,7 @@ async function loadSmmBal(){
     const d=await smmCall({action:"balance"});el.innerHTML="";
     if(d?.balance!==undefined){const b=parseFloat(d.balance);const wrap=mk("div");wrap.style.cssText="display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg2);border-radius:var(--r);border:1px solid var(--bd)";
       const bv=mk("div","","$"+b.toFixed(2));bv.style.cssText="font-family:var(--font);font-size:26px;font-weight:800;color:var(--blue)";
-      const rd=mk("div");rd.appendChild(mk("div","","= "+fmtN(b*CFG.settings.usdRate)));rd.children[0].style.cssText="font-size:11px;color:var(--t2)";rd.appendChild(mk("span","bdg bg","✅ متصل"));
+      const rd=mk("div");rd.appendChild(mk("div","","= "+fmtN(b)));rd.children[0].style.cssText="font-size:11px;color:var(--t2)";rd.appendChild(mk("span","bdg bg","✅ متصل"));
       wrap.appendChild(bv);wrap.appendChild(rd);el.appendChild(wrap);}
     else throw new Error(d.error||"فشل الاتصال");
   }catch(e){el.innerHTML="";el.appendChild(mk("span","bdg br","❌ "+e.message));}
@@ -4541,7 +4553,6 @@ async function importSmm(){
     };
     const limit   = parseInt(CFG.settings.svcLimit)||20000;
     const markup  = (parseFloat(CFG.settings.markup)||30)/100;
-    const usdRate = parseFloat(CFG.settings.usdRate)||50;
     const slice   = list.slice(0, limit);
 
     // ── حذف القديم ──
@@ -4560,13 +4571,13 @@ async function importSmm(){
         for(const[k,v] of Object.entries(am)) if(cat.includes(k)){app=v;break;}
       }
       const smmRateUsd = parseFloat(s.rate||0);
-      const baseEgp    = smmRateUsd * usdRate;
-      const finalEgp   = baseEgp * (1 + markup);
+      const baseUsd    = smmRateUsd;
+      const finalUsd   = baseUsd * (1 + markup);
       const key = DB.ref("services").push().key;
       allItems.push([key, {
         app, name:s.name||"خدمة", category:s.category||app,
-        price:    parseFloat(finalEgp.toFixed(4)),
-        basePrice:parseFloat(baseEgp.toFixed(4)),
+        price:    parseFloat(finalUsd.toFixed(4)),
+        basePrice:parseFloat(baseUsd.toFixed(4)),
         smmRateUsd, smmRate:smmRateUsd,
         min:parseInt(s.min)||100, max:parseInt(s.max)||10000,
         quality:s.type||"SMM", speed:"24-48h",
@@ -4596,7 +4607,7 @@ async function importSmm(){
     if(FB_OK) DB.ref("settings/svcsVersion").set(newVer);
     loadAllSvcs(true);
     if(importBtn) importBtn.innerHTML = origBtnHTML;
-    toast(`✅ تم استيراد ${total} خدمة · الدولار: ${usdRate} USD · هامش: ${Math.round(markup*100)}%`, "ok");
+    toast(`✅ تم استيراد ${total} خدمة · الأسعار بالدولار الأمريكي · هامش: ${Math.round(markup*100)}%`, "ok");
   }catch(e){
     if(importBtn) importBtn.innerHTML = origBtnHTML;
     toast("❌ "+e.message,"err");
@@ -4646,7 +4657,7 @@ async function smmCall(params, retries=2){
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
   try {
-    const res=await fetch("/api/smm?"+body.toString(), { signal: controller.signal });
+    const res=await fetch("/api/smm.php?"+body.toString(), { signal: controller.signal });
     clearTimeout(timeout);
     if(!res.ok) throw new Error("HTTP "+res.status);
     const data=await res.json();
@@ -4740,7 +4751,7 @@ function modalAddSvcById(){
       const sid=idInp.value;const name=(nm.value||"").trim();const app=$("qs-app-btn")?.getAttribute("data-val")||"Other";const margin=parseFloat(mg.value||"20")/100;
       if(!sid||!name){toast("أدخل SMM ID واسم الخدمة","wrn");return;}if(!FB_OK){toast("تعذر الاتصال","err");return;}
       sv2.disabled=true;sv2.textContent="جاري الإضافة...";
-      try{const list=await smmCall({action:"services"});const svc=Array.isArray(list)?list.find(s=>String(s.service)===String(sid)):null;const bp=svc?parseFloat(svc.rate||0)*(parseFloat(CFG.settings.usdRate)||50):0;const fp=bp*(1+margin);
+      try{const list=await smmCall({action:"services"});const svc=Array.isArray(list)?list.find(s=>String(s.service)===String(sid)):null;const bp=svc?parseFloat(svc.rate||0):0;const fp=bp*(1+margin);
         await DB.ref("services").push({app,name,category:svc?.category||app,price:fp,min:svc?parseInt(svc.min||100):100,max:svc?parseInt(svc.max||10000):10000,quality:svc?(svc.type||"SMM"):"SMM",speed:"24-48h",source:"smmparty",smmpartyId:parseInt(sid),refill:svc?(svc.refill||false):false,cancel:svc?(svc.cancel||false):false,desc:svc?(svc.category||""):"",createdAt:new Date().toISOString(),createdBy:CU?.u||"admin"});
         closeModal();loadAllSvcs();toast("✅ تم إضافة الخدمة","ok");
       }catch(e){sv2.disabled=false;sv2.innerHTML='<i class="fas fa-floppy-disk"></i> إضافة وتفعيل الخدمة';toast("❌ "+e.message,"err");}
@@ -4856,6 +4867,7 @@ function modalSettings(){
     sall.addEventListener("click",()=>{
       const pairs=[["sys-wl","walletNum"],["sys-wl","vodafoneNumber"],["sys-ip","instapayNumber"],["sys-ud","usdtAddress"],["sys-we","wiseEmail"],["sys-ba","bankAccount"],["sys-bn","bankName"],["sys-us","usdRate"],["sys-tg","tgLink"],["sys-wa","waNum"]];
       const upd={};pairs.forEach(([id2,key])=>{const v=$(id2)?.value;if(v){upd[key]=isNaN(v)?v:parseFloat(v);CFG.settings[key]=upd[key];}});
+      upd.usdRate=FIXED_IQD_PER_USD; upd.iqdPerUsd=FIXED_IQD_PER_USD; CFG.settings.usdRate=FIXED_IQD_PER_USD; CFG.settings.iqdPerUsd=FIXED_IQD_PER_USD;
       if(FB_OK)DB.ref("settings").update(upd);
       const k=$("sys-key")?.value;if(k&&FB_OK){CFG.smm.key=k;DB.ref("config/smm").set({key:k});}
       toast("✅ تم حفظ الإعدادات","ok");closeModal();buildPms();
@@ -5476,7 +5488,7 @@ async function restoreAllServices() {
     const limit  = parseInt(CFG.settings.svcLimit) || 200;
     const markup  = (parseFloat(CFG.settings.markup) || 30) / 100;
     // ── سعر الدولار الحقيقي من الإعدادات ──
-    const usdRate = parseFloat(CFG.settings.usdRate) || 50;
+    const usdRate = FIXED_IQD_PER_USD;
 
     // Delete old services
     await DB.ref("services").remove();
@@ -5489,7 +5501,7 @@ async function restoreAllServices() {
       for (const [k,v] of Object.entries(am)) {
         if ((s.name||"").toLowerCase().includes(k)) { app = v; break; }
       }
-      const baseEgp  = parseFloat(s.rate||0) * usdRate;             // rate هو $/1000 × USD/$ = USD/1000
+      const baseEgp  = parseFloat(s.rate||0);                       // سعر المزود بالدولار لكل 1000
       const finalEgp = baseEgp * (1 + markup);                       // + هامش الربح
       const key = DB.ref("services").push().key;
       batch["services/" + key] = {
@@ -5513,7 +5525,7 @@ async function restoreAllServices() {
 
     loadAllSvcs();
     loadAdmSvcsFull();
-    toast("✅ تم استرداد " + n + " خدمة · سعر الدولار: " + usdRate + " USD · هامش: " + Math.round(markup*100) + "%","ok");
+    toast("✅ تم استرداد " + n + " خدمة · الأسعار بالدولار الأمريكي · هامش: " + Math.round(markup*100) + "%","ok");
   } catch(e) {
     toast("❌ " + e.message,"err");
     loadAdmSvcsFull();
@@ -5904,7 +5916,7 @@ function renderAdmSettings(){
   var s_price=mk('div','card');s_price.style.cssText='padding:14px;margin-bottom:12px';
   s_price.innerHTML='<div style="font-size:13px;font-weight:700;color:var(--t0);margin-bottom:12px;display:flex;align-items:center;gap:7px"><i class="fas fa-percent" style="color:var(--ylw)"></i> الأسعار وهامش الربح</div>';
   var priceFlds=[
-    ['sys-us','سعر الدولار مقابل USD',String(CFG.settings.usdRate),'number','مثال: 50'],
+    ['sys-us','سعر الصرف الثابت',String(CFG.settings.usdRate),'number','مثال: 50'],
     ['sys-mk','هامش الربح %',String(CFG.settings.markup||30),'number','مثال: 30 (يعني 30%)'],
     ['sys-sl','حد الخدمات (عدد الخدمات المستوردة)',String(CFG.settings.svcLimit||200),'number','مثال: 200'],
   ];
@@ -5930,8 +5942,8 @@ function renderAdmSettings(){
     var ur=parseFloat(document.getElementById('sys-us')?.value)||30;
     var mk3=parseFloat(document.getElementById('sys-mk')?.value)||30;
     var sl=parseInt(document.getElementById('sys-sl')?.value)||200;
-    CFG.settings.usdRate=ur; CFG.settings.markup=mk3; CFG.settings.svcLimit=sl;
-    if(FB_OK)DB.ref('settings').update({usdRate:ur,markup:mk3,svcLimit:sl});
+    CFG.settings.usdRate=FIXED_IQD_PER_USD; CFG.settings.iqdPerUsd=FIXED_IQD_PER_USD; CFG.settings.markup=mk3; CFG.settings.svcLimit=sl;
+    if(FB_OK)DB.ref('settings').update({usdRate:FIXED_IQD_PER_USD,iqdPerUsd:FIXED_IQD_PER_USD,markup:mk3,svcLimit:sl});
     toast('✅ تم حفظ إعدادات الأسعار — أعد استيراد الخدمات لتطبيق الهامش الجديد','ok');
   });
   s_price.appendChild(svb2);el.appendChild(s_price);
