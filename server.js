@@ -8,7 +8,7 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.3.6';
+const APP_VERSION = '1.4.0';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
@@ -66,17 +66,20 @@ function providerStore(){ return readJSON('providers.json',{activeProvider:'',pr
 function getProviderById(id){ const store=providerStore(); const pid=String(id||store.activeProvider||''); return {store,pid,prov:(store.providers||{})[pid]||null}; }
 function normalizeProviderStatus(v){ const x=String(v||'').trim().toLowerCase(); const map={pending:'pending',queued:'pending',processing:'processing','in progress':'processing',completed:'completed',complete:'completed',partial:'partial',canceled:'cancelled',cancelled:'cancelled',failed:'failed',error:'failed',refunded:'refunded'}; return map[x]||'unknown'; }
 function normalizeProviderBalance(d){
-  const candidates=[
-    d?.balance, d?.data?.balance, d?.result?.balance, d?.response?.balance, d?.account?.balance,
-    d?.credits, d?.data?.credits, d?.result?.credits, d?.account?.credits,
-    d?.credit, d?.data?.credit, d?.result?.credit, d?.account?.credit
-  ];
-  for(const v of candidates){
-    if(v!==undefined && v!==null && String(v).trim()!==''){
-      const raw=String(v).trim();
-      const n=Number(raw.replace(/,/g,''));
-      if(Number.isFinite(n)) return n;
+  const vals=[];
+  const add=(v)=>{ if(v!==undefined&&v!==null&&String(v).trim()!=='') vals.push(v); };
+  const walk=(x,depth=0)=>{
+    if(x===null||x===undefined||depth>3) return;
+    if(typeof x==='object' && !Array.isArray(x)){
+      for(const k of ['balance','credits','credit','amount','available_balance','availableBalance','wallet_balance','walletBalance']) add(x[k]);
+      for(const k of ['data','result','response','account','wallet','user']) walk(x[k],depth+1);
     }
+  };
+  add(d?.balance); add(d?.credits); add(d?.credit); walk(d);
+  for(const v of vals){
+    const raw=String(v).trim().replace(/\s+/g,'').replace(/,/g,'').replace(/^[$€£]/,'');
+    const n=Number(raw);
+    if(Number.isFinite(n)) return n;
   }
   return null;
 }
@@ -219,6 +222,14 @@ async function apiSmm(req,res,urlObj){
   }catch(e){return json(res,502,{error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});}
 }
 
+
+function readNotifications(){ return readJSON('notifications.json',[]); }
+function writeNotifications(v){ writeJSON('notifications.json',Array.isArray(v)?v:[]); }
+function readNotificationSeen(){ return readJSON('notification_seen.json',{}); }
+function writeNotificationSeen(v){ writeJSON('notification_seen.json',v&&typeof v==='object'?v:{}); }
+function notifId(){ return 'N'+Date.now().toString(36)+crypto.randomBytes(3).toString('hex'); }
+function sanitizeNotification(n){ return {id:String(n.id||''),title:String(n.title||''),message:String(n.message||''),url:String(n.url||''),required:!!n.required,active:n.active!==false,createdAt:n.createdAt||new Date().toISOString(),updatedAt:n.updatedAt||n.createdAt||new Date().toISOString()}; }
+
 async function routeAPI(req,res,urlObj){
   const p=normalizedPath(urlObj.pathname);
   if(p==='/api/config'){ const cfg=readJSON('settings.json',{}); const waUrl=normalizeWhatsAppUrl(cfg.waUrl||cfg.waNum||'https://wa.me/9647762267959'); return json(res,200,{appName:APP_NAME,version:APP_VERSION,currency:'USD',exchangeRate:FIXED_RATE,fixedRecharge:'5000 IQD = 4 USD',rateTable:[1000,2000,3000,4000,5000,6000,7000,8000,9000,10000].map(i=>({iqd:i,usd:i/FIXED_RATE})),supportWhatsappUrl:waUrl,supportWhatsappNumber:normalizeWhatsAppNumber(waUrl)}); }
@@ -241,6 +252,48 @@ async function routeAPI(req,res,urlObj){
   if(p==='/api/session' && req.method==='GET'){ const s=session(req); if(!s)return json(res,200,{ok:false,authenticated:false}); if(s.role==='admin')return json(res,200,{ok:true,authenticated:true,role:'admin',username:s.username}); const store=readJSON('users.json',{users:{}}); const u=store.users?.[s.username]; if(!u)return json(res,200,{ok:false,authenticated:false}); const clean={...u}; delete clean.password; delete clean.passwordHash; return json(res,200,{ok:true,authenticated:true,role:'user',username:s.username,user:clean}); }
   if(p==='/api/settings' && req.method==='GET'){ const cfg=readJSON('settings.json',{}); const waUrl=normalizeWhatsAppUrl(cfg.waUrl||cfg.waNum||'https://wa.me/9647762267959'); return json(res,200,{ok:true,settings:{waUrl,waNum:normalizeWhatsAppNumber(waUrl)}}); }
   if(p==='/api/settings' && req.method==='POST'){ if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'}); const b=await bodyJSON(req); const cfg=readJSON('settings.json',{}); if(b.waUrl!==undefined) cfg.waUrl=normalizeWhatsAppUrl(b.waUrl); else if(b.waNum!==undefined) cfg.waUrl=normalizeWhatsAppUrl(b.waNum); cfg.waNum=normalizeWhatsAppNumber(cfg.waUrl); writeJSON('settings.json',cfg); return json(res,200,{ok:true,settings:{waUrl:cfg.waUrl,waNum:cfg.waNum}}); }
+  if(p==='/api/mastercard' && req.method==='GET'){
+    const cfg=readJSON('settings.json',{}); const mc=cfg.mastercard||{};
+    return json(res,200,{ok:true,mastercard:{enabled:mc.enabled!==false,number:String(mc.number||''),image:String(mc.image||''),updatedAt:mc.updatedAt||null}});
+  }
+  if(p==='/api/mastercard' && req.method==='POST'){
+    if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
+    const b=await bodyJSON(req); const cfg=readJSON('settings.json',{}); const old=cfg.mastercard||{};
+    const image=String(b.image??old.image??''); if(image.length>1600000)return json(res,413,{ok:false,error:'صورة Mastercard كبيرة جداً'});
+    cfg.mastercard={enabled:b.enabled!==undefined?!!b.enabled:(old.enabled!==false),number:String(b.number??old.number??'').replace(/\s+/g,' ').trim(),image,updatedAt:new Date().toISOString()}; writeJSON('settings.json',cfg);
+    return json(res,200,{ok:true,mastercard:cfg.mastercard});
+  }
+  if(p==='/api/provider/diagnostics' && req.method==='POST'){
+    if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
+    const b=await bodyJSON(req); const prov={name:String(b.name||'مزود'),url:String(b.url||'').trim(),key:String(b.key||'').trim()};
+    if(!/^https?:\/\//i.test(prov.url)||!prov.key)return json(res,422,{ok:false,error:'رابط API أو مفتاح API غير صالح'});
+    const out={connection:{ok:false},balance:{ok:false},services:{ok:false}};
+    try{
+      const bd=await providerRequest(prov,{action:'balance'}); const balance=normalizeProviderBalance(bd); if(balance===null) throw new Error('الاتصال نجح لكن API لم يرجع رصيداً رقمياً');
+      out.connection={ok:true}; out.balance={ok:true,balance,currency:normalizeProviderCurrency(bd)};
+    }catch(e){ out.connection={ok:false,error:e.message}; return json(res,502,{ok:false,diagnostics:out}); }
+    try{
+      const sd=await providerRequest(prov,{action:'services'}); const list=Array.isArray(sd)?sd:(Array.isArray(sd.services)?sd.services:(Array.isArray(sd.data)?sd.data:[]));
+      out.services={ok:true,count:list.length};
+    }catch(e){ out.services={ok:false,error:e.message}; }
+    return json(res,200,{ok:out.connection.ok&&out.balance.ok&&out.services.ok,diagnostics:out});
+  }
+  if(p==='/api/admin/notifications' && req.method==='GET'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'}); return json(res,200,{ok:true,notifications:readNotifications().map(sanitizeNotification)});
+  }
+  if(p==='/api/admin/notifications' && req.method==='POST'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'}); const b=await bodyJSON(req); const title=String(b.title||'').trim(), message=String(b.message||'').trim(), url=String(b.url||'').trim();
+    if(!title||!message)return json(res,422,{ok:false,error:'العنوان والنص مطلوبان'}); const all=readNotifications(); const n=sanitizeNotification({id:notifId(),title,message,url,required:!!b.required,active:b.active!==false,createdAt:new Date().toISOString()}); all.unshift(n); writeNotifications(all.slice(0,500)); return json(res,200,{ok:true,notification:n});
+  }
+  if(p==='/api/admin/notifications' && req.method==='PATCH'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'}); const b=await bodyJSON(req); const all=readNotifications(); const i=all.findIndex(x=>String(x.id)===String(b.id)); if(i<0)return json(res,404,{ok:false,error:'الإشعار غير موجود'}); if(b.action==='delete')all.splice(i,1); else {all[i]={...sanitizeNotification(all[i]),...(b.active!==undefined?{active:!!b.active}:{}),...(b.required!==undefined?{required:!!b.required}:{}),updatedAt:new Date().toISOString()};} writeNotifications(all); return json(res,200,{ok:true});
+  }
+  if(p==='/api/notifications' && req.method==='GET'){
+    const s=session(req); if(!s||s.role!=='user')return json(res,401,{ok:false,error:'يجب تسجيل الدخول'}); const seen=readNotificationSeen()[s.username]||{}; const items=readNotifications().filter(n=>n.active!==false).map(sanitizeNotification).filter(n=>!seen[n.id]); return json(res,200,{ok:true,notifications:items});
+  }
+  if(p==='/api/notifications/seen' && req.method==='POST'){
+    const s=session(req); if(!s||s.role!=='user')return json(res,401,{ok:false,error:'يجب تسجيل الدخول'}); const b=await bodyJSON(req); const id=String(b.id||''); if(!id)return json(res,422,{ok:false,error:'معرف الإشعار مطلوب'}); const seen=readNotificationSeen(); seen[s.username]=seen[s.username]||{}; seen[s.username][id]=new Date().toISOString(); writeNotificationSeen(seen); return json(res,200,{ok:true});
+  }
   if(p==='/api/provider/balance' && req.method==='GET'){ if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'}); const {prov,pid}=getProviderById(urlObj.searchParams.get('provider')); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'}); try{const d=await providerRequest(prov,{action:'balance'}); const balance=normalizeProviderBalance(d); if(balance===null)return json(res,502,{ok:false,error:'المزود لم يرجع قيمة رصيد صالحة',raw:d}); return json(res,200,{ok:true,providerId:pid,providerName:prov.name||pid,balance,currency:normalizeProviderCurrency(d),raw:d,checkedAt:new Date().toISOString()});}catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});} }
   if(p==='/api/provider/test' && req.method==='POST'){
     if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
