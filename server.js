@@ -10,7 +10,7 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.9';
+const APP_VERSION = '1.5.10';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
@@ -179,7 +179,7 @@ async function providerRequest(prov,params,timeoutMs=30000){
       const controller=new AbortController();
       const timer=setTimeout(()=>controller.abort(),timeoutMs);
       try{
-        const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8','Accept':'application/json,text/plain,*/*','User-Agent':'SadaIraq/1.5.9'},body:payload.toString(),redirect:'follow',signal:controller.signal});
+        const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8','Accept':'application/json,text/plain,*/*','User-Agent':'SadaIraq/1.5.10'},body:payload.toString(),redirect:'follow',signal:controller.signal});
         const text=await r.text();
         let d={};
         try{d=text?JSON.parse(text):{};}catch(_){d={raw:text};}
@@ -201,8 +201,8 @@ async function providerRequest(prov,params,timeoutMs=30000){
   if(['balance','services'].includes(String(params?.action||''))){
     for(const endpoint of endpoints){
       const variants = [
-        {method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json,text/plain,*/*','User-Agent':'SadaIraq/1.5.9'}, body:JSON.stringify(Object.fromEntries(payload.entries()))},
-        {method:'GET', headers:{'Accept':'application/json,text/plain,*/*','User-Agent':'SadaIraq/1.5.9'}, body:null, url:endpoint+'?'+payload.toString()}
+        {method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json,text/plain,*/*','User-Agent':'SadaIraq/1.5.10'}, body:JSON.stringify(Object.fromEntries(payload.entries()))},
+        {method:'GET', headers:{'Accept':'application/json,text/plain,*/*','User-Agent':'SadaIraq/1.5.10'}, body:null, url:endpoint+'?'+payload.toString()}
       ];
       for(const v of variants){
         const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),timeoutMs);
