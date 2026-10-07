@@ -7015,7 +7015,8 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
   const V='1.5.1', RATE=1250, DEFAULT_WA='https://wa.me/9647762267959';
   const $=id=>document.getElementById(id), txt=v=>String(v??''), api=(p,o)=>fetch(p,Object.assign({credentials:'include',cache:'no-store',headers:{'Content-Type':'application/json'}},o||{})).then(async r=>{const t=await r.text();let d={};try{d=t?JSON.parse(t):{}}catch(_){d={error:t||('HTTP '+r.status)}};if(!r.ok||d.error)throw new Error(d.error||('HTTP '+r.status));return d;});
   const ensure=fn=>document.readyState==='loading'?document.addEventListener('DOMContentLoaded',fn,{once:true}):fn();
-  let SECTION_META={};
+  window.SECTION_META=window.SECTION_META||{};
+  let SECTION_META=window.SECTION_META;
   window.SadaIraqVersion=V;
 
   function safe(v){return txt(v).replace(/[&<>\"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[m]));}
@@ -7318,7 +7319,7 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 
   /* ----- support URL + settings sync on startup ----- */
   async function syncSettings(){try{const d=await api('/api/settings',{method:'GET'});if(d?.settings){CFG.settings.waUrl=d.settings.waUrl||DEFAULT_WA;CFG.settings.waNum=d.settings.waNum||'9647762267959';}}catch(_){CFG.settings.waUrl=CFG.settings.waUrl||DEFAULT_WA}}
-  async function syncSectionMeta(){try{if(FB_OK&&DB){const s=await DB.ref('categoryMeta').once('value');SECTION_META={};if(s.exists())s.forEach(c=>{const v=c.val()||{};if(v.name)SECTION_META[v.name]=v});if(typeof window.parseSvcsArr==='function'&&Array.isArray(ALL_SVCS_ARR))window.parseSvcsArr(ALL_SVCS_ARR);}}catch(_){}}
+  async function syncSectionMeta(){try{if(FB_OK&&DB){const s=await DB.ref('categoryMeta').once('value');SECTION_META={};window.SECTION_META=SECTION_META;if(s.exists())s.forEach(c=>{const v=c.val()||{};if(v.name)SECTION_META[v.name]=v});if(typeof window.parseSvcsArr==='function'&&Array.isArray(ALL_SVCS_ARR))window.parseSvcsArr(ALL_SVCS_ARR);}}catch(_){}}
 
   /* ----- no dashboard button for regular users, start at new order ----- */
   const oldLaunch=window.launchApp;
@@ -7593,7 +7594,7 @@ window.renderSmmProvidersList=function(container){
 
 async function getSectionNames(){
   const s=new Set();
-  Object.keys(ALL_CATS||{}).forEach(x=>x&&s.add(x));Object.keys(SECTION_META||{}).forEach(x=>x&&s.add(x));
+  Object.keys(ALL_CATS||{}).forEach(x=>x&&s.add(x));Object.keys(window.SECTION_META||{}).forEach(x=>x&&s.add(x));
   if(FB_OK&&DB){
     try{const snap=await DB.ref('categoryMeta').once('value');snap.forEach(c=>{const v=c.val()||{};if(v.name)s.add(String(v.name));});}catch(_){ }
     try{const snap=await DB.ref('services').once('value');snap.forEach(c=>{const v=c.val()||{};(v.groups||v.categories||[]).forEach(g=>{if(g)s.add(String(g));});if(v.category)s.add(String(v.category));});}catch(_){ }
@@ -7629,7 +7630,7 @@ window.restoreAllServices=async function(initialMode='selected'){
     function render(){const q=search.value.trim().toLowerCase();let arr=raw.filter(x=>!q||String(x.name||'').toLowerCase().includes(q));if(importMode.value==='section'&&sourceCategory.value)arr=arr.filter(x=>String(x.category||'عام')===String(sourceCategory.value));list.innerHTML='';arr.forEach(x=>{const lab=qMk('label','sada-v152-import-row');const cb=document.createElement('input');cb.type='checkbox';cb.checked=importMode.value!=='selected';cb.dataset.sid=String(x.service||'');cb.onchange=updateCount;const info=qMk('div','sada-v152-import-info');info.innerHTML='<b>'+qSafe(x.name||'خدمة')+'</b><small>'+qSafe(x.category||'عام')+' · ID '+qSafe(x.service||'—')+'</small>';const pr=qMk('div','sada-v152-import-price','$'+Number(x.rate||0).toFixed(4)+'/1000');lab.append(cb,info,pr);list.appendChild(lab)});updateCount();}
     importMode.onchange=()=>{uiVisibility();render()};targetMode.onchange=()=>{uiVisibility();fillTargets()};sourceCategory.onchange=render;search.oninput=render;provider.onchange=()=>{raw=[];sourceCategory.innerHTML='<option value="">اختر قسم المزود</option>';list.innerHTML='';status.textContent='غيّر المزود ثم اضغط جلب الخدمات';updateCount();};
     selectAll.onclick=()=>{const boxes=list.querySelectorAll('input[type=checkbox]');const all=[...boxes].every(x=>x.checked);boxes.forEach(x=>x.checked=!all);updateCount()};
-    fetchBtn.onclick=async()=>{fetchBtn.disabled=true;try{const d=await qApi('/api/smm?provider='+encodeURIComponent(provider.value)+'&action=services');raw=Array.isArray(d)?d:(d.services||d.data||[]);if(!raw.length)throw new Error('المزود لم يرجع خدمات');CFG.smm.activeProvider=provider.value;await fillSourceCats();await fillTargets();render();status.textContent='🟢 تم جلب '+raw.length+' خدمة من '+(provider.options[provider.selectedIndex]?.text||provider.value);qToast('✅ تم جلب الخدمات','ok');}catch(e){status.textContent='🔴 '+e.message;qToast('❌ '+e.message,'err')}finally{fetchBtn.disabled=false}};
+    fetchBtn.onclick=async()=>{fetchBtn.disabled=true;try{const d=await qApi('/api/smm?provider='+encodeURIComponent(provider.value)+'&action=services');raw=Array.isArray(d)?d:(Array.isArray(d.services)?d.services:(Array.isArray(d.data)?d.data:(Array.isArray(d.result)?d.result:(Array.isArray(d.items)?d.items:(d.services&&typeof d.services==='object'?Object.entries(d.services).map(([service,v])=>({service,...(v||{})})):d.data&&typeof d.data==='object'?Object.entries(d.data).map(([service,v])=>({service,...(v||{})})):[])))));if(!raw.length)throw new Error('المزود لم يرجع خدمات');CFG.smm.activeProvider=provider.value;await fillSourceCats();await fillTargets();render();status.textContent='🟢 تم جلب '+raw.length+' خدمة من '+(provider.options[provider.selectedIndex]?.text||provider.value);qToast('✅ تم جلب الخدمات','ok');}catch(e){status.textContent='🔴 '+e.message;qToast('❌ '+e.message,'err')}finally{fetchBtn.disabled=false}};
     importBtn.onclick=async()=>{
       if(busy)return;const chosen=[...list.querySelectorAll('input[type=checkbox]:checked')].map(c=>raw.find(x=>String(x.service||'')===String(c.dataset.sid))).filter(Boolean);if(!chosen.length)return qToast('حدد خدمة واحدة على الأقل','wrn');
       if(targetMode.value==='existing'&&!target.value)return qToast('اختر القسم الموجود','wrn');if(targetMode.value==='new'&&!newName.value.trim())return qToast('اكتب اسم القسم الجديد','wrn');

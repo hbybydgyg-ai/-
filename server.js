@@ -88,6 +88,20 @@ function normalizeProviderBalance(d){
 function normalizeProviderCurrency(d){
   return String(d?.currency||d?.data?.currency||d?.result?.currency||d?.account?.currency||'USD').toUpperCase();
 }
+
+function normalizeProviderServices(d){
+  if(Array.isArray(d)) return d;
+  if(Array.isArray(d?.services)) return d.services;
+  if(Array.isArray(d?.data)) return d.data;
+  if(Array.isArray(d?.result)) return d.result;
+  if(Array.isArray(d?.items)) return d.items;
+  for(const key of ['services','data','result','items']){
+    const obj=d?.[key];
+    if(obj && typeof obj==='object' && !Array.isArray(obj)) return Object.entries(obj).map(([service,v])=>({service,...(v&&typeof v==='object'?v:{value:v})}));
+  }
+  return [];
+}
+
 function providerActionSucceeded(action,d,orderId=''){
   if(action!=='cancel') return true;
   const okCancel=(v)=>v===1||v==='1'||v===true||(v&&typeof v==='object'&&!v.error&&(v.cancel===1||v.success===true));
@@ -329,7 +343,7 @@ async function routeAPI(req,res,urlObj){
       out.connection={ok:true}; out.balance={ok:true,balance,currency:normalizeProviderCurrency(bd),raw:bd};
     }catch(e){ out.balance={ok:false,error:e.name==='AbortError'?'انتهت مهلة جلب الرصيد':e.message}; }
     try{
-      const sd=await providerRequest(prov,{action:'services'}); const list=Array.isArray(sd)?sd:(Array.isArray(sd.services)?sd.services:(Array.isArray(sd.data)?sd.data:[]));
+      const sd=await providerRequest(prov,{action:'services'}); const list=normalizeProviderServices(sd);
       if(!list.length) throw new Error('المزود لم يرجع أي خدمات');
       out.services={ok:true,count:list.length}; out.connection={ok:true};
     }catch(e){ out.services={ok:false,error:e.name==='AbortError'?'انتهت مهلة جلب الخدمات':e.message}; }
@@ -360,7 +374,7 @@ async function routeAPI(req,res,urlObj){
     const out={connection:{ok:false},balance:{ok:false},services:{ok:false}};
     try{ const d=await providerRequest(prov,{action:'balance'}); const balance=normalizeProviderBalance(d); if(balance===null) throw new Error('API لم يرجع رصيداً رقمياً'); out.connection={ok:true}; out.balance={ok:true,balance,currency:normalizeProviderCurrency(d)}; }
     catch(e){ out.balance={ok:false,error:e.name==='AbortError'?'انتهت مهلة جلب الرصيد':e.message}; }
-    try{ const d=await providerRequest(prov,{action:'services'}); const list=Array.isArray(d)?d:(d.services||d.data||[]); out.services={ok:Array.isArray(list)&&list.length>0,count:Array.isArray(list)?list.length:0,error:Array.isArray(list)&&list.length?'':'لم يرجع خدمات'}; if(out.services.ok && !out.connection.ok) out.connection={ok:true}; }
+    try{ const d=await providerRequest(prov,{action:'services'}); const list=normalizeProviderServices(d); out.services={ok:Array.isArray(list)&&list.length>0,count:Array.isArray(list)?list.length:0,error:Array.isArray(list)&&list.length?'':'لم يرجع خدمات'}; if(out.services.ok && !out.connection.ok) out.connection={ok:true}; }
     catch(e){ out.services={ok:false,error:e.name==='AbortError'?'انتهت مهلة جلب الخدمات':e.message}; }
     if(!out.connection.ok) out.connection={ok:false,error:out.balance.error||out.services.error||'فشل الاتصال بالمزود'};
     return json(res,200,{ok:out.connection.ok&&out.balance.ok&&out.services.ok,providerName:prov.name,diagnostics:out,checkedAt:new Date().toISOString()});
