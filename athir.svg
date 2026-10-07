@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="أثير">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0ea5e9"/><stop offset="1" stop-color="#155e75"/></linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect x="8" y="8" width="224" height="224" rx="44" fill="#08111f"/>
+  <rect x="18" y="18" width="204" height="204" rx="38" fill="url(#g)" opacity=".95"/>
+  <circle cx="120" cy="112" r="58" fill="#07131f" opacity=".92" filter="url(#glow)"/>
+  <path d="M98 82h33c18 0 30 12 30 29 0 14-9 25-22 28l27 29h-25l-23-26h-8v26H88V82h10zm12 15v30h19c10 0 17-6 17-15s-7-15-17-15h-19z" fill="#fff"/>
+  <text x="120" y="196" text-anchor="middle" font-family="Arial, sans-serif" font-size="21" font-weight="700" fill="#d7f3ff">أثير</text>
+</svg>
