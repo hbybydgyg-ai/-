@@ -1,0 +1,4 @@
+Options -MultiViews
+DirectoryIndex index.html
+RewriteEngine On
+RewriteRule ^api/(config|auth|providers|smm|asiacell)/?$ api/$1.php [L,QSA]
