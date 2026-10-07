@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0a0e1a">
-<title>صدى العراق · v1.5.10</title>
+<title>صدى العراق · v1.5.11</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
@@ -6904,10 +6904,10 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 </script>
 
 <script>
-/* ===== صدى العراق v1.5.10 — FINAL UI / ORDER / IMPORT REPAIR ===== */
+/* ===== صدى العراق v1.5.11 — FINAL UI / ORDER / IMPORT REPAIR ===== */
 (function(){
   const RATE157=1250;
-  const SADA_BUILD='1.5.10';
+  const SADA_BUILD='1.5.11';
   const s157=window.safe||function(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))};
   const m157=window.mk||function(t,c,x){const e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e};
   const t157=(m,x)=>{try{toast(m,x)}catch(_){}};
@@ -7076,7 +7076,7 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 ═══════════════════════════════════════════════════════════════ */
 (function(){
   'use strict';
-  const SADA_VERSION='1.5.10';
+  const SADA_VERSION='1.5.11';
   const RATE=1250;
   const ATHIR_NUMBER='07903221783';
     window.SadaIraqVersion=SADA_VERSION;
@@ -7362,16 +7362,17 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 
 <script>
 /* ═══════════════════════════════════════════════════════════════
-   صدى العراق v1.5.10 — ORDER / SERVICES / SECURITY PATCH
+   صدى العراق v1.5.11 — ORDER / SERVICES / SECURITY PATCH
    لا يحذف أي ملف أو دالة قديمة؛ يبدّل الواجهة والوظائف المطلوبة فقط.
 ═══════════════════════════════════════════════════════════════ */
 (function(){
   'use strict';
-  const V='1.5.10', RATE=1250, DEFAULT_WA='https://wa.me/9647762267959';
+  const V='1.5.11', RATE=1250, DEFAULT_WA='https://wa.me/9647762267959';
   const $=id=>document.getElementById(id), txt=v=>String(v??''), api=(p,o)=>fetch(p,Object.assign({credentials:'include',cache:'no-store',headers:{'Content-Type':'application/json'}},o||{})).then(async r=>{const t=await r.text();let d={};try{d=t?JSON.parse(t):{}}catch(_){d={error:t||('HTTP '+r.status)}};if(!r.ok||d.error)throw new Error(d.error||('HTTP '+r.status));return d;});
   const ensure=fn=>document.readyState==='loading'?document.addEventListener('DOMContentLoaded',fn,{once:true}):fn();
   window.SECTION_META=window.SECTION_META||{};
   window.SadaIraqVersion=V;
+window.SadaIraqBuildId='SADA-1.5.11-ORDER-FIX-20261007';
 
   function safe(v){return txt(v).replace(/[&<>\"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[m]));}
   function appLabel(id){const p=(CFG.platforms||[]).find(x=>x.id===id);return p?.lbl||id||'عام';}
@@ -7692,12 +7693,13 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 <script>
 (function(){
 'use strict';
-const V='1.5.10';
+const V='1.5.11';
 const $=id=>document.getElementById(id);
 const safe=v=>String(v??'').replace(/[&<>\"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[m]));
 const api=window.apiJSON||((p,o)=>fetch(p,Object.assign({credentials:'include',cache:'no-store',headers:{'Content-Type':'application/json'}},o||{})).then(async r=>{const t=await r.text();let d={};try{d=t?JSON.parse(t):{}}catch(_){d={error:t}}if(!r.ok||d.error)throw new Error(d.error||('HTTP '+r.status));return d;}));
 const mk=window.mk||((tag,cls,txt)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(txt!==undefined)e.textContent=txt;return e;});
 window.SadaIraqVersion=V;
+window.SadaIraqBuildId='SADA-1.5.11-ORDER-FIX-20261007';
 
 function setVersion(){
   const b=$('sadairaq-version-badge');
@@ -7833,7 +7835,7 @@ setTimeout(init140,1200);
 })();
 
 </script>
-<!-- Sada Iraq v1.5.10 provider import fix + services repair block -->
+<!-- Sada Iraq v1.5.11 provider import fix + services repair block -->
 <style id="sadairaq-v152-repair">
 #sadairaq-v152-actions{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 12px}
 #sadairaq-v152-actions .btn{min-height:38px;font-weight:800}
@@ -8115,7 +8117,7 @@ setTimeout(repairNow,900);setTimeout(repairNow,1800);
 </script>
 
 
-<!-- Sada Iraq v1.5.10 — final order/category/recharge/import repair -->
+<!-- Sada Iraq v1.5.11 — final order/category/recharge/import repair -->
 <style id="sadairaq-v158-final-style">
 #sadairaq-mastercard-card.sada-v158-mc{max-width:760px;margin:12px auto;border:1px solid rgba(124,111,247,.22)!important;background:linear-gradient(145deg,rgba(17,21,64,.96),rgba(9,11,30,.98))!important;overflow:hidden}
 .sada-v158-mc-head{width:100%;display:flex;align-items:center;gap:14px;text-align:right;background:transparent;border:0;color:inherit;cursor:pointer;padding:16px}

@@ -1,0 +1,11 @@
+صدى العراق v1.5.11 — إصلاح حقيقي لإنشاء الطلبات وتثبيت الإصدار
+
+- توحيد الإصدار إلى 1.5.11 في server.js و package.json و version.txt و index.html.
+- إضافة BUILD_ID ثابت يمكن التحقق منه عبر /api/health و /api/config.
+- عدم اعتماد إنشاء الطلب على نجاح API الرصيد؛ فحص الرصيد أصبح معلوماتياً فقط.
+- منع إعادة محاولة طلب add تلقائياً حتى لا تتكرر الطلبات عند timeout أو استجابة 5xx.
+- قبول order و order_id و orderId وبعض أشكال الاستجابة المتداخلة عند المزود.
+- تسجيل أخطاء الإرسال في data/provider_failures.json بدون حذف الطلبات أو الملفات القديمة.
+- دعم مزود API عبر متغيرات Railway: SMM_PROVIDER_ID و SMM_PROVIDER_NAME و SMM_API_URL و SMM_API_KEY.
+- السماح بالاختبار المحلي للمزود فقط عند NODE_ENV=test و ALLOW_LOCAL_PROVIDER_TEST=1، مع بقاء حماية SSRF مفعلة في الإنتاج.
+- POST /api/providers يحافظ على المزودين الحاليين افتراضياً، والحذف/الاستبدال يحتاج mode=replace صراحةً.

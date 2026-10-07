@@ -10,7 +10,8 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.10';
+const APP_VERSION = process.env.APP_VERSION || '1.5.11';
+const BUILD_ID = process.env.BUILD_ID || 'SADA-1.5.11-ORDER-FIX-20261007';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
@@ -28,6 +29,7 @@ function ensureData() {
   const defaults={
     'users.json':{users:{}},
     'orders.json':[],
+    'provider_failures.json':[],
     'payments.json':[],
     'notifications.json':[],
     'notification_seen.json':{},
@@ -39,7 +41,7 @@ function ensureData() {
     let cur=null, ok=true;
     try{cur=JSON.parse(fs.readFileSync(full,'utf8'));}catch(_){ok=false;}
     if(file==='users.json') ok=!!(cur&&typeof cur==='object'&&cur.users&&typeof cur.users==='object'&&!Array.isArray(cur.users));
-    else if(file==='orders.json'||file==='payments.json'||file==='notifications.json') ok=Array.isArray(cur);
+    else if(file==='orders.json'||file==='provider_failures.json'||file==='payments.json'||file==='notifications.json') ok=Array.isArray(cur);
     else if(file==='notification_seen.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
     else if(file==='providers.json') ok=!!(cur&&typeof cur==='object'&&cur.providers&&typeof cur.providers==='object'&&!Array.isArray(cur.providers));
     else if(file==='settings.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
@@ -92,7 +94,22 @@ function safeEqual(a,b){ const aa=Buffer.from(String(a||'')); const bb=Buffer.fr
 function hashPassword(password){ const salt=crypto.randomBytes(16).toString('hex'); const hash=crypto.scryptSync(String(password),salt,64).toString('hex'); return `scrypt$${salt}$${hash}`; }
 function verifyPassword(password,stored){ const v=String(stored||''); if(!v.startsWith('scrypt$')) return safeEqual(password,v); const parts=v.split('$'); if(parts.length!==3) return false; try{return safeEqual(crypto.scryptSync(String(password),parts[1],64).toString('hex'),parts[2]);}catch(_){return false;} }
 function adminPasswordValid(password){ return process.env.ADMIN_PASSWORD_HASH ? verifyPassword(password,process.env.ADMIN_PASSWORD_HASH) : safeEqual(password,ADMIN_PASSWORD); }
-function providerStore(){ return readJSON('providers.json',{activeProvider:'',providers:{}}); }
+function envProvider(){
+  const id=String(process.env.SMM_PROVIDER_ID||process.env.PROVIDER_ID||'').trim();
+  const name=String(process.env.SMM_PROVIDER_NAME||process.env.PROVIDER_NAME||'').trim() || id;
+  const url=String(process.env.SMM_API_URL||process.env.SMM_URL||process.env.PROVIDER_URL||'').trim();
+  const key=String(process.env.SMM_API_KEY||process.env.SMM_KEY||process.env.PROVIDER_KEY||'').trim();
+  if(!id||!url||!key) return null;
+  return {id,name,url,key,source:'environment'};
+}
+function providerStore(){
+  const local=readJSON('providers.json',{activeProvider:'',providers:{}});
+  const providers={...(local&&local.providers&&typeof local.providers==='object'?local.providers:{})};
+  const env=envProvider();
+  if(env) providers[env.id]={...(providers[env.id]||{}),...env};
+  const active=String(local?.activeProvider||env?.id||'');
+  return {activeProvider:active,providers};
+}
 function getProviderById(id){ const store=providerStore(); const pid=String(id||store.activeProvider||''); return {store,pid,prov:(store.providers||{})[pid]||null}; }
 function normalizeProviderStatus(v){ const x=String(v||'').trim().toLowerCase(); const map={pending:'pending',queued:'pending',processing:'processing','in progress':'processing',completed:'completed',complete:'completed',partial:'partial',canceled:'cancelled',cancelled:'cancelled',failed:'failed',error:'failed',refunded:'refunded'}; return map[x]||'unknown'; }
 function normalizeProviderBalance(d){
@@ -115,6 +132,28 @@ function normalizeProviderBalance(d){
   }
   return null;
 }
+function normalizeProviderOrderId(d){
+  const vals=[
+    d?.order,d?.order_id,d?.orderId,d?.providerOrderId,d?.id,
+    d?.data?.order,d?.data?.order_id,d?.data?.orderId,d?.data?.id,
+    d?.result?.order,d?.result?.order_id,d?.result?.orderId,d?.result?.id
+  ];
+  for(const v of vals){ if(v!==undefined&&v!==null&&String(v).trim()!=='') return String(v).trim(); }
+  return '';
+}
+function providerReturnedError(d){
+  if(!d || typeof d!=='object' || Array.isArray(d)) return false;
+  const e=d.error;
+  if(e===true) return true;
+  if(typeof e==='string') return e.trim()!=='';
+  if(e && typeof e==='object') return true;
+  return false;
+}
+function safeProviderResponse(d){
+  if(d===undefined) return null;
+  try{return JSON.parse(JSON.stringify(d));}catch(_){return String(d);} 
+}
+
 function normalizeProviderCurrency(d){
   return String(d?.currency||d?.data?.currency||d?.result?.currency||d?.account?.currency||'USD').toUpperCase();
 }
@@ -158,9 +197,11 @@ function isPrivateAddress(address){
 async function validateProviderUrl(raw){
   const u=new URL(String(raw||'').trim());
   if(!/^https?:$/.test(u.protocol)) throw new Error('API URL يجب أن يبدأ بـ http:// أو https://');
-  const h=u.hostname.toLowerCase(); if(h==='localhost'||h.endsWith('.localhost')||h.endsWith('.local')||h.endsWith('.internal')) throw new Error('عنوان المزود غير مسموح');
+  const h=u.hostname.toLowerCase();
+  const localTest = process.env.NODE_ENV==='test' && process.env.ALLOW_LOCAL_PROVIDER_TEST==='1';
+  if(!localTest && (h==='localhost'||h.endsWith('.localhost')||h.endsWith('.local')||h.endsWith('.internal'))) throw new Error('عنوان المزود غير مسموح');
   const records=await dns.lookup(h,{all:true,verbatim:true}); if(!records.length) throw new Error('تعذر حل اسم مزود API');
-  if(records.some(x=>isPrivateAddress(x.address))) throw new Error('عنوان API داخلي أو خاص غير مسموح');
+  if(!localTest && records.some(x=>isPrivateAddress(x.address))) throw new Error('عنوان API داخلي أو خاص غير مسموح');
   return u;
 }
 
@@ -169,58 +210,66 @@ async function providerRequest(prov,params,timeoutMs=30000){
   const rawUrl=String(prov.url).trim();
   await validateProviderUrl(rawUrl);
   const base=rawUrl.replace(/\/+$/,'');
+  const action=String(params?.action||'');
+  // Read operations may try both slash variants and limited retries.
+  // Order creation must be exactly-once from our side: never retry add automatically.
   const endpoints=[base,base+'/'].filter((v,i,a)=>a.indexOf(v)===i);
   const payload=new URLSearchParams();
   payload.set('key',String(prov.key));
   Object.entries(params||{}).forEach(([k,v])=>{if(v!==undefined&&v!==null&&String(v)!=='')payload.set(k,String(v));});
-  let lastError=null;
-  for(const endpoint of endpoints){
-    for(let attempt=1;attempt<=3;attempt++){
-      const controller=new AbortController();
-      const timer=setTimeout(()=>controller.abort(),timeoutMs);
+
+  async function callForm(endpoint,attempts){
+    let lastError=null;
+    for(let attempt=1;attempt<=attempts;attempt++) {
+      const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),timeoutMs);
       try{
-        const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8','Accept':'application/json,text/plain,*/*','User-Agent':'SadaIraq/1.5.10'},body:payload.toString(),redirect:'follow',signal:controller.signal});
-        const text=await r.text();
-        let d={};
-        try{d=text?JSON.parse(text):{};}catch(_){d={raw:text};}
-        if(!r.ok){
-          const err=new Error(`مزود SMM أعاد HTTP ${r.status}`); err.retryable=r.status===408||r.status===425||r.status===429||r.status>=500; throw err;
-        }
-        if(d&&typeof d==='object'&&d.error) throw new Error(String(d.error));
+        const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8','Accept':'application/json,text/plain,*/*','User-Agent':`SadaIraq/${APP_VERSION}`},body:payload.toString(),redirect:'follow',signal:controller.signal});
+        const text=await r.text(); let d={}; try{d=text?JSON.parse(text):{};}catch(_){d={raw:text};}
+        if(!r.ok){ const err=new Error(`مزود SMM أعاد HTTP ${r.status}${text?': '+String(text).slice(0,180):''}`); err.retryable=[408,425,429].includes(r.status)||r.status>=500; throw err; }
+        if(providerReturnedError(d)) throw new Error(typeof d.error==='string'?d.error:'المزود رفض العملية');
         return d;
       }catch(e){
-        lastError=e;
-        const retryable=e?.name==='AbortError'||e?.retryable;
-        if(retryable&&attempt<3){await new Promise(r=>setTimeout(r,250*attempt));continue;}
+        lastError=e; const retryable=e?.name==='AbortError'||e?.retryable;
+        if(retryable&&attempt<attempts){await new Promise(r=>setTimeout(r,300*attempt));continue;}
         break;
       }finally{clearTimeout(timer);}
     }
+    throw lastError||new Error('تعذر الاتصال بالمزود');
   }
-  // Compatibility fallbacks for READ operations only. Never retry order creation here,
-  // because a provider could accept an order even when the response is unusual.
-  if(['balance','services'].includes(String(params?.action||''))){
+
+  if(action==='add'){
+    // Exactly one outbound order-create attempt. A timeout/5xx is surfaced to the UI
+    // instead of blindly creating duplicates.
+    return callForm(endpoints[0],1);
+  }
+
+  let lastError=null;
+  for(const endpoint of endpoints){
+    try{return await callForm(endpoint,3);}catch(e){lastError=e;}
+  }
+
+  // Compatibility fallbacks for READ operations only. Never use them for order creation.
+  if(['balance','services'].includes(action)){
     for(const endpoint of endpoints){
-      const variants = [
-        {method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json,text/plain,*/*','User-Agent':'SadaIraq/1.5.10'}, body:JSON.stringify(Object.fromEntries(payload.entries()))},
-        {method:'GET', headers:{'Accept':'application/json,text/plain,*/*','User-Agent':'SadaIraq/1.5.10'}, body:null, url:endpoint+'?'+payload.toString()}
+      const variants=[
+        {method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json,text/plain,*/*','User-Agent':`SadaIraq/${APP_VERSION}`},body:JSON.stringify(Object.fromEntries(payload.entries()))},
+        {method:'GET',headers:{'Accept':'application/json,text/plain,*/*','User-Agent':`SadaIraq/${APP_VERSION}`},body:null,url:endpoint+'?'+payload.toString()}
       ];
       for(const v of variants){
         const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),timeoutMs);
         try{
           const r=await fetch(v.url||endpoint,{method:v.method,headers:v.headers,body:v.body,redirect:'follow',signal:controller.signal});
           const t=await r.text(); let d={}; try{d=t?JSON.parse(t):{};}catch(_){d={raw:t};}
-          if(!r.ok) continue;
-          if(d&&typeof d==='object'&&d.error) continue;
+          if(!r.ok||providerReturnedError(d)) continue;
           return d;
-        }catch(_){
-          // keep trying compatible read formats
-        }finally{clearTimeout(timer);}
+        }catch(_){ } finally{clearTimeout(timer);}
       }
     }
   }
   if(lastError?.name==='AbortError') throw lastError;
   throw lastError||new Error('تعذر الاتصال بالمزود');
 }
+
 function userFromSession(req){ const s=session(req); return s?.role==='user' ? String(s.username||'') : ''; }
 function appendJsonLedger(file,entry){ const arr=readJSON(file,[]); const next=Array.isArray(arr)?arr:[]; next.push(entry); writeJSON(file,next.slice(-5000)); }
 function normalizedPath(p){
@@ -351,7 +400,7 @@ function ownedProviderOrder(username,providerId,providerOrderId){
 
 async function routeAPI(req,res,urlObj){
   const p=normalizedPath(urlObj.pathname);
-  if(p==='/api/config'){ const cfg=readJSON('settings.json',{}); const waUrl=normalizeWhatsAppUrl(cfg.waUrl||cfg.waNum||'https://wa.me/9647762267959'); return json(res,200,{appName:APP_NAME,version:APP_VERSION,currency:'USD',exchangeRate:FIXED_RATE,fixedRecharge:'5000 IQD = 4 USD',rateTable:[1000,2000,3000,4000,5000,6000,7000,8000,9000,10000].map(i=>({iqd:i,usd:i/FIXED_RATE})),supportWhatsappUrl:waUrl,supportWhatsappNumber:normalizeWhatsAppNumber(waUrl),telegramChannelUrl:'https://t.me/jbhbhg58'}); }
+  if(p==='/api/config'){ const cfg=readJSON('settings.json',{}); const waUrl=normalizeWhatsAppUrl(cfg.waUrl||cfg.waNum||'https://wa.me/9647762267959'); return json(res,200,{appName:APP_NAME,version:APP_VERSION,buildId:BUILD_ID,currency:'USD',exchangeRate:FIXED_RATE,fixedRecharge:'5000 IQD = 4 USD',rateTable:[1000,2000,3000,4000,5000,6000,7000,8000,9000,10000].map(i=>({iqd:i,usd:i/FIXED_RATE})),supportWhatsappUrl:waUrl,supportWhatsappNumber:normalizeWhatsAppNumber(waUrl),telegramChannelUrl:'https://t.me/jbhbhg58'}); }
   if(p==='/api/auth' && req.method==='POST'){
     const wait=rateLimit(req,'auth'); if(wait) return json(res,429,{ok:false,error:'محاولات كثيرة، أعد المحاولة بعد '+wait+' ثانية'},{'Retry-After':String(wait)});
     const b=await bodyJSON(req); const u=String(b.username||'').trim(); const pw=String(b.password||'');
@@ -435,20 +484,30 @@ async function routeAPI(req,res,urlObj){
   if(p==='/api/order/create' && req.method==='POST'){
     const wait=rateLimit(req,'order'); if(wait)return json(res,429,{ok:false,error:'طلبات كثيرة، أعد المحاولة بعد قليل'},{'Retry-After':String(wait)});
     const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'});
-    const b=await bodyJSON(req); const providerId=String(b.providerId||''); const serviceId=String(b.serviceId||''); const link=String(b.link||'').trim(); const quantity=Number(b.quantity);
-    if(!providerId||!serviceId||!link||!Number.isInteger(quantity)||quantity<=0)return json(res,422,{ok:false,error:'بيانات الطلب غير مكتملة'});
-    const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود المرتبط بالخدمة غير موجود'});
+    const b=await bodyJSON(req); const providerId=String(b.providerId||'').trim(); const serviceId=String(b.serviceId||'').trim(); const link=String(b.link||'').trim(); const quantity=Number(b.quantity);
+    if(!providerId||!serviceId||!link||!Number.isInteger(quantity)||quantity<=0)return json(res,422,{ok:false,error:'بيانات الطلب غير مكتملة',stage:'validate'});
+    const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود المرتبط بالخدمة غير موجود — أعد حفظ مزود API أو ضعه في متغيرات Railway',stage:'provider_lookup',providerId});
     try{
-      const bd=await providerRequest(prov,{action:'balance'});
-      const balance=normalizeProviderBalance(bd);
-      if(balance===null) return json(res,502,{ok:false,error:'تعذر التحقق من رصيد المزود الحقيقي قبل إنشاء الطلب'});
+      // Do not make order creation depend on a separate balance call. Many providers accept add
+      // even when balance is returned in a non-standard format or the balance endpoint is restricted.
+      let providerBalanceBefore=null;
+      try{ const bd=await providerRequest(prov,{action:'balance'}); providerBalanceBefore=normalizeProviderBalance(bd); }catch(_){ /* balance is informational only */ }
+
       const d=await providerRequest(prov,{action:'add',service:serviceId,link,quantity});
-      if(!d||d.order===undefined||d.order===null||String(d.order)==='')return json(res,502,{ok:false,error:'المزود لم يرجع رقم طلب حقيقي',providerResponse:d});
-      const providerOrderId=String(d.order);
-      appendJsonLedger('orders.json',{localId:String(b.localId||''),user:username,providerId,providerOrderId,serviceId,link,quantity,status:'pending',providerBalanceBefore:balance,createdAt:new Date().toISOString()});
-      return json(res,200,{ok:true,providerId,providerName:prov.name||providerId,providerOrderId,providerRaw:d,providerBalanceBefore:balance,createdAt:new Date().toISOString()});
-    }catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});}
+      const providerOrderId=normalizeProviderOrderId(d);
+      if(!providerOrderId){
+        appendJsonLedger('provider_failures.json',{stage:'provider_response',user:username,providerId,serviceId,link,quantity,error:'المزود لم يرجع رقم طلب حقيقي',providerResponse:safeProviderResponse(d),createdAt:new Date().toISOString()});
+        return json(res,502,{ok:false,error:'المزود استلم العملية أو رفضها بدون رقم طلب واضح — راجع استجابة المزود',stage:'provider_response',providerResponse:safeProviderResponse(d)});
+      }
+      const createdAt=new Date().toISOString();
+      appendJsonLedger('orders.json',{localId:String(b.localId||''),user:username,providerId,providerOrderId,serviceId,link,quantity,status:'pending',providerBalanceBefore,createdAt});
+      return json(res,200,{ok:true,providerId,providerName:prov.name||providerId,providerOrderId,providerRaw:safeProviderResponse(d),providerBalanceBefore,createdAt});
+    }catch(e){
+      appendJsonLedger('provider_failures.json',{stage:'provider_add',user:username,providerId,serviceId,link,quantity,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message,createdAt:new Date().toISOString()});
+      return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود: لم تتم إعادة المحاولة تلقائياً حتى لا يتكرر الطلب':e.message,stage:'provider_add'});
+    }
   }
+
   if(p==='/api/order/status' && req.method==='POST'){
     const wait=rateLimit(req,'order'); if(wait)return json(res,429,{ok:false,error:'طلبات كثيرة، أعد المحاولة بعد قليل'},{'Retry-After':String(wait)});
     const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'}); const b=await bodyJSON(req); const providerId=String(b.providerId||''); const providerOrderId=String(b.providerOrderId||''); if(!providerId||!providerOrderId)return json(res,422,{ok:false,error:'بيانات التحقق ناقصة'}); if(!ownedProviderOrder(username,providerId,providerOrderId))return json(res,403,{ok:false,error:'هذا الطلب لا يتبع حسابك'}); const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
@@ -486,7 +545,7 @@ async function routeAPI(req,res,urlObj){
     return json(res,200,{ok:true,providerId:id,key:String(prov.key||'')});
   }
   if(p==='/api/providers'){
-    const store=readJSON('providers.json',{activeProvider:'',providers:{}});
+    const store=providerStore();
     if(req.method==='GET'){
       if(!isAdmin(req)) return json(res,403,{error:'غير مصرح'});
       const safe={}; for(const [id,v] of Object.entries(store.providers||{})) safe[id]={id,name:v.name||id,url:v.url||'',hasKey:!!v.key};
@@ -501,7 +560,7 @@ async function routeAPI(req,res,urlObj){
         const id=String(item.id||'').replace(/[^a-zA-Z0-9_-]/g,''); const name=String(item.name||'').trim(); const apiUrl=String(item.url||'').trim(); const key=String(item.key||'').trim();
         const preserved=String((store.providers||{})[id]?.key||''); if(id&&name&&/^https?:\/\//i.test(apiUrl)&&(key||preserved)) incoming[id]={name,url:apiUrl,key:key||preserved};
       }
-      const out = b.mode==='merge' ? {...(store.providers||{}), ...incoming} : incoming;
+      const out = b.mode==='replace' ? incoming : {...(store.providers||{}), ...incoming};
       const active = String(b.activeProvider!==undefined ? b.activeProvider : (store.activeProvider||''));
       writeJSON('providers.json',{activeProvider:active,providers:out,updatedAt:new Date().toISOString()});
       return json(res,200,{ok:true,count:Object.keys(out).length,activeProvider:active});
@@ -509,7 +568,7 @@ async function routeAPI(req,res,urlObj){
   }
   if(p==='/api/smm') return apiSmm(req,res,urlObj);
   if(p==='/api/asiacell' && req.method==='POST') return apiAsiacell(req,res);
-  if(p==='/api/health') return json(res,200,{ok:true,app:APP_NAME,version:APP_VERSION,time:new Date().toISOString(),node:process.version});
+  if(p==='/api/health') return json(res,200,{ok:true,app:APP_NAME,version:APP_VERSION,buildId:BUILD_ID,time:new Date().toISOString(),node:process.version});
   return json(res,404,{error:'API endpoint not found'});
 }
 
