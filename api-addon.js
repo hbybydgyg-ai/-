@@ -1,2 +1,2 @@
-// صدى العراق - توافق إضافي. جميع واجهات API الرئيسية موجودة في server.js.
-window.SadaIraqAPI = window.SadaIraqAPI || {version:'1.5.21'};
+// صدى العراق v1.5.24 — API compatibility marker
+window.SadaIraqAPI = window.SadaIraqAPI || {version:'1.5.24'};

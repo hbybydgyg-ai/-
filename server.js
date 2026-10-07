@@ -10,20 +10,20 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = process.env.APP_VERSION || '1.5.22';
-const BUILD_ID = process.env.BUILD_ID || 'SADA-1.5.22-FREEZE-USD-REAL-ORDER-20261008';
+const APP_VERSION = '1.5.24';
+const BUILD_ID = 'SADA-1.5.24-FINAL-API-PROVIDER-SECURITY-20261008';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
 const FIXED_RATE = 1250; // 1 USD = 1,250 IQD
-// v1.5.22: signed stateless sessions survive Railway restarts/instance changes.
+// v1.5.24: signed stateless sessions survive Railway restarts/instance changes.
 const sessions = new Map(); // legacy sessions kept only during rolling deployments
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || 'sadairaq-session-secret-change-me');
 const SESSION_COOKIE = 'sadairaq_sid';
 const SESSION_TOKEN_HEADER = 'x-sada-session';
 const RATE_BUCKETS = new Map();
-const RATE_RULES = { auth:{window:60_000,max:12}, provider:{window:60_000,max:20}, order:{window:60_000,max:20}, general:{window:60_000,max:60} };
+const RATE_RULES = { auth:{window:60_000,max:12}, provider:{window:60_000,max:20}, order:{window:60_000,max:20}, api:{window:60_000,max:60}, general:{window:60_000,max:60} };
 function clientIp(req){ return String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim(); }
 function rateLimit(req,bucket='general'){ const r=RATE_RULES[bucket]||RATE_RULES.general; const key=clientIp(req)+'|'+bucket; const now=Date.now(); let x=RATE_BUCKETS.get(key); if(!x||now-x.started>r.window)x={started:now,count:0}; x.count++; RATE_BUCKETS.set(key,x); if(x.count>r.max){ return Math.ceil((x.started+r.window-now)/1000); } return 0; }
 setInterval(()=>{ const now=Date.now(); for(const [k,v] of RATE_BUCKETS) if(now-v.started>120_000) RATE_BUCKETS.delete(k); for(const [k,v] of sessions) if(now-(v.createdAt||0)>SESSION_TTL_MS) sessions.delete(k); }, 120_000).unref();
@@ -37,8 +37,12 @@ function ensureData() {
     'payments.json':[],
     'notifications.json':[],
     'notification_seen.json':{},
-    'providers.json':{activeProvider:'',providers:{}},
-    'settings.json':{}
+    'providers.json':{activeProvider:'',providers:{},deletedProviderIds:[]},
+    'settings.json':{},
+    'api_services.json':[],
+    'balance_ledger.json':[],
+    'api_keys.json':{},
+    'stats_state.json':{resetAt:null}
   };
   for(const [file,def] of Object.entries(defaults)){
     const full=path.join(DATA,file);
@@ -48,7 +52,8 @@ function ensureData() {
     else if(file==='orders.json'||file==='provider_failures.json'||file==='payments.json'||file==='notifications.json') ok=Array.isArray(cur);
     else if(file==='notification_seen.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
     else if(file==='providers.json') ok=!!(cur&&typeof cur==='object'&&cur.providers&&typeof cur.providers==='object'&&!Array.isArray(cur.providers));
-    else if(file==='settings.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
+    else if(file==='settings.json'||file==='api_keys.json'||file==='stats_state.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
+    else if(file==='api_services.json'||file==='balance_ledger.json') ok=Array.isArray(cur);
     if(!ok){ fs.writeFileSync(full,JSON.stringify(def,null,2),'utf8'); }
   }
 }
@@ -106,7 +111,7 @@ function session(req){
   if(stateless){
     if(!/^[a-zA-Z0-9_@.\-]+$/.test(String(stateless.username||''))) return null;
     if(stateless.role==='admin' && String(stateless.username)!==String(ADMIN_USER)) return null;
-    // v1.5.22: do NOT require users.json for an already signed user session.
+    // v1.5.24: do NOT require users.json for an already signed user session.
     // Firebase/custom-app users may outlive Railway's ephemeral local filesystem.
     return stateless;
   }
@@ -291,7 +296,7 @@ async function providerRequest(prov,params,timeoutMs=30000){
       try{
         const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8','Accept':'application/json,text/plain,*/*','User-Agent':`SadaIraq/${APP_VERSION}`},body:payload.toString(),redirect:'follow',signal:controller.signal});
         const text=await r.text(); let d={}; try{d=text?JSON.parse(text):{};}catch(_){d={raw:text};}
-        if(!r.ok){ const err=new Error(`مزود SMM أعاد HTTP ${r.status}${text?': '+String(text).slice(0,180):''}`); err.retryable=[408,425,429].includes(r.status)||r.status>=500; throw err; }
+        if(!r.ok){ const err=new Error(`مزود SMM أعاد HTTP ${r.status}${text?': '+String(text).slice(0,180):''}`); err.providerRejected=r.status>=400&&r.status<500&&![408,425,429].includes(r.status); err.retryable=[408,425,429].includes(r.status)||r.status>=500; throw err; }
         if(providerReturnedError(d)){ const err=new Error(providerErrorText(d)||'المزود رفض العملية'); err.providerRejected=true; throw err; }
         return d;
       }catch(e){
@@ -464,8 +469,230 @@ function ownedProviderOrder(username,providerId,providerOrderId){
   const rows=readJSON('orders.json',[]); return Array.isArray(rows) && rows.some(x=>String(x.user||'')===String(username||'') && String(x.providerId||'')===String(providerId||'') && String(x.providerOrderId||'')===String(providerOrderId||''));
 }
 
+
+function nowISO(){ return new Date().toISOString(); }
+function sha256(v){ return crypto.createHash('sha256').update(String(v||'')).digest('hex'); }
+function apiCipherKey(){ return crypto.createHash('sha256').update(String(SESSION_SECRET)).digest(); }
+function encryptSecret(plain){
+  const iv=crypto.randomBytes(12), c=crypto.createCipheriv('aes-256-gcm',apiCipherKey(),iv);
+  const enc=Buffer.concat([c.update(String(plain||''),'utf8'),c.final()]);
+  const tag=c.getAuthTag();
+  return Buffer.concat([iv,tag,enc]).toString('base64url');
+}
+function decryptSecret(blob){
+  try{
+    const b=Buffer.from(String(blob||''),'base64url'); if(b.length<28)return '';
+    const iv=b.subarray(0,12),tag=b.subarray(12,28),enc=b.subarray(28);
+    const d=crypto.createDecipheriv('aes-256-gcm',apiCipherKey(),iv);d.setAuthTag(tag);
+    return Buffer.concat([d.update(enc),d.final()]).toString('utf8');
+  }catch(_){ return ''; }
+}
+function newApiKey(){ return 'sr_'+crypto.randomBytes(32).toString('base64url'); }
+const API_USER_LOCKS=new Map();
+async function withApiUserLock(username,fn){
+  const k=String(username||''); let tail=API_USER_LOCKS.get(k)||Promise.resolve();
+  const run=tail.catch(()=>{}).then(fn); API_USER_LOCKS.set(k,run.finally(()=>{if(API_USER_LOCKS.get(k)===run)API_USER_LOCKS.delete(k)}));
+  return run;
+}
+const FIREBASE_DATABASE_URL=String(process.env.FIREBASE_DATABASE_URL||'https://tiktokzoom-97c9d-default-rtdb.firebaseio.com').replace(/\/$/,'');
+function firebaseSafeKey(value){ const s=String(value??''); return Array.from(s).map(ch=>{const cp=ch.codePointAt(0); return /^[A-Za-z0-9_-]$/.test(ch)?ch:'_x'+cp.toString(16)+'_';}).join('')||'_empty'; }
+async function firebaseGetJson(pathname,timeoutMs=8000){
+  const controller=new AbortController(), timer=setTimeout(()=>controller.abort(),timeoutMs);
+  try{ const u=FIREBASE_DATABASE_URL+'/'+String(pathname).replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/')+'.json'; const r=await fetch(u,{headers:{'Accept':'application/json'},signal:controller.signal}); if(!r.ok) throw new Error('Firebase HTTP '+r.status); return await r.json(); }
+  finally{ clearTimeout(timer); }
+}
+async function firebaseServiceByKey(fbKey){ const k=firebaseSafeKey(fbKey); const v=await firebaseGetJson('services/'+k); return v&&typeof v==='object'?{...v,fbKey:String(fbKey)}:null; }
+async function firebaseUserByUsername(username){ const k=firebaseSafeKey(username); const v=await firebaseGetJson('users/'+k); return v&&typeof v==='object'?v:null; }
+function apiKeyFromRequest(req){
+  const h=String(req.headers['x-api-key']||'').trim(); if(h)return h;
+  const a=String(req.headers.authorization||'').trim(); if(/^Bearer\s+/i.test(a))return a.replace(/^Bearer\s+/i,'').trim();
+  return '';
+}
+function apiKeyUser(req){
+  const raw=apiKeyFromRequest(req); if(!raw||raw.length<20)return null;
+  const keys=readJSON('api_keys.json',{}); const rec=keys[sha256(raw)];
+  if(!rec||rec.revokedAt)return null;
+  const users=readJSON('users.json',{users:{}}).users||{}; const u=users[rec.username];
+  if(!u)return null;
+  return {raw,username:rec.username,record:rec,user:u};
+}
+function redactSecretObject(value,depth=0){
+  if(depth>5)return '[truncated]';
+  if(Array.isArray(value))return value.slice(0,100).map(v=>redactSecretObject(v,depth+1));
+  if(value&&typeof value==='object'){
+    const o={}; for(const [k,v] of Object.entries(value)){
+      if(/^(key|api[_-]?key|token|password|secret|authorization)$/i.test(k)) o[k]='[redacted]';
+      else o[k]=redactSecretObject(v,depth+1);
+    } return o;
+  }
+  if(typeof value==='string' && value.length>2000)return value.slice(0,2000)+'…';
+  return value;
+}
+// Replace the old raw provider response sanitizer with a redacting version.
+safeProviderResponse = function(d){ return redactSecretObject(d); };
+function providerAuthErrorText(t){ return /invalid|incorrect|wrong|unauthori[sz]ed|authentication|api\s*key|access\s*denied|expired|login|sign\s*in/i.test(String(t||'')); }
+async function sendTelegram(text){
+  const cfg=readJSON('settings.json',{}).telegram||{};
+  if(cfg.enabled===false||!cfg.token||!cfg.chat)return false;
+  try{
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),7000);
+    const r=await fetch('https://api.telegram.org/bot'+encodeURIComponent(String(cfg.token))+'/sendMessage',{
+      method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},
+      body:JSON.stringify({chat_id:String(cfg.chat),text:String(text),disable_web_page_preview:true}),signal:controller.signal
+    }); clearTimeout(timer); return r.ok;
+  }catch(_){ return false; }
+}
+function providerSafeName(p){return String(p?.name||p?.id||'مزود');}
+async function authoritativeWebsiteService(providerId, serviceId, firebaseServiceKey){
+  const pid=String(providerId||'').trim(), sid=String(serviceId||'').trim(), fkey=String(firebaseServiceKey||'').trim();
+  let cached=findInternalApiService(sid);
+  if(cached && String(cached.providerId||'')===pid) return cached;
+  if(fkey){
+    try{
+      const fb=await firebaseServiceByKey(fkey);
+      if(fb){
+        const providerServiceId=String(fb.smmpartyId||fb.providerServiceId||fb.serviceId||'').trim();
+        const p=String(fb.providerId||'').trim();
+        if(p===pid && (!providerServiceId || providerServiceId===sid)) return {id:providerServiceId||sid,fbId:fkey,name:String(fb.name||'خدمة'),category:String(fb.category||((fb.groups||[])[0]||'عام')),sellingUsd:Number(fb.sellingUsd??0),rateUsd:Number(fb.sellingUsd??fb.smmRateUsd??fb.rateUsd??(Number(fb.price||0)/FIXED_RATE)),min:Number(fb.min||100),max:Number(fb.max||10000),providerId:p,providerServiceId:providerServiceId||sid,smmRateUsd:Number(fb.smmRateUsd||fb.rate||0),refill:!!fb.refill,cancel:!!fb.cancel};
+      }
+    }catch(_){}
+  }
+  return null;
+}
+
+function publicApiService(s){
+  const rate=Number(s?.sellingUsd); const rateUsd=Number.isFinite(rate)&&rate>=0?rate:Number(s?.price||0)/FIXED_RATE;
+  return {id:String(s?.smmpartyId||s?.providerServiceId||s?.serviceId||s?.fbKey||''),name:String(s?.name||'خدمة'),category:String(s?.category||((Array.isArray(s?.groups)&&s.groups[0])||'عام')),rate:Number((Number(rateUsd)||0).toFixed(6)),min:Number(s?.min||100),max:Number(s?.max||10000),refill:!!s?.refill,cancel:!!s?.cancel};
+}
+function internalApiServices(){ return readJSON('api_services.json',[]).filter(x=>x&&x.id); }
+function findInternalApiService(id){ const sid=String(id||''); return internalApiServices().find(x=>String(x.id)===sid)||null; }
+function apiOrderPublic(o){ return {order_id:String(o.id||''),status:String(o.status||'pending'),service:String(o.serviceId||''),quantity:Number(o.quantity||0),chargeUsd:Number(o.chargeUsd||0),createdAt:o.createdAt||null}; }
+function calcApiChargeUsd(s,qty,user){
+  const pct=Math.max(0,Math.min(100,Number(user?.discountPct)||0));
+  const total=Math.max(0,Number(qty)/1000*Number(s.sellingUsd||s.rateUsd||s.rate||0)*(1-pct/100));
+  return {pct,total:Number(total.toFixed(6))};
+}
+function statsSnapshot(range='all'){
+  const orders=readJSON('orders.json',[]); const reset=readJSON('stats_state.json',{resetAt:null}).resetAt; let since=reset?new Date(reset):null; const now=new Date(); if(range==='today')since=new Date(now.getTime()-24*60*60*1000); else if(range==='7d')since=new Date(now.getTime()-7*24*60*60*1000); else if(range==='month')since=new Date(now.getFullYear(),now.getMonth(),1); const list=Array.isArray(orders)?orders.filter(o=>{const d=new Date(o.createdAt||0);return (!since||d>since)}):[];
+  const counts={total:0,today:0,completed:0,processing:0,pending:0,cancelled:0,failed:0,refunded:0,partial:0}; let sales=0,cost=0;
+  const todayNow=new Date(); const day=todayNow.toISOString().slice(0,10); const services={}; const users={}; const profits={};
+  for(const o of list){ counts.total++; const st=normalizeProviderStatus(o.status||'pending'); if(st in counts)counts[st]++; if(String(o.createdAt||'').slice(0,10)===day)counts.today++;
+    const sale=Number(o.chargeUsd!==undefined?o.chargeUsd:(Number(o.total||0)/FIXED_RATE)); const providerCost=Number(o.providerCostUsd!==undefined?o.providerCostUsd:(Number(o.providerRateUsd||o.smmRateUsd||0)*Number(o.quantity||0)/1000)); sales+=Number.isFinite(sale)?sale:0; cost+=Number.isFinite(providerCost)?providerCost:0;
+    const sn=String(o.serviceName||o.serviceId||'خدمة'); services[sn]=(services[sn]||0)+1; profits[sn]=(profits[sn]||0)+(Number.isFinite(sale)?sale:0)-(Number.isFinite(providerCost)?providerCost:0); const un=String(o.user||''); users[un]=(users[un]||0)+1;
+  }
+  const vals=list.map(o=>Number(o.chargeUsd!==undefined?o.chargeUsd:Number(o.total||0)/FIXED_RATE)).filter(Number.isFinite);
+  const serviceMost=Object.entries(services).sort((a,b)=>b[1]-a[1])[0]||null, userMost=Object.entries(users).sort((a,b)=>b[1]-a[1])[0]||null, profitMost=Object.entries(profits).sort((a,b)=>b[1]-a[1])[0]||null;
+  return {counts,salesUsd:Number(sales.toFixed(6)),providerCostUsd:Number(cost.toFixed(6)),profitUsd:Number((sales-cost).toFixed(6)),highestOrderUsd:vals.length?Math.max(...vals):0,lowestOrderUsd:vals.length?Math.min(...vals):0,mostOrderedService:serviceMost?.[0]||null,mostOrderingUser:userMost?.[0]||null,highestProfitService:profitMost?{name:profitMost[0],profitUsd:Number(Number(profitMost[1]).toFixed(6))}:null,resetAt:reset||null};
+}
+
 async function routeAPI(req,res,urlObj){
   const p=normalizedPath(urlObj.pathname);
+
+  // -------------------- Public API key management --------------------
+  if(p==='/api/user/api-key' && req.method==='GET'){
+    const u=userFromSession(req); if(!u)return json(res,401,{ok:false,error:'يجب تسجيل الدخول'});
+    const keys=readJSON('api_keys.json',{}); const rec=Object.values(keys).find(x=>x&&x.username===u&&!x.revokedAt);
+    return json(res,200,{ok:true,exists:!!rec,masked:rec?.masked||null});
+  }
+  if(p==='/api/user/api-key' && req.method==='POST'){
+    const wait=rateLimit(req,'auth'); if(wait)return json(res,429,{ok:false,error:'محاولات كثيرة، أعد المحاولة لاحقاً'},{'Retry-After':String(wait)});
+    const u=userFromSession(req); if(!u)return json(res,401,{ok:false,error:'يجب تسجيل الدخول'});
+    const keys=readJSON('api_keys.json',{}); for(const [h,v] of Object.entries(keys)){if(v?.username===u&&!v.revokedAt)delete keys[h];}
+    const raw=newApiKey(); keys[sha256(raw)]={username:u,createdAt:nowISO(),masked:raw.slice(0,7)+'…'+raw.slice(-4),encrypted:encryptSecret(raw),version:1}; writeJSON('api_keys.json',keys);
+    return json(res,200,{ok:true,apiKey:raw,masked:raw.slice(0,7)+'…'+raw.slice(-4),createdAt:keys[sha256(raw)].createdAt});
+  }
+  if(p==='/api/user/api-key/revoke' && req.method==='POST'){
+    const u=userFromSession(req); if(!u)return json(res,401,{ok:false,error:'يجب تسجيل الدخول'}); const keys=readJSON('api_keys.json',{}); let found=0;for(const [h,v] of Object.entries(keys)){if(v?.username===u&&!v.revokedAt){v.revokedAt=nowISO();found++;}}writeJSON('api_keys.json',keys);return json(res,200,{ok:true,revoked:found});
+  }
+  if(p==='/api/user/api-key/reveal' && req.method==='POST'){
+    const u=userFromSession(req); if(!u)return json(res,401,{ok:false,error:'يجب تسجيل الدخول'}); const b=await bodyJSON(req); if(String(b.confirm||'')!=='reveal')return json(res,422,{ok:false,error:'تأكيد الإظهار مطلوب'});
+    const keys=readJSON('api_keys.json',{}); const rec=Object.values(keys).find(x=>x&&x.username===u&&!x.revokedAt); if(!rec?.encrypted)return json(res,404,{ok:false,error:'لا يوجد مفتاح API نشط'});
+    const raw=decryptSecret(rec.encrypted); if(!raw)return json(res,500,{ok:false,error:'تعذر فك مفتاح API'}); return json(res,200,{ok:true,apiKey:raw});
+  }
+
+  // -------------------- Public customer API (backend only) --------------------
+  if(p==='/api/v1/services' && req.method==='GET'){
+    const wait=rateLimit(req,'api'); if(wait)return json(res,429,{error:'Too Many Requests'},{'Retry-After':String(wait)});
+    if(!apiKeyUser(req))return json(res,401,{error:'Invalid API key'}); return json(res,200,internalApiServices().map(publicApiService));
+  }
+  if(p==='/api/v1/balance' && req.method==='GET'){
+    const wait=rateLimit(req,'api'); if(wait)return json(res,429,{error:'Too Many Requests'},{'Retry-After':String(wait)});
+    const au=apiKeyUser(req); if(!au)return json(res,401,{error:'Invalid API key'}); const usd=Number(au.user.balance||0)/FIXED_RATE; return json(res,200,{balance:Number(usd.toFixed(6)),currency:'USD'});
+  }
+  if(p==='/api/v1/orders' && req.method==='GET'){
+    const wait=rateLimit(req,'api'); if(wait)return json(res,429,{error:'Too Many Requests'},{'Retry-After':String(wait)}); const au=apiKeyUser(req);if(!au)return json(res,401,{error:'Invalid API key'});const rows=readJSON('orders.json',[]).filter(o=>String(o.user||'')===au.username);const limit=Math.min(100,Math.max(1,Number(urlObj.searchParams.get('limit')||50)));return json(res,200,rows.slice(-limit).reverse().map(apiOrderPublic));
+  }
+  const apiOrderMatch=p.match(/^\/api\/v1\/order\/([^/]+)$/);
+  if(apiOrderMatch && req.method==='GET'){
+    const wait=rateLimit(req,'api'); if(wait)return json(res,429,{error:'Too Many Requests'},{'Retry-After':String(wait)}); const au=apiKeyUser(req);if(!au)return json(res,401,{error:'Invalid API key'});const id=decodeURIComponent(apiOrderMatch[1]);const o=readJSON('orders.json',[]).find(x=>String(x.id||'')===id&&String(x.user||'')===au.username);if(!o)return json(res,404,{error:'Order not found'});return json(res,200,apiOrderPublic(o));
+  }
+  if(p==='/api/v1/order' && req.method==='POST'){
+    const wait=rateLimit(req,'api'); if(wait)return json(res,429,{error:'Too Many Requests'},{'Retry-After':String(wait)}); const au=apiKeyUser(req);if(!au)return json(res,401,{error:'Invalid API key'});
+    const idem=String(req.headers['idempotency-key']||'').trim(); const b=await bodyJSON(req); const serviceId=String(b.service||'').trim();const link=String(b.link||'').trim();const quantity=Number(b.quantity);if(!serviceId||!/^https?:\/\//i.test(link)||!Number.isInteger(quantity)||quantity<=0)return json(res,422,{error:'service, link and positive integer quantity are required'});
+    const existing=readJSON('orders.json',[]).find(o=>String(o.user||'')===au.username&&idem&&String(o.idempotencyKey||'')===idem); if(existing)return json(res,200,apiOrderPublic(existing));
+    const svc=findInternalApiService(serviceId); if(!svc)return json(res,404,{error:'Service not found'}); const s={...svc,sellingUsd:Number(svc.sellingUsd??svc.rateUsd??svc.rate??0)}; if(quantity<Number(s.min)||quantity>Number(s.max))return json(res,422,{error:'Quantity outside service limits'});
+    const {pct,total}=calcApiChargeUsd(s,quantity,au.user); const iqd=Number((total*FIXED_RATE).toFixed(4)); const {prov}=getProviderById(s.providerId); if(!prov)return json(res,502,{error:'Provider unavailable'});
+    const result=await withApiUserLock(au.username,async()=>{
+      const keys=readJSON('api_keys.json',{}); const live=Object.values(keys).find(x=>x&&x.username===au.username&&!x.revokedAt); if(!live)return {authRevoked:true};
+      const users=readJSON('users.json',{users:{}}); const u=users.users?.[au.username]; if(!u)return {notFound:true};
+      const before=Number(u.balance||0); if(before<iqd)return {insufficient:true,balanceUsd:Number((before/FIXED_RATE).toFixed(6))};
+      if(readJSON('orders.json',[]).some(o=>String(o.user||'')===au.username&&idem&&String(o.idempotencyKey||'')===idem)) return {duplicate:true};
+      // Reserve the user's balance BEFORE contacting the provider. This closes the concurrent-spend race.
+      u.balance=Number((before-iqd).toFixed(4)); users.users[au.username]=u; writeJSON('users.json',users);
+      try{
+        const d=await providerRequest(prov,{action:'add',service:String(s.providerServiceId||s.smmpartyId),link,quantity}); const po=normalizeProviderOrderId(d);
+        if(!po){
+          if(false){ }
+          throw Object.assign(new Error('Provider did not return an order id'),{providerRejected:false,uncertain:true});
+        }
+        const settings=readJSON('settings.json',{}); const id=String(Number(settings.orderCounter||0)+1); settings.orderCounter=Number(id); writeJSON('settings.json',settings);
+        const ord={id,user:au.username,serviceId,serviceName:s.name||'خدمة',link,quantity,unitSellingUsd:Number(s.sellingUsd||0),discountPct:pct,chargeUsd:total,total:iqd,providerRateUsd:Number(s.providerRateUsd||s.smmRateUsd||0),providerCostUsd:Number(s.providerRateUsd||s.smmRateUsd||0)*quantity/1000,status:'pending',providerId:s.providerId,providerName:prov.name||s.providerId,providerOrderId:String(po),idempotencyKey:idem||null,createdAt:nowISO()};
+        appendJsonLedger('orders.json',ord); appendJsonLedger('balance_ledger.json',{user:au.username,type:'order',amountUSD:total,amountIQD:iqd,before,after:u.balance,reason:'API order',admin:'api',reference:id,createdAt:nowISO()});
+        return {ok:true,order:ord};
+      }catch(e){
+        // A definite provider rejection is safe to refund. A timeout/5xx is not safe to refund because the provider may have accepted it.
+        if(e.providerRejected){ const latest=readJSON('users.json',{users:{}}); const lu=latest.users?.[au.username]; if(lu){lu.balance=Number((Number(lu.balance||0)+iqd).toFixed(4));latest.users[au.username]=lu;writeJSON('users.json',latest);appendJsonLedger('balance_ledger.json',{user:au.username,type:'refund',amountUSD:total,amountIQD:iqd,before:u.balance,after:lu.balance,reason:'Provider rejected API order',admin:'api',createdAt:nowISO()});} }
+        appendJsonLedger('provider_failures.json',{stage:'api_order',uncertain:!e.providerRejected,username:au.username,providerId:s.providerId,serviceId,quantity,error:String(e.message||e),createdAt:nowISO()});
+        return {error:String(e.message||e),uncertain:!e.providerRejected,authFailure:providerAuthErrorText(e.message)};
+      }
+    });
+    if(result?.authRevoked)return json(res,401,{error:'Invalid API key'}); if(result?.notFound)return json(res,404,{error:'User not found'}); if(result?.insufficient)return json(res,402,{error:'Insufficient balance',balance:result.balanceUsd}); if(result?.duplicate)return json(res,409,{error:'Duplicate order'}); if(result?.error)return json(res,502,{error:result.authFailure?'Provider API key rejected':result.error,uncertain:!!result.uncertain});
+    if(result?.ok){ sendTelegram(`🆕 طلب جديد\n🆔 رقم الطلب: #${result.order.id}\n👤 المستخدم: ${au.username}\n📦 الخدمة: ${result.order.serviceName}\n🔗 الرابط: ${link}\n🔢 الكمية: ${quantity.toLocaleString('en-US')}\n💰 السعر: $${total.toFixed(2)}\n📊 الحالة: Pending\n🕐 الوقت: ${new Date().toLocaleString('en-GB',{hour12:false})}`).catch(()=>{}); return json(res,200,apiOrderPublic(result.order)); }
+    return json(res,500,{error:'تعذر إنشاء الطلب'});
+  }
+
+  // -------------------- Admin API / audit / stats --------------------
+  if(p==='/api/admin/service-sync' && req.method==='POST'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const list=Array.isArray(b.services)?b.services:[];if(list.length>25000)return json(res,413,{ok:false,error:'عدد الخدمات كبير جداً'});
+    const safe=list.map(s=>{const providerServiceId=String(s?.smmpartyId||s?.providerServiceId||s?.serviceId||'').trim();const fbId=String(s?.fbKey||s?.id||'').trim();return {id:providerServiceId,fbId,name:String(s?.name||'خدمة'),category:String(s?.category||((Array.isArray(s?.groups)&&s.groups[0])||'عام')),sellingUsd:Number(s?.sellingUsd||0),rateUsd:Number(s?.sellingUsd||s?.smmRateUsd||s?.rateUsd||0),min:Number(s?.min||100),max:Number(s?.max||10000),refill:!!s?.refill,cancel:!!s?.cancel,providerId:String(s?.providerId||''),providerServiceId,smmRateUsd:Number(s?.smmRateUsd||s?.rate||0),updatedAt:nowISO()};}).filter(x=>x.id&&x.providerId);
+    writeJSON('api_services.json',safe);return json(res,200,{ok:true,count:safe.length,syncedAt:nowISO()});
+  }
+  if(p==='/api/admin/sync-users' && req.method==='POST'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const list=Array.isArray(b.users)?b.users:[];const store=readJSON('users.json',{users:{}});let n=0;for(const x of list.slice(0,10000)){const u=String(x?.username||'').trim();const bal=Number(x?.balance);if(!u||!Number.isFinite(bal)||bal<0)continue;store.users[u]={...(store.users[u]||{name:u,role:'user'}),balance:Number(bal.toFixed(4)),totalSpent:Number(x?.totalSpent||store.users[u]?.totalSpent||0),totalOrders:Number(x?.totalOrders||store.users[u]?.totalOrders||0),discountPct:Number(x?.discountPct??store.users[u]?.discountPct??0)};n++;}writeJSON('users.json',store);return json(res,200,{ok:true,count:n});
+  }
+  if(p==='/api/admin/stats' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const range=String(urlObj.searchParams.get('range')||'all');if(!['today','7d','month','all'].includes(range))return json(res,422,{ok:false,error:'نطاق غير صالح'});return json(res,200,{ok:true,range,stats:statsSnapshot(range)});}
+  if(p==='/api/admin/stats/reset' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);if(String(b.confirm||'')!=='RESET_STATS')return json(res,422,{ok:false,error:'تأكيد التصفير غير صحيح'});const now=nowISO();writeJSON('stats_state.json',{resetAt:now});return json(res,200,{ok:true,resetAt:now});}
+  if(p==='/api/admin/balance-adjust' && req.method==='POST'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
+    const b=await bodyJSON(req); const username=String(b.username||'').trim(); const usd=Number(b.usd); const type=String(b.type||''); const reason=String(b.reason||'').trim();
+    if(!username||!Number.isFinite(usd)||usd<=0||usd>1000000||!['charge','deduct'].includes(type)||!reason||reason.length>500)return json(res,422,{ok:false,error:'المستخدم والمبلغ والنوع والسبب مطلوبة'});
+    const result=await withApiUserLock(username,async()=>{
+      const store=readJSON('users.json',{users:{}}); const u=store.users?.[username]; if(!u)return {notFound:true};
+      const amount=Number((usd*FIXED_RATE).toFixed(4)); const before=Number(u.balance||0);
+      if(type==='deduct'&&before<amount)return {insufficient:true,beforeUsd:Number((before/FIXED_RATE).toFixed(6))};
+      const after=Number((type==='charge'?before+amount:before-amount).toFixed(4)); u.balance=after; u.updatedAt=nowISO(); store.users[username]=u; writeJSON('users.json',store);
+      appendJsonLedger('balance_ledger.json',{user:username,type,amountUSD:usd,amountIQD:amount,before,after,reason,admin:session(req)?.username||'admin',createdAt:nowISO()});
+      return {ok:true,after,before};
+    });
+    if(result?.notFound)return json(res,404,{ok:false,error:'المستخدم غير موجود'}); if(result?.insufficient)return json(res,409,{ok:false,error:'الرصيد لا يكفي',balanceUsd:result.beforeUsd});
+    return json(res,200,{ok:true,username,balanceUsd:Number((result.after/FIXED_RATE).toFixed(6)),beforeUsd:Number((result.before/FIXED_RATE).toFixed(6)),afterUsd:Number((result.after/FIXED_RATE).toFixed(6))});
+  }
+  if(p==='/api/admin/balance-ledger' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const user=String(urlObj.searchParams.get('user')||'');const rows=readJSON('balance_ledger.json',[]).filter(x=>!user||String(x.user||'')===user).slice(-500).reverse();return json(res,200,{ok:true,ledger:rows});}
+  if(p==='/api/admin/user-finance' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const username=String(urlObj.searchParams.get('username')||'').trim();if(!username)return json(res,422,{ok:false,error:'اسم المستخدم مطلوب'});const u=readJSON('users.json',{users:{}}).users?.[username];if(!u)return json(res,404,{ok:false,error:'المستخدم غير موجود'});const orders=readJSON('orders.json',[]).filter(o=>String(o.user||'')===username);const ledger=readJSON('balance_ledger.json',[]).filter(x=>String(x.user||'')===username);const deposits=ledger.filter(x=>['charge','deposit'].includes(String(x.type||''))).reduce((a,x)=>a+Number(x.amountUSD||Number(x.amountIQD||0)/FIXED_RATE||0),0);const spent=orders.reduce((a,o)=>a+Number(o.chargeUsd??Number(o.total||0)/FIXED_RATE),0);return json(res,200,{ok:true,user:{username,name:String(u.name||username),balanceUsd:Number((Number(u.balance||0)/FIXED_RATE).toFixed(6)),totalDepositsUsd:Number(deposits.toFixed(6)),totalSpentUsd:Number(spent.toFixed(6)),totalOrders:orders.length,discountPct:Number(u.discountPct||0)}});}
+  if(p==='/api/admin/telegram' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const cfg=readJSON('settings.json',{}).telegram||{};return json(res,200,{ok:true,telegram:{enabled:cfg.enabled!==false,tokenSet:!!cfg.token,chat:cfg.chat||''}});}
+  if(p==='/api/admin/telegram' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const cfg=readJSON('settings.json',{});const tg=cfg.telegram||{};if(b.enabled!==undefined)tg.enabled=!!b.enabled;if(b.token!==undefined&&String(b.token).trim())tg.token=String(b.token).trim();if(b.chat!==undefined)tg.chat=String(b.chat).trim();cfg.telegram=tg;writeJSON('settings.json',cfg);return json(res,200,{ok:true,telegram:{enabled:tg.enabled!==false,tokenSet:!!tg.token,chat:tg.chat||''}});}
+  if(p==='/api/admin/telegram/test' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const ok=await sendTelegram(String(b.text||'✅ اختبار إشعارات صدى العراق'));return json(res,ok?200:502,{ok,error:ok?'تم إرسال اختبار Telegram':'فشل إرسال اختبار Telegram'});}
+
   if(p==='/api/config'){ const cfg=readJSON('settings.json',{}); const waUrl=normalizeWhatsAppUrl(cfg.waUrl||cfg.waNum||'https://wa.me/9647762267959'); return json(res,200,{appName:APP_NAME,version:APP_VERSION,buildId:BUILD_ID,currency:'USD',exchangeRate:FIXED_RATE,fixedRecharge:'5000 IQD = 4 USD',rateTable:[1000,2000,3000,4000,5000,6000,7000,8000,9000,10000].map(i=>({iqd:i,usd:i/FIXED_RATE})),supportWhatsappUrl:waUrl,supportWhatsappNumber:normalizeWhatsAppNumber(waUrl),telegramChannelUrl:'https://t.me/jbhbhg58'}); }
   if(p==='/api/auth' && req.method==='POST'){
     const wait=rateLimit(req,'auth'); if(wait) return json(res,429,{ok:false,error:'محاولات كثيرة، أعد المحاولة بعد '+wait+' ثانية'},{'Retry-After':String(wait)});
@@ -560,33 +787,41 @@ async function routeAPI(req,res,urlObj){
   if(p==='/api/order/create' && req.method==='POST'){
     const wait=rateLimit(req,'order'); if(wait)return json(res,429,{ok:false,error:'طلبات كثيرة، أعد المحاولة بعد قليل'},{'Retry-After':String(wait)});
     const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'});
-    const b=await bodyJSON(req); const providerId=String(b.providerId||'').trim(); const serviceId=String(b.serviceId||'').trim(); const link=String(b.link||'').trim(); const quantity=Number(b.quantity); const localId=String(b.localId||'').trim();
+    const b=await bodyJSON(req); const providerId=String(b.providerId||'').trim(); const serviceId=String(b.serviceId||'').trim(); const firebaseServiceKey=String(b.firebaseServiceKey||'').trim(); const link=String(b.link||'').trim(); const quantity=Number(b.quantity); const localId=String(b.localId||'').trim();
     if(!providerId||!serviceId||!link||!Number.isInteger(quantity)||quantity<=0)return json(res,422,{ok:false,error:'بيانات الطلب غير مكتملة',stage:'validate'});
-    if(localId){
-      const existing=readJSON('orders.json',[]).find(x=>String(x.user||'')===username&&String(x.localId||'')===localId&&String(x.providerOrderId||''));
-      if(existing) return json(res,200,{ok:true,idempotent:true,providerId:String(existing.providerId||providerId),providerName:String(existing.providerName||''),providerOrderId:String(existing.providerOrderId),providerRaw:existing.providerRaw||null,createdAt:existing.createdAt||new Date().toISOString()});
-    }
-    const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود المرتبط بالخدمة غير موجود. أعد حفظ المزود الحقيقي أو ثبّته بمتغيرات Railway',stage:'provider_lookup',providerId});
-    try{
-      // v1.5.22: send ADD directly; balance is informational and must not block order creation.
-      const providerBalanceBefore=null;
-
-      // IMPORTANT: order creation is exactly one outbound call. No automatic retry.
-      const d=await providerRequest(prov,{action:'add',service:serviceId,link,quantity});
-      const providerOrderId=normalizeProviderOrderId(d);
-      if(!providerOrderId){
-        appendJsonLedger('provider_failures.json',{stage:'provider_response',uncertain:true,user:username,providerId,serviceId,link,quantity,error:'المزود لم يرجع رقم طلب واضح',providerResponse:safeProviderResponse(d),createdAt:new Date().toISOString()});
-        return json(res,502,{ok:false,error:'المزود لم يرجع رقم طلب واضح بعد عملية الإرسال. لا تعاود الضغط لتجنب التكرار.',stage:'provider_response',uncertain:true,providerResponse:safeProviderResponse(d)});
+    if(!/^https?:\/\//i.test(link))return json(res,422,{ok:false,error:'الرابط غير صالح',stage:'validate'});
+    const existing=readJSON('orders.json',[]).find(x=>String(x.user||'')===username&&String(x.localId||'')===localId&&localId&&String(x.providerOrderId||''));
+    if(existing) return json(res,200,{ok:true,idempotent:true,providerId:String(existing.providerId||providerId),providerName:String(existing.providerName||''),providerOrderId:String(existing.providerOrderId),providerRaw:existing.providerRaw||null,createdAt:existing.createdAt||new Date().toISOString()});
+    const svc=await authoritativeWebsiteService(providerId,serviceId,firebaseServiceKey);
+    if(!svc)return json(res,409,{ok:false,error:'لم أستطع التحقق من الخدمة وربطها بالمزود. أعد تحميل الخدمات من لوحة الإدارة. ',stage:'service_lookup'});
+    const mn=Math.max(1,Number(svc.min||100)),mx=Math.max(mn,Number(svc.max||10000)); if(quantity<mn||quantity>mx)return json(res,422,{ok:false,error:'الكمية خارج حدود الخدمة',stage:'validate'});
+    const serviceRate=Number(svc.sellingUsd??svc.rateUsd??0); const localUser=readJSON('users.json',{users:{}}).users?.[username]||{}; const userDiscount=Math.max(0,Math.min(100,Number(localUser.discountPct??0)||0)); const chargeUsd=Number((Math.max(0,quantity/1000*serviceRate*(1-userDiscount/100))).toFixed(6)); const chargeIqd=Number((chargeUsd*FIXED_RATE).toFixed(4));
+    const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود المرتبط بالخدمة غير موجود',stage:'provider_lookup'});
+    const result=await withApiUserLock(username,async()=>{
+      // The website wallet is Firebase; use a single transaction as the authoritative reservation.
+      let reserved=false,before=0,after=0;
+      if(chargeIqd>0){
+        // The browser performs the authoritative Firebase transaction before calling this endpoint.
+        // The server uses its synchronized local wallet as a second safety check and does not depend on
+        // an outbound Firebase call (which would make Railway provider orders fail when Firebase is unreachable).
+        const localWallet=readJSON('users.json',{users:{}}).users?.[username];
+        const startBal=Number(localWallet?.balance||0); before=startBal;
+        if(localWallet && startBal<chargeIqd)return {insufficient:true,balanceUsd:Number((startBal/FIXED_RATE).toFixed(6))};
       }
-      const createdAt=new Date().toISOString();
-      appendJsonLedger('orders.json',{localId,user:username,providerId,providerName:prov.name||providerId,providerOrderId,serviceId,link,quantity,status:'pending',providerBalanceBefore,providerRaw:safeProviderResponse(d),createdAt});
-      return json(res,200,{ok:true,providerId,providerName:prov.name||providerId,providerOrderId,providerRaw:safeProviderResponse(d),providerBalanceBefore,createdAt});
-    }catch(e){
-      const rejected=!!e.providerRejected;
-      const uncertain=!rejected;
-      appendJsonLedger('provider_failures.json',{stage:'provider_add',uncertain,user:username,providerId,serviceId,link,quantity,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message,createdAt:new Date().toISOString()});
-      return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود — لم تتم إعادة المحاولة تلقائياً حتى لا يتكرر الطلب':e.message,stage:'provider_add',uncertain});
-    }
+      try{
+        const d=await providerRequest(prov,{action:'add',service:String(svc.providerServiceId||serviceId),link,quantity});
+        const providerOrderId=normalizeProviderOrderId(d);
+        if(!providerOrderId){appendJsonLedger('provider_failures.json',{stage:'provider_response',uncertain:true,user:username,providerId,serviceId,link,quantity,error:'المزود لم يرجع رقم طلب واضح',providerResponse:safeProviderResponse(d),createdAt:nowISO()});return {error:'المزود لم يرجع رقم طلب واضح بعد عملية الإرسال',uncertain:true};}
+        const createdAt=nowISO(); const ord={id:String(localId||('EXT_'+Date.now())),localId,user:username,providerId,providerName:prov.name||providerId,providerOrderId,serviceId,serviceName:String(svc.name||'خدمة'),link,quantity,unitSellingUsd:serviceRate,discountPct:userDiscount,chargeUsd,total:chargeIqd,status:'pending',providerRaw:safeProviderResponse(d),createdAt}; appendJsonLedger('orders.json',ord);
+        return {ok:true,order:ord};
+      }catch(e){
+        const rejected=!!e.providerRejected; const authFail=providerAuthErrorText(e.message); appendJsonLedger('provider_failures.json',{stage:'website_provider_add',uncertain:!rejected,authFailure:authFail,user:username,providerId,serviceId,link,quantity,error:String(e.message||e),createdAt:nowISO()}); return {error:authFail?'مفتاح API للمزود مرفوض أو منتهي':String(e.message||e),uncertain:!rejected,authFailure:authFail};
+      }
+    });
+    if(result?.insufficient)return json(res,402,{ok:false,error:'رصيد المستخدم غير كافٍ',balanceUsd:result.balanceUsd});
+    if(result?.error)return json(res,502,{ok:false,error:result.error,uncertain:!!result.uncertain,authFailure:!!result.authFailure});
+    if(result?.ok){sendTelegram(`🆕 طلب جديد\n🆔 رقم المزود: #${result.order.providerOrderId}\n👤 المستخدم: ${username}\n📦 الخدمة: ${result.order.serviceName}\n🔗 الرابط: ${link}\n🔢 الكمية: ${quantity.toLocaleString('en-US')}\n💰 السعر: $${chargeUsd.toFixed(2)}\n📊 الحالة: Pending\n🕐 الوقت: ${new Date().toLocaleString('en-GB',{hour12:false})}`).catch(()=>{});return json(res,200,{ok:true,providerId,providerName:prov.name||providerId,providerOrderId:String(result.order.providerOrderId),providerRaw:result.order.providerRaw,providerBalanceBefore:null,chargeUsd,totalIQD:chargeIqd,discountPct:userDiscount,createdAt:result.order.createdAt});}
+    return json(res,500,{ok:false,error:'تعذر إنشاء الطلب'});
   }
 
   if(p==='/api/order/status' && req.method==='POST'){
