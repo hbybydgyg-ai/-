@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0a0e1a">
-<title>صدى العراق · v1.3.4</title>
+<title>صدى العراق · v1.3.6</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
@@ -2284,8 +2284,16 @@ body { padding-top: 0 !important; }
 
 
 
+<style id="sadairaq-v135-stack-fix">
+/* v1.3.6 — modal and toast layers must remain clickable above the fixed app shell. */
+#modal-mask { z-index:100000 !important; pointer-events:auto !important; }
+#modal-mask.on { display:flex !important; pointer-events:auto !important; }
+#modal-mask .modal { position:relative; z-index:100001 !important; pointer-events:auto !important; }
+#toasts { z-index:100002 !important; pointer-events:none !important; }
+</style>
+
 <style id="sadairaq-v132-safe-layout">
-/* v1.3.3 — keep original scrolling model; never pin the authenticated app to the viewport. */
+/* v1.3.6 — keep original scrolling model; never pin the authenticated app to the viewport. */
 html, body { width:100%; min-height:100%; overflow-x:hidden; }
 #app { height:100vh; min-height:0; overflow:hidden; }
 #app.on { display:flex; }
@@ -2300,7 +2308,7 @@ html, body { width:100%; min-height:100%; overflow-x:hidden; }
 </style>
 
 <style id="sadairaq-v133-shell-fix">
-/* v1.3.3 — definitive mobile/desktop app shell fix.
+/* v1.3.6 — definitive mobile/desktop app shell fix.
    The authenticated app owns the viewport; only .pc scrolls.
    This prevents the auth/landing document scroll position from pushing the app below the fold. */
 html, body { width:100%; min-width:0; }
@@ -3045,12 +3053,11 @@ body.app-active { overflow:hidden !important; height:100dvh !important; }
               <div id="adm-svcs-content"></div>
             </div>
             <div id="adm-sub-smmparty" class="adm-sub">
-              <div class="adm-sec-hd"><div class="adm-sec-ttl"><i class="fas fa-plug"></i> SMMParty API</div><button class="btn bs2 btn-sm" onclick="loadSmmBal()"><i class="fas fa-rotate-right"></i> الرصيد</button></div>
+              <div class="adm-sec-hd"><div class="adm-sec-ttl"><i class="fas fa-plug"></i> SMMParty API</div><div style="display:flex;gap:7px;flex-wrap:wrap"><button type="button" id="sada-add-provider-btn" class="btn bp btn-sm"><i class="fas fa-plus"></i> إضافة مزود حقيقي</button><button class="btn bs2 btn-sm" onclick="loadSmmBal()"><i class="fas fa-rotate-right"></i> الرصيد</button></div></div>
               <div id="smm-bal" style="margin-bottom:14px"></div>
               <div class="card" style="padding:14px;margin-bottom:12px">
-                <div style="font-size:12px;font-weight:700;color:var(--t1);margin-bottom:10px">إعداد API Key</div>
-                <input class="inp" type="password" id="smm-key-input" placeholder="أدخل API Key" style="margin-bottom:10px">
-                <div style="display:flex;gap:8px"><button class="btn bs2" onclick="testSmmConn()"><i class="fas fa-wifi"></i> اختبار</button><button class="btn bp" onclick="saveSmmKey()"><i class="fas fa-floppy-disk"></i> حفظ</button></div>
+                <div style="font-size:12px;font-weight:800;color:var(--t1);margin-bottom:10px">المزودون المحفوظون</div>
+                <div id="smm-providers-list"></div>
                 <div id="smm-test-out" style="margin-top:8px"></div>
               </div>
               <!-- Toggle: Import & Auto-Exec -->
@@ -4630,6 +4637,13 @@ async function loadSmmBal(){
   }catch(e){el.innerHTML="";el.appendChild(mk("span","bdg br","❌ "+e.message));}
 }
 
+
+function modalQuickSvc(){
+  if(typeof modalAddSvcById === 'function') return modalAddSvcById();
+  try{ toast('❌ أداة إضافة الخدمة غير محمّلة','err'); }catch(_){}
+}
+window.modalQuickSvc=modalQuickSvc;
+
 async function importSmm(){
   if(CFG.settings.importEnabled === false){
     toast("⛔ الاستيراد موقوف — فعّله من إعدادات SMMParty","wrn"); return;
@@ -5632,12 +5646,12 @@ function tgSend(msg){fetch(`https://api.telegram.org/bot${CFG.tg.token}/sendMess
 })();
 </script>
 
-<style id="sadairaq-v134-admin-background-restore">
-/* v1.3.4 — restore the original moving background and original admin navigation presentation. */
+<style id="sadairaq-v136-admin-background-restore">
+/* v1.3.6 — restore the original moving background and original admin navigation presentation. */
 #app.on { background: transparent !important; }
-#app.on .pc { background: rgba(8,17,31,.72) !important; }
-#app.on .adm-main { background: transparent !important; }
-#ks-particles { z-index: 0 !important; opacity: 1 !important; }
+#app.on .pc { background: transparent !important; }
+#app.on .ma, #app.on .pc, #app.on .adm-layout, #app.on .adm-main { background: transparent !important; }
+#ks-particles { z-index: 1 !important; opacity: 1 !important; pointer-events:none !important; }
 .ks-particle { filter: saturate(1.05); }
 
 /* Return admin navigation to its original layout; only spacing/hover remain touch friendly. */
@@ -5667,7 +5681,7 @@ function tgSend(msg){fetch(`https://api.telegram.org/bot${CFG.tg.token}/sendMess
 }
 </style>
 <script>
-/* v1.3.4 — restore native admin navigation logic, keeping the requested real API tools. */
+/* v1.3.6 — restore native admin navigation logic, keeping the requested real API tools. */
 (function(){
   'use strict';
   function showAdminSection(sub,el){
@@ -6691,7 +6705,7 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 ═══════════════════════════════════════════════════════════════ */
 (function(){
   'use strict';
-  const SADA_VERSION='1.3.3';
+  const SADA_VERSION='1.3.6';
   const RATE=1250;
   const ATHIR_NUMBER='07903221783';
     window.SadaIraqVersion=SADA_VERSION;
@@ -6705,11 +6719,14 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
   const statusArabic=s=>({pending:'قيد الانتظار',processing:'قيد التنفيذ',completed:'مكتمل',partial:'جزئي',cancelled:'ملغي',failed:'فشل',refunded:'مسترد'})[s]||safeText(s||'غير معروف');
 
   function addVersionBadge(){
-    if(el('sadairaq-version-badge')) return;
-    const b=document.createElement('div'); b.id='sadairaq-version-badge';
-    b.innerHTML='<i class="fas fa-code-branch"></i> صدى العراق · الإصدار <b>'+SADA_VERSION+'</b>';
-    document.body.appendChild(b);
-    document.title='صدى العراق · v'+SADA_VERSION;
+    let b=el('sadairaq-version-badge');
+    if(!b){
+      b=document.createElement('div'); b.id='sadairaq-version-badge';
+      document.body.appendChild(b);
+    }
+    const applyVersion=v=>{const ver=String(v||SADA_VERSION);b.innerHTML='<i class="fas fa-code-branch"></i> صدى العراق · الإصدار <b>'+ver+'</b>';document.title='صدى العراق · v'+ver;window.SadaIraqVersion=ver;};
+    applyVersion(SADA_VERSION);
+    fetch('/api/health?version_probe='+encodeURIComponent(SADA_VERSION)+'&ts='+Date.now(),{credentials:'include',cache:'no-store',headers:{'Cache-Control':'no-cache'}}).then(r=>r.json()).then(d=>{if(d&&d.version)applyVersion(d.version);}).catch(()=>{});
   }
 
   function addStyles(){
@@ -6974,12 +6991,12 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 
 <script>
 /* ═══════════════════════════════════════════════════════════════
-   صدى العراق v1.3.3 — REAL ADMIN / NO DATA LOSS PATCH
+   صدى العراق v1.3.6 — REAL ADMIN / NO DATA LOSS PATCH
    لا يحذف أي ملف أو دالة قديمة؛ يبدّل الواجهة والوظائف المطلوبة فقط.
 ═══════════════════════════════════════════════════════════════ */
 (function(){
   'use strict';
-  const V='1.3.3', RATE=1250, DEFAULT_WA='https://wa.me/9647762267959';
+  const V='1.3.6', RATE=1250, DEFAULT_WA='https://wa.me/9647762267959';
   const $=id=>document.getElementById(id), txt=v=>String(v??''), api=(p,o)=>fetch(p,Object.assign({credentials:'include',cache:'no-store',headers:{'Content-Type':'application/json'}},o||{})).then(async r=>{const t=await r.text();let d={};try{d=t?JSON.parse(t):{}}catch(_){d={error:t||('HTTP '+r.status)}};if(!r.ok||d.error)throw new Error(d.error||('HTTP '+r.status));return d;});
   const ensure=fn=>document.readyState==='loading'?document.addEventListener('DOMContentLoaded',fn,{once:true}):fn();
   let SECTION_META={};
@@ -7174,18 +7191,24 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
   };
 
   /* ----- clean admin UI and direct settings ----- */
-  function buildCleanAdminMenu(){
-    const host=document.querySelector('#adm-panel .adm-sb');if(!host||host.dataset.v13)return;host.dataset.v13='1';
-    [...host.children].forEach(x=>x.style.display='none');
-    const box=document.createElement('div');box.className='sada-admin-menu';
-    box.innerHTML='<div style="padding:8px 10px 12px;display:flex;align-items:center;gap:8px"><img src="sadairaq-logo.jpg" style="width:42px;height:42px;border-radius:11px;object-fit:cover"><div><div style="font-weight:900;color:var(--t0)">إدارة صدى العراق</div><div style="font-size:9px;color:var(--t2)">الإصدار '+V+'</div></div></div><div class="sada-admin-menu-title">الإدارة الأساسية</div>';
-    const items=[
-      ['services','fa-store','الخدمات'],['cats','fa-layer-group','الأقسام والمنصات'],['smmparty','fa-plug','المزود API'],['orders','fa-cart-shopping','الطلبات'],['users','fa-users','المستخدمون'],['payments','fa-money-bill-transfer','الشحنات'],['settings','fa-gear','الإعدادات']
-    ];
-    items.forEach(([sub,ico,label])=>{const b=document.createElement('button');b.innerHTML='<i class="fas '+ico+'"></i><span>'+label+'</span>';b.onclick=()=>admNavTo(sub,null);box.appendChild(b)});
-    const clean=document.createElement('button');clean.className='danger';clean.innerHTML='<i class="fas fa-broom"></i><span>تنظيف كل البيانات</span>';clean.onclick=window.clearAllAppData;box.appendChild(clean);
-    host.appendChild(box);
+  window.openSadaProviderModal=function(){
+    try{
+      if(typeof modalAddSmmProvider!=='function') throw new Error('نافذة إضافة المزود غير محمّلة');
+      modalAddSmmProvider(function(){ try{ window.loadSmmProviders(); window.loadSmmBal(); }catch(_){} });
+    }catch(e){ try{toast('❌ '+e.message,'err')}catch(_){} }
+  };
+  function bindProviderAddButton(){
+    const b=document.getElementById('sada-add-provider-btn');
+    if(!b || b.dataset.bound==='1') return;
+    b.dataset.bound='1';
+    b.addEventListener('click',function(e){
+      e.preventDefault();
+      e.stopPropagation();
+      window.openSadaProviderModal();
+    });
   }
+  document.addEventListener('DOMContentLoaded',bindProviderAddButton,{once:true});
+  function buildCleanAdminMenu(){ /* v1.3.6: preserve the original native admin sidebar. */ }
   window.renderAdmSettings=function(){
     const el=$('adm-settings-content');if(!el)return;el.innerHTML='';
     const wrap=mk('div');
@@ -7239,21 +7262,6 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
     }catch(e){toast('❌ فشل التنظيف: '+e.message,'err')}
   };
 
-  /* ----- admin navigation: always services, no overview/messages ----- */
-  const oldAdmNav=window.admNavTo;
-  window.admNavTo=function(sub,el){
-    if(sub==='overview'||sub==='messages')sub='services';
-    if(oldAdmNav)oldAdmNav(sub,el);
-    if(sub==='services')loadAdmSvcsFull();
-    if(sub==='cats')loadAdmCatsFull();
-    if(sub==='smmparty'){loadSmmProviders().then(()=>window.loadSmmBal()).catch(()=>{})}
-  };
-  const oldLoadAdmin=window.loadAdminPage;
-  window.loadAdminPage=function(){
-    if(oldLoadAdmin)oldLoadAdmin();
-    setTimeout(()=>{buildCleanAdminMenu();const p=$('adm-panel');if(CU?.role==='admin'&&p){document.querySelectorAll('#adm-panel .adm-sb-item').forEach(x=>x.style.display='none');document.querySelectorAll('#adm-sub-overview,#adm-sub-messages').forEach(x=>x.style.display='none');admNavTo('services',null);}},120);
-  };
-
   /* ----- support URL + settings sync on startup ----- */
   async function syncSettings(){try{const d=await api('/api/settings',{method:'GET'});if(d?.settings){CFG.settings.waUrl=d.settings.waUrl||DEFAULT_WA;CFG.settings.waNum=d.settings.waNum||'9647762267959';}}catch(_){CFG.settings.waUrl=CFG.settings.waUrl||DEFAULT_WA}}
   async function syncSectionMeta(){try{if(FB_OK&&DB){const s=await DB.ref('categoryMeta').once('value');SECTION_META={};if(s.exists())s.forEach(c=>{const v=c.val()||{};if(v.name)SECTION_META[v.name]=v});if(typeof window.parseSvcsArr==='function'&&Array.isArray(ALL_SVCS_ARR))window.parseSvcsArr(ALL_SVCS_ARR);}}catch(_){}}
@@ -7264,7 +7272,7 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
     if(oldLaunch)oldLaunch();
     syncSectionMeta().then(()=>{try{buildCatDD(SEL_PLAT||'all')}catch(_){}});
     setTimeout(()=>{const isAdmin=CU?.role==='admin';const home=$('snav-home');if(home&&!isAdmin)home.style.display='none';if(!isAdmin){const pg=$('pg-home');if(pg)pg.style.display='none';nav('order');}},80);
-    if(CU?.role==='admin')setTimeout(buildCleanAdminMenu,120);
+    if(CU?.role==='admin')setTimeout(()=>{ try{admNavTo('overview',null);}catch(_){} },120);
   };
 
   /* ----- sidebar: exact single logo */
