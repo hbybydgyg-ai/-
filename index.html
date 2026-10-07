@@ -6741,6 +6741,42 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 })();
 </script>
 
+
+<style id="sadairaq-mc-legacy-style-v156">
+.sada-mc-mini{width:58px;height:40px;border-radius:10px;position:relative;overflow:hidden;background:#f5f5f5;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.sada-mc-mini span{position:absolute;width:25px;height:25px;border-radius:50%}.sada-mc-mini span:first-child{background:#eb001b;left:12px}.sada-mc-mini span:last-child{background:#f79e1b;right:12px;mix-blend-mode:multiply}.sada-mc-hero{padding:16px;border-radius:18px;background:linear-gradient(135deg,#17152b,#24213f);border:1px solid rgba(255,255,255,.08)}
+.sada-mc-logo{width:70px;height:48px;border-radius:10px;background:#f5f5f5;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;flex-shrink:0}.sada-mc-logo span{position:absolute;width:32px;height:32px;border-radius:50%}.sada-mc-logo span:first-child{background:#eb001b;left:12px}.sada-mc-logo span:last-child{background:#f79e1b;right:12px;mix-blend-mode:multiply}.sada-mc-steps{margin-top:12px;padding:14px;border-radius:16px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07)}
+.sada-mc-step{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:12px;line-height:1.8;color:var(--t1)}.sada-mc-step:last-child{border-bottom:0}.sada-mc-step b{width:25px;height:25px;border-radius:50%;display:grid;place-items:center;background:#6c5ce7;color:#fff;flex-shrink:0}.sada-mc-number{display:flex;gap:8px;align-items:center;margin-top:6px;padding:11px 12px;border-radius:12px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.08)}.sada-mc-number b{font-family:var(--mono);direction:ltr;font-size:18px;flex:1}.sada-mc-wa{margin-top:12px;width:100%;background:#25d366!important}.sada-mc-proof{margin-top:10px;padding:11px 12px;border-radius:12px;background:rgba(37,211,102,.08);color:#baf5cf;font-size:11px;line-height:1.8}.sada-mc-fees{margin-top:12px;padding:13px;border-radius:14px;background:rgba(255,255,255,.03)}.sada-mc-fee{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:11px}.sada-mc-fee:last-child{border-bottom:0}
+</style>
+<script id="sadairaq-mc-legacy-v156">
+(function(){
+  function mcWa(){
+    const raw=String(CFG?.settings?.waUrl||'https://wa.me/9647762267959');
+    const base=raw.replace(/\?.*$/,'');
+    const text='مرحباً، قمت بتحويل مبلغ شحن عبر ماستر كارد في صدى العراق، وسأرسل لكم صورة إثبات التحويل للتأكيد.';
+    const url=base + (base.includes('?')?'&':'?') + 'text=' + encodeURIComponent(text);
+    window.open(url,'_blank','noopener');
+  }
+  async function legacyMC(){
+    const wallet=$('pg-wallet'); if(!wallet)return;
+    document.getElementById('sadairaq-mastercard-card')?.remove();
+    const card=mk('div','card'); card.id='sadairaq-mastercard-card'; card.style.cssText='max-width:760px;margin:12px auto;padding:0;overflow:hidden';
+    card.innerHTML='<button type="button" id="sada-mc-toggle-v156" style="width:100%;display:flex;align-items:center;gap:14px;text-align:right;background:transparent;color:inherit;cursor:pointer;padding:16px"><div class="sada-mc-mini"><span></span><span></span></div><span style="flex:1"><strong style="display:block;font-size:16px;color:var(--t0)">شحن ماستر كارد</strong><span style="font-size:11px;color:var(--t2)">الدفع بواسطة ماستر كارد — اضغط لعرض التفاصيل</span></span><i class="fas fa-chevron-down"></i></button><div id="sadairaq-mc-details-v156" style="display:none;padding:0 16px 16px"></div>';
+    wallet.appendChild(card);
+    card.querySelector('#sada-mc-toggle-v156').onclick=async()=>{
+      const d=card.querySelector('#sadairaq-mc-details-v156'); if(d.style.display!=='none'){d.style.display='none';return;} d.style.display='block';
+      const mc=await loadMastercard(); if(mc.enabled===false){d.innerHTML='<div class="empty">طريقة الدفع غير مفعلة حالياً.</div>';return;}
+      const image=mc.image?'<img src="'+safe(mc.image)+'" alt="صورة ماستر كارد" style="display:block;width:100%;max-height:230px;object-fit:contain;border-radius:18px;margin-top:14px;background:#fff;padding:8px">':'';
+      d.innerHTML='<div class="sada-mc-hero"><div style="display:flex;align-items:center;gap:12px"><div style="flex:1"><div style="font-size:22px;font-weight:900;color:#fff">شحن ماستر كارد</div><div style="font-size:12px;color:var(--t2);margin-top:3px">الدفع عبر الماستر كارد — خطوات بسيطة</div></div><div class="sada-mc-logo"><span></span><span></span></div></div>'+image+'</div><div class="sada-mc-steps"><div style="font-size:18px;font-weight:900;color:#fff;margin-bottom:5px">التعليمات</div><div class="sada-mc-step"><b>1</b><span>حوّل المبلغ المطلوب إلى رقم ماستر كارد الموضح أدناه.</span></div><div class="sada-mc-step"><b>2</b><span>بعد التحويل خذ Screenshot واضح لإثبات العملية.</span></div><div class="sada-mc-step"><b>3</b><span>اضغط زر واتساب وأرسل صورة إثبات التحويل إلى الدعم الفني.</span></div><div class="sada-mc-step"><b>4</b><span>بعد تأكيد التحويل من الدعم يتم إضافة الرصيد إلى حسابك.</span></div></div><div style="margin-top:12px;font-size:13px;font-weight:900;color:var(--t0)">رقم التحويل (ماستر كارد)</div><div class="sada-mc-number"><b>3494089927</b><button class="btn bp btn-sm" type="button">📋 نسخ</button></div><button class="btn bp btn-lg sada-mc-wa" type="button"><i class="fab fa-whatsapp"></i> إرسال إثبات عبر واتساب الدعم الفني</button><div class="sada-mc-proof">⚠️ لا ترفع الصورة داخل الموقع. بعد التحويل اضغط زر واتساب، ثم أرسل Screenshot إثبات التحويل للدعم الفني مباشرة داخل واتساب.</div>';
+      d.querySelector('.sada-mc-number button')?.addEventListener('click',()=>copyText('3494089927',d.querySelector('.sada-mc-number button')));
+      d.querySelector('.sada-mc-wa')?.addEventListener('click',mcWa);
+    };
+  }
+  window.addMastercardUserCard=legacyMC; window.addMC=legacyMC; window.openMastercardWhatsApp=mcWa;
+  const oldNav=window.nav; window.nav=function(name){const r=oldNav?oldNav.apply(this,arguments):undefined;if(name==='wallet')setTimeout(legacyMC,100);return r};
+  setTimeout(()=>{if($('pg-wallet'))legacyMC()},300);
+})();
+</script>
 </body>
 </html>
 <script>
@@ -7366,7 +7402,7 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 <script>
 (function(){
 'use strict';
-const V='1.5.4';
+const V='1.5.6';
 const $=id=>document.getElementById(id);
 const safe=v=>String(v??'').replace(/[&<>\"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[m]));
 const api=window.apiJSON||((p,o)=>fetch(p,Object.assign({credentials:'include',cache:'no-store',headers:{'Content-Type':'application/json'}},o||{})).then(async r=>{const t=await r.text();let d={};try{d=t?JSON.parse(t):{}}catch(_){d={error:t}}if(!r.ok||d.error)throw new Error(d.error||('HTTP '+r.status));return d;}));
@@ -7507,7 +7543,7 @@ setTimeout(init140,1200);
 })();
 
 </script>
-<!-- Sada Iraq v1.5.4 security + services repair block -->
+<!-- Sada Iraq v1.5.6 provider import fix + services repair block -->
 <style id="sadairaq-v152-repair">
 #sadairaq-v152-actions{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 12px}
 #sadairaq-v152-actions .btn{min-height:38px;font-weight:800}
@@ -7533,6 +7569,7 @@ setTimeout(init140,1200);
 </style>
 <script>
 (function(){'use strict';
+const RATE=1250;
 const qSafe=window.safe||function(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))};
 const qMk=window.mk||function(tag,cls,txt){const e=document.createElement(tag);if(cls)e.className=cls;if(txt!==undefined)e.textContent=txt;return e};
 const qApi=window.apiJSON||((p,o)=>fetch(p,Object.assign({credentials:'include',cache:'no-store',headers:{'Content-Type':'application/json'}},o||{})).then(async r=>{const t=await r.text();let d={};try{d=t?JSON.parse(t):{}}catch(_){d={error:t}}if(!r.ok||d.error)throw new Error(d.error||('HTTP '+r.status));return d;}));
