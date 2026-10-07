@@ -8,7 +8,7 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
@@ -86,9 +86,10 @@ function normalizeProviderBalance(d){
 function normalizeProviderCurrency(d){
   return String(d?.currency||d?.data?.currency||d?.result?.currency||d?.account?.currency||'USD').toUpperCase();
 }
-function providerActionSucceeded(action,d){
-  if(action==='cancel') return d?.cancel===1 || d?.cancel==='1' || d?.success===true || String(d?.status||'').toLowerCase()==='cancelled';
-  return true;
+function providerActionSucceeded(action,d,orderId=''){
+  if(action!=='cancel') return true;
+  if(Array.isArray(d)) return d.some(x=>String(x?.order||'')===String(orderId) && (x?.cancel===1 || x?.cancel==='1' || x?.success===true));
+  return d?.cancel===1 || d?.cancel==='1' || d?.success===true || String(d?.status||'').toLowerCase()==='cancelled';
 }
 function normalizeWhatsAppUrl(v){
   const raw=String(v||'').trim();
@@ -103,9 +104,38 @@ function normalizeWhatsAppNumber(v){
 }
 async function providerRequest(prov,params,timeoutMs=30000){
   if(!prov?.url||!prov?.key) throw new Error('بيانات المزود غير مكتملة');
-  const payload=new URLSearchParams(); payload.set('key',String(prov.key)); Object.entries(params||{}).forEach(([k,v])=>{if(v!==undefined&&v!==null&&String(v)!=='')payload.set(k,String(v));});
-  const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),timeoutMs);
-  try{ const r=await fetch(prov.url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'},body:payload.toString(),redirect:'follow',signal:controller.signal}); const text=await r.text(); let d={}; try{d=text?JSON.parse(text):{};}catch(_){d={raw:text};} if(!r.ok) throw new Error(`مزود SMM أعاد HTTP ${r.status}`); if(d?.error) throw new Error(String(d.error)); return d; } finally{clearTimeout(timer);} }
+  const rawUrl=String(prov.url).trim();
+  const base=rawUrl.replace(/\/+$/,'');
+  const endpoints=[base,base+'/'].filter((v,i,a)=>a.indexOf(v)===i);
+  const payload=new URLSearchParams();
+  payload.set('key',String(prov.key));
+  Object.entries(params||{}).forEach(([k,v])=>{if(v!==undefined&&v!==null&&String(v)!=='')payload.set(k,String(v));});
+  let lastError=null;
+  for(const endpoint of endpoints){
+    for(let attempt=1;attempt<=3;attempt++){
+      const controller=new AbortController();
+      const timer=setTimeout(()=>controller.abort(),timeoutMs);
+      try{
+        const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8','Accept':'application/json,text/plain,*/*','User-Agent':'SadaIraq/1.5.0'},body:payload.toString(),redirect:'follow',signal:controller.signal});
+        const text=await r.text();
+        let d={};
+        try{d=text?JSON.parse(text):{};}catch(_){d={raw:text};}
+        if(!r.ok){
+          const err=new Error(`مزود SMM أعاد HTTP ${r.status}`); err.retryable=r.status===408||r.status===425||r.status===429||r.status>=500; throw err;
+        }
+        if(d&&typeof d==='object'&&d.error) throw new Error(String(d.error));
+        return d;
+      }catch(e){
+        lastError=e;
+        const retryable=e?.name==='AbortError'||e?.retryable;
+        if(retryable&&attempt<3){await new Promise(r=>setTimeout(r,250*attempt));continue;}
+        break;
+      }finally{clearTimeout(timer);}
+    }
+  }
+  if(lastError?.name==='AbortError') throw lastError;
+  throw lastError||new Error('تعذر الاتصال بالمزود');
+}
 function userFromSession(req){ const s=session(req); return s?.role==='user' ? String(s.username||'') : ''; }
 function appendJsonLedger(file,entry){ const arr=readJSON(file,[]); const next=Array.isArray(arr)?arr:[]; next.push(entry); writeJSON(file,next.slice(-5000)); }
 function normalizedPath(p){
@@ -210,7 +240,7 @@ async function apiSmm(req,res,urlObj){
   const action=String(urlObj.searchParams.get('action')||'balance');
   if(!['balance','services','add','status','cancel'].includes(action))return json(res,422,{error:'عملية غير مدعومة'});
   if(!isAdmin(req))return json(res,403,{error:'غير مصرح'});
-  const payload={action}; for(const k of ['service','link','quantity','order']){if(urlObj.searchParams.has(k))payload[k]=urlObj.searchParams.get(k);}
+  const payload={action}; for(const k of ['service','link','quantity','order','orders']){if(urlObj.searchParams.has(k))payload[k]=urlObj.searchParams.get(k);} if(action==='cancel' && payload.orders===undefined && payload.order!==undefined){payload.orders=payload.order;delete payload.order;}
   try{
     const d=await providerRequest(prov,payload);
     if(action==='balance'){
@@ -269,13 +299,16 @@ async function routeAPI(req,res,urlObj){
     if(!/^https?:\/\//i.test(prov.url)||!prov.key)return json(res,422,{ok:false,error:'رابط API أو مفتاح API غير صالح'});
     const out={connection:{ok:false},balance:{ok:false},services:{ok:false}};
     try{
-      const bd=await providerRequest(prov,{action:'balance'}); const balance=normalizeProviderBalance(bd); if(balance===null) throw new Error('الاتصال نجح لكن API لم يرجع رصيداً رقمياً');
-      out.connection={ok:true}; out.balance={ok:true,balance,currency:normalizeProviderCurrency(bd)};
-    }catch(e){ out.connection={ok:false,error:e.message}; return json(res,502,{ok:false,diagnostics:out}); }
+      const bd=await providerRequest(prov,{action:'balance'}); const balance=normalizeProviderBalance(bd);
+      if(balance===null) throw new Error('API لم يرجع رصيداً رقمياً');
+      out.connection={ok:true}; out.balance={ok:true,balance,currency:normalizeProviderCurrency(bd),raw:bd};
+    }catch(e){ out.balance={ok:false,error:e.name==='AbortError'?'انتهت مهلة جلب الرصيد':e.message}; }
     try{
       const sd=await providerRequest(prov,{action:'services'}); const list=Array.isArray(sd)?sd:(Array.isArray(sd.services)?sd.services:(Array.isArray(sd.data)?sd.data:[]));
-      out.services={ok:true,count:list.length};
-    }catch(e){ out.services={ok:false,error:e.message}; }
+      if(!list.length) throw new Error('المزود لم يرجع أي خدمات');
+      out.services={ok:true,count:list.length}; out.connection={ok:true};
+    }catch(e){ out.services={ok:false,error:e.name==='AbortError'?'انتهت مهلة جلب الخدمات':e.message}; }
+    if(!out.connection.ok) out.connection={ok:false,error:out.balance.error||out.services.error||'فشل الاتصال بالمزود'};
     return json(res,200,{ok:out.connection.ok&&out.balance.ok&&out.services.ok,diagnostics:out});
   }
   if(p==='/api/admin/notifications' && req.method==='GET'){
@@ -297,23 +330,31 @@ async function routeAPI(req,res,urlObj){
   if(p==='/api/provider/balance' && req.method==='GET'){ if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'}); const {prov,pid}=getProviderById(urlObj.searchParams.get('provider')); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'}); try{const d=await providerRequest(prov,{action:'balance'}); const balance=normalizeProviderBalance(d); if(balance===null)return json(res,502,{ok:false,error:'المزود لم يرجع قيمة رصيد صالحة',raw:d}); return json(res,200,{ok:true,providerId:pid,providerName:prov.name||pid,balance,currency:normalizeProviderCurrency(d),raw:d,checkedAt:new Date().toISOString()});}catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});} }
   if(p==='/api/provider/test' && req.method==='POST'){
     if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
-    const b=await bodyJSON(req);
-    const prov={name:String(b.name||'مزود مؤقت'),url:String(b.url||'').trim(),key:String(b.key||'').trim()};
+    const b=await bodyJSON(req); const prov={name:String(b.name||'مزود مؤقت'),url:String(b.url||'').trim(),key:String(b.key||'').trim()};
     if(!/^https?:\/\//i.test(prov.url)||!prov.key) return json(res,422,{ok:false,error:'رابط API أو مفتاح API غير صالح'});
-    try{
-      const d=await providerRequest(prov,{action:'balance'});
-      const balance=normalizeProviderBalance(d);
-      if(balance===null) return json(res,502,{ok:false,error:'تم الوصول إلى المزود لكنه لم يرجع رصيداً رقمياً',providerResponse:d});
-      return json(res,200,{ok:true,balance,currency:normalizeProviderCurrency(d),providerName:prov.name,checkedAt:new Date().toISOString(),raw:d});
-    }catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});}
+    const out={connection:{ok:false},balance:{ok:false},services:{ok:false}};
+    try{ const d=await providerRequest(prov,{action:'balance'}); const balance=normalizeProviderBalance(d); if(balance===null) throw new Error('API لم يرجع رصيداً رقمياً'); out.connection={ok:true}; out.balance={ok:true,balance,currency:normalizeProviderCurrency(d)}; }
+    catch(e){ out.balance={ok:false,error:e.name==='AbortError'?'انتهت مهلة جلب الرصيد':e.message}; }
+    try{ const d=await providerRequest(prov,{action:'services'}); const list=Array.isArray(d)?d:(d.services||d.data||[]); out.services={ok:Array.isArray(list)&&list.length>0,count:Array.isArray(list)?list.length:0,error:Array.isArray(list)&&list.length?'':'لم يرجع خدمات'}; if(out.services.ok) out.connection={ok:true}; }
+    catch(e){ out.services={ok:false,error:e.name==='AbortError'?'انتهت مهلة جلب الخدمات':e.message}; }
+    if(!out.connection.ok) out.connection={ok:false,error:out.balance.error||out.services.error||'فشل الاتصال بالمزود'};
+    return json(res,200,{ok:out.connection.ok&&out.balance.ok&&out.services.ok,providerName:prov.name,diagnostics:out,checkedAt:new Date().toISOString()});
   }
   if(p==='/api/order/create' && req.method==='POST'){
     const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'});
     const b=await bodyJSON(req); const providerId=String(b.providerId||''); const serviceId=String(b.serviceId||''); const link=String(b.link||'').trim(); const quantity=Number(b.quantity);
     if(!providerId||!serviceId||!link||!Number.isInteger(quantity)||quantity<=0)return json(res,422,{ok:false,error:'بيانات الطلب غير مكتملة'});
     const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود المرتبط بالخدمة غير موجود'});
-    try{const d=await providerRequest(prov,{action:'add',service:serviceId,link,quantity}); if(!d||d.order===undefined||d.order===null||String(d.order)==='')return json(res,502,{ok:false,error:'المزود لم يرجع رقم طلب حقيقي',providerResponse:d}); const providerOrderId=String(d.order); appendJsonLedger('orders.json',{localId:String(b.localId||''),user:username,providerId,providerOrderId,serviceId,link,quantity,status:'pending',createdAt:new Date().toISOString()}); return json(res,200,{ok:true,providerId,providerName:prov.name||providerId,providerOrderId,providerRaw:d,createdAt:new Date().toISOString()});}
-    catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});}
+    try{
+      const bd=await providerRequest(prov,{action:'balance'});
+      const balance=normalizeProviderBalance(bd);
+      if(balance===null) return json(res,502,{ok:false,error:'تعذر التحقق من رصيد المزود الحقيقي قبل إنشاء الطلب'});
+      const d=await providerRequest(prov,{action:'add',service:serviceId,link,quantity});
+      if(!d||d.order===undefined||d.order===null||String(d.order)==='')return json(res,502,{ok:false,error:'المزود لم يرجع رقم طلب حقيقي',providerResponse:d});
+      const providerOrderId=String(d.order);
+      appendJsonLedger('orders.json',{localId:String(b.localId||''),user:username,providerId,providerOrderId,serviceId,link,quantity,status:'pending',providerBalanceBefore:balance,createdAt:new Date().toISOString()});
+      return json(res,200,{ok:true,providerId,providerName:prov.name||providerId,providerOrderId,providerRaw:d,providerBalanceBefore:balance,createdAt:new Date().toISOString()});
+    }catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});}
   }
   if(p==='/api/order/status' && req.method==='POST'){
     const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'}); const b=await bodyJSON(req); const providerId=String(b.providerId||''); const providerOrderId=String(b.providerOrderId||''); if(!providerId||!providerOrderId)return json(res,422,{ok:false,error:'بيانات التحقق ناقصة'}); const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
@@ -322,7 +363,7 @@ async function routeAPI(req,res,urlObj){
   }
   if(p==='/api/order/cancel' && req.method==='POST'){
     const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'}); const b=await bodyJSON(req); const providerId=String(b.providerId||''); const providerOrderId=String(b.providerOrderId||''); if(!providerId||!providerOrderId)return json(res,422,{ok:false,error:'بيانات الإلغاء ناقصة'}); const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
-    try{const d=await providerRequest(prov,{action:'cancel',order:providerOrderId}); if(!providerActionSucceeded('cancel',d)) return json(res,502,{ok:false,error:'المزود لم يؤكد إلغاء الطلب',providerRaw:d}); appendJsonLedger('orders.json',{event:'cancel',user:username,providerId,providerOrderId,status:'cancelled',createdAt:new Date().toISOString(),providerRaw:d}); return json(res,200,{ok:true,providerOrderId,status:'cancelled',providerRaw:d,updatedAt:new Date().toISOString()});}
+    try{const d=await providerRequest(prov,{action:'cancel',orders:providerOrderId}); if(!providerActionSucceeded('cancel',d,providerOrderId)) return json(res,502,{ok:false,error:'المزود لم يؤكد إلغاء الطلب',providerRaw:d}); appendJsonLedger('orders.json',{event:'cancel',user:username,providerId,providerOrderId,status:'cancelled',createdAt:new Date().toISOString(),providerRaw:d}); return json(res,200,{ok:true,providerOrderId,status:'cancelled',providerRaw:d,updatedAt:new Date().toISOString()});}
     catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});}
   }
   if(p==='/api/logout'){
