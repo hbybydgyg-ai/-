@@ -1,11 +1,10 @@
-<!-- صدى العراق | قاعدة بيانات مستقلة: sadairaq_v1 | العملة: USD | الأدمن الجديد مفعّل -->
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0a0e1a">
-<title>صدى العراق · لوحة الخدمات والتسويق</title>
+<title>صدى العراق · لوحة التسويق الاجتماعي</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
@@ -2236,11 +2235,23 @@ body { padding-top: 0 !important; }
 }
 
 
-/* صدى العراق — الشعار الرسمي */
-.sada-logo-auth{width:64px;height:64px;object-fit:cover;border-radius:16px;display:block;box-shadow:0 8px 28px rgba(0,0,0,.35);pointer-events:none}
-.sada-logo-sidebar{width:34px;height:34px;object-fit:cover;border-radius:9px;display:block;flex-shrink:0;box-shadow:0 4px 14px rgba(0,0,0,.25);pointer-events:none}
-.afp-logo{align-items:center}
-@media(max-width:768px){.sada-logo-auth{width:58px;height:58px}}
+/* ── صدى العراق branding ── */
+.sada-logo{width:56px;height:56px;border-radius:16px;object-fit:cover;display:block;box-shadow:0 10px 30px rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.08)}
+.sada-logo-sm{width:34px;height:34px;border-radius:10px;object-fit:cover;display:block;box-shadow:0 6px 18px rgba(0,0,0,.3)}
+.sada-logo-xl{width:92px;height:92px;border-radius:24px;object-fit:cover;display:block;margin:0 auto 14px;box-shadow:0 14px 40px rgba(0,0,0,.4)}
+.asiacell-card{position:relative;overflow:hidden;border-color:rgba(48,221,199,.22)!important;background:linear-gradient(145deg,rgba(13,31,37,.95),rgba(13,24,41,.96))}
+.asiacell-card:before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 85% 10%,rgba(48,221,199,.10),transparent 34%);pointer-events:none}
+.ac-step{background:var(--bg2);border:1px solid var(--bd);border-radius:10px;padding:10px 12px;margin-top:8px}
+.ac-step-title{font-size:11px;font-weight:800;color:var(--t0);display:flex;gap:7px;align-items:center}
+.ac-step-num{width:22px;height:22px;border-radius:7px;background:var(--ts);color:var(--teal);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;flex-shrink:0}
+.ac-amounts{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:10px}
+.ac-amt{background:var(--bg1);border:1px solid var(--bd);border-radius:9px;padding:9px 5px;text-align:center;color:var(--t0);cursor:pointer;transition:var(--tr);font-family:var(--font)}
+.ac-amt:hover{border-color:var(--teal);transform:translateY(-1px)}
+.ac-amt.on{border-color:var(--teal);background:var(--ts);box-shadow:0 0 0 1px var(--teal)}
+.ac-amt .iqd{font-size:12px;font-weight:900}.ac-amt .usd{font-size:10px;color:var(--teal);margin-top:2px}
+.ac-rate{padding:10px 12px;border-radius:10px;background:rgba(61,232,160,.07);border:1px solid rgba(61,232,160,.16);color:var(--grn);font-size:11px;font-weight:800;margin:10px 0}
+.ac-note{font-size:10px;color:var(--t2);line-height:1.65;margin-top:8px}
+.ac-status{font-size:11px;margin-top:8px;min-height:20px}
 </style>
 
 </head>
@@ -2255,7 +2266,7 @@ body { padding-top: 0 !important; }
   <div class="ks-marquee-track">
     <span class="ks-marquee-item"><i class="fas fa-crown"></i> صدى العراق</span>
     <span class="ks-marquee-sep"></span>
-    <span class="ks-marquee-item"><i class="fab fa-instagram"></i> إنستغرام</span>
+    <span class="ks-marquee-item"><i class="fab fa-instagram"></i> انستجرام</span>
     <span class="ks-marquee-sep"></span>
     <span class="ks-marquee-item"><i class="fab fa-tiktok"></i> تيك توك</span>
     <span class="ks-marquee-sep"></span>
@@ -2280,7 +2291,7 @@ body { padding-top: 0 !important; }
     <!-- duplicate for seamless loop -->
     <span class="ks-marquee-item"><i class="fas fa-crown"></i> صدى العراق</span>
     <span class="ks-marquee-sep"></span>
-    <span class="ks-marquee-item"><i class="fab fa-instagram"></i> إنستغرام</span>
+    <span class="ks-marquee-item"><i class="fab fa-instagram"></i> انستجرام</span>
     <span class="ks-marquee-sep"></span>
     <span class="ks-marquee-item"><i class="fab fa-tiktok"></i> تيك توك</span>
     <span class="ks-marquee-sep"></span>
@@ -2392,14 +2403,14 @@ body { padding-top: 0 !important; }
             <div class="ks-feat-ico" style="background:linear-gradient(135deg,#fdcb6e,#e17055)"><i class="fas fa-headset"></i></div>
             <div class="ks-feat-body">
               <div class="ks-feat-title">دعم فني بشري ٢٤/٧</div>
-              <div class="ks-feat-desc">فريق دعمنا جاهز لمساعدتك في أي وقت عبر تيليغرام أو واتساب. لا روبوتات، دعم بشري حقيقي.</div>
+              <div class="ks-feat-desc">فريق دعمنا جاهز لمساعدتك في أي وقت عبر تلجرام أو واتساب. لا روبوتات، دعم بشري حقيقي.</div>
             </div>
           </div>
           <div class="ks-feat-card">
             <div class="ks-feat-ico" style="background:linear-gradient(135deg,#74b9ff,#0984e3)"><i class="fas fa-layer-group"></i></div>
             <div class="ks-feat-body">
               <div class="ks-feat-title">أكثر من ٥٠٠ خدمة</div>
-              <div class="ks-feat-desc">إنستغرام، تيك توك، يوتيوب، فيسبوك، تويتر، سناب، تيليجرام، لينكد إن — كل المنصات في مكان واحد.</div>
+              <div class="ks-feat-desc">انستجرام، تيك توك، يوتيوب، فيسبوك، تويتر، سناب، تيليجرام، لينكد إن — كل المنصات في مكان واحد.</div>
             </div>
           </div>
           <div class="ks-feat-card">
@@ -2423,7 +2434,7 @@ body { padding-top: 0 !important; }
               <div class="ks-review-av" style="background:linear-gradient(135deg,#6c5ce7,#fd79a8)">أ</div>
               <div>
                 <div class="ks-review-name">أحمد السيد</div>
-                <div class="ks-review-role"><i class="fab fa-instagram" style="color:#e1306c"></i> مؤثر · ١٠٠K+</div>
+                <div class="ks-review-role"><i class="fab fa-instagram" style="color:#e1306c"></i> انفلونسر · ١٠٠K+</div>
               </div>
             </div>
           </div>
@@ -2485,14 +2496,17 @@ body { padding-top: 0 !important; }
   </div>
   <div class="auth-form-panel" id="auth-form-panel">
     <div class="auth-form-inner">
-      <div class="afp-logo"><img class="sada-logo-auth" src="sadairaq-logo.jpg" alt="صدى العراق"><div class="afp-logo-name">صدى العراق</div></div>
+      <div class="afp-logo">
+        <img src="sadairaq-logo.jpg" class="sada-logo-sm" alt="صدى العراق">
+        <div class="afp-logo-name">صدى العراق</div>
+      </div>
       <div id="box-login">
         <div class="form-title">تسجيل الدخول</div>
         <div class="form-sub">أدخل بياناتك للوصول إلى حسابك</div>
         <div id="err-login" class="auth-err"><i class="fas fa-circle-exclamation"></i><span id="err-login-t"></span></div>
-        <div class="fg"><label>البريد الإلكتروني أو اسم المستخدم</label>
+        <div class="fg"><label>اسم المستخدم</label>
           <div class="fi-wrap"><i class="fi-right-ico fas fa-user"></i>
-            <input id="l-user" class="fi" type="text" placeholder="أدخل البريد الإلكتروني أو اسم المستخدم" autocomplete="username" style="padding-right:38px;padding-left:12px"></div></div>
+            <input id="l-user" class="fi" type="text" placeholder="أدخل اسم المستخدم" autocomplete="username" style="padding-right:38px;padding-left:12px"></div></div>
         <div class="fg"><label>كلمة المرور</label>
           <div class="fi-wrap"><i class="fi-right-ico fas fa-lock"></i>
             <input id="l-pass" class="fi" type="password" placeholder="كلمة المرور" style="padding-right:38px">
@@ -2511,7 +2525,7 @@ body { padding-top: 0 !important; }
         <div class="fg"><label>كلمة المرور</label>
           <div class="fi-wrap"><i class="fi-right-ico fas fa-lock"></i><input id="r-pass" class="fi" type="password" placeholder="4 أحرف على الأقل" style="padding-right:38px">
             <button class="fi-eye" id="eye2" onclick="toggleEye('r-pass','eye2')"><i class="fas fa-eye"></i></button></div></div>
-        <div class="fg"><label>تيليغرام <span class="opt">(اختياري)</span></label>
+        <div class="fg"><label>تلجرام <span class="opt">(اختياري)</span></label>
           <div class="fi-wrap"><i class="fi-right-ico fab fa-telegram"></i><input id="r-tg" class="fi" type="text" placeholder="بدون @" style="padding-right:38px;padding-left:12px"></div></div>
         <div class="fg"><label>رقم الهاتف</label>
           <div class="fi-wrap"><i class="fi-right-ico fas fa-phone"></i><input id="r-ph" class="fi" type="text" placeholder="01012345678" style="padding-right:38px;padding-left:12px"></div></div>
@@ -2537,7 +2551,17 @@ body { padding-top: 0 !important; }
   <div class="sb" id="sb">
     <!-- Close button (mobile only) -->
     <div class="sb-top" style="justify-content:space-between">
-      <div class="sb-logo-wrap"><img class="sada-logo-sidebar" src="sadairaq-logo.jpg" alt="صدى العراق"><span class="sb-logo-name">صدى العراق</span></div>
+      <div class="sb-logo-wrap">
+        <svg class="sb-logo-svg" viewBox="0 0 28 28" fill="none">
+          <rect width="28" height="28" rx="8" fill="url(#logo-g1)"/>
+          <path d="M7 14C7 10.134 10.134 7 14 7C17.866 7 21 10.134 21 14" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M9.5 14C9.5 11.515 11.515 9.5 14 9.5C16.485 9.5 18.5 11.515 18.5 14" stroke="rgba(255,255,255,0.55)" stroke-width="1.8" stroke-linecap="round"/>
+          <circle cx="14" cy="14" r="2.5" fill="white"/>
+          <path d="M14 16.5V21" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <img src="sadairaq-logo.jpg" class="sada-logo-sm" alt="صدى العراق">
+        <span class="sb-logo-name">صدى العراق</span>
+      </div>
       <button onclick="closeSB()" class="sb-close-btn" title="إغلاق"><i class="fas fa-times"></i></button>
     </div>
 
@@ -2548,7 +2572,7 @@ body { padding-top: 0 !important; }
         <div style="padding:4px 10px 10px">
           <div class="cdd" id="sb-cur-cdd">
             <button class="cdd-trigger" id="sb-cur-btn" onclick="toggleCDD('sb-cur-cdd',event)" style="width:100%">
-              <span class="cdd-icon" id="sb-cur-fl" style="font-size:18px">🇪🇬</span>
+              <span class="cdd-icon" id="sb-cur-fl" style="font-size:18px">🇺🇸</span>
               <span class="cdd-label" id="sb-cur-cd" style="font-weight:800">USD</span>
               <i class="fas fa-chevron-down cdd-arrow"></i>
             </button>
@@ -2586,6 +2610,7 @@ body { padding-top: 0 !important; }
     <!-- Topbar -->
     <div class="tb">
       <button class="tb-ham" onclick="toggleSB()"><i class="fas fa-bars"></i></button>
+      <img src="sadairaq-logo.jpg" class="sada-logo-sm" alt="صدى العراق" style="margin-right:2px">
       <span class="tb-pg" id="pg-ttl">لوحة التحكم</span>
       <div class="tb-sp"></div>
       <!-- Balance badge (compact) -->
@@ -2722,13 +2747,7 @@ body { padding-top: 0 !important; }
 
       <!-- WALLET PAGE -->
       <div id="pg-wallet" class="pg">
-        <div class="pg-hd"><h1>المحفظة والشحن</h1><p>إدارة رصيدك وطرق الدفع</p></div>
-        <div class="card" style="background:linear-gradient(135deg,rgba(61,232,160,.08),rgba(91,164,255,.08));border-color:rgba(61,232,160,.2);margin-bottom:14px">
-          <div style="display:flex;align-items:center;gap:10px">
-            <div style="width:38px;height:38px;border-radius:10px;background:var(--gs);display:flex;align-items:center;justify-content:center;color:var(--grn)"><i class="fas fa-coins"></i></div>
-            <div><div style="font-weight:900;color:var(--t0)">سعر الصرف الثابت</div><div style="font-size:12px;color:var(--grn);margin-top:2px">5,000 د.ع = 4 USD · 1 USD = 1,250 د.ع</div></div>
-          </div>
-        </div>
+        <div class="pg-hd"><h1>المحفظة والشحن</h1><p>إدارة رصيدك وطرق الدفع · العملة الرسمية USD · 5,000 د.ع = $4.00</p></div>
         <div class="g2" style="align-items:start">
           <div>
             <div class="bal-card" style="margin-bottom:12px">
@@ -2741,6 +2760,39 @@ body { padding-top: 0 !important; }
               <div id="pm-list" class="pms"></div>
               <div id="pm-form"></div>
               <button class="btn bp btn-w btn-lg" onclick="submitPay()"><i class="fas fa-paper-plane"></i> إرسال طلب الشحن</button>
+            </div>
+            <div class="card asiacell-card" id="asiacell-card">
+              <div class="card-hd"><div class="card-ttl"><i class="fas fa-mobile-screen-button" style="color:var(--teal)"></i> شحن آسياسيل</div><span class="bdg bg">تحويل مباشر</span></div>
+              <div class="ac-rate"><i class="fas fa-repeat"></i> سعر الصرف ثابت: 5,000 د.ع = 4.00 USD · 1 USD = 1,250 د.ع</div>
+              <div class="ac-step">
+                <div class="ac-step-title"><span class="ac-step-num">1</span> أدخل رقم آسياسيل</div>
+                <div style="display:flex;gap:7px;margin-top:8px">
+                  <input class="inp" id="ac-phone" inputmode="tel" placeholder="077xxxxxxxx" autocomplete="tel">
+                  <button class="btn bp" id="ac-login-btn" onclick="acRequestLogin()" style="flex-shrink:0"><i class="fas fa-message"></i> إرسال الكود</button>
+                </div>
+              </div>
+              <div class="ac-step" id="ac-step-sms" style="display:none">
+                <div class="ac-step-title"><span class="ac-step-num">2</span> أدخل رمز SMS</div>
+                <div style="display:flex;gap:7px;margin-top:8px">
+                  <input class="inp" id="ac-sms" inputmode="numeric" placeholder="رمز التحقق">
+                  <button class="btn bp" id="ac-sms-btn" onclick="acVerifyLogin()" style="flex-shrink:0">تحقق</button>
+                </div>
+              </div>
+              <div class="ac-step" id="ac-step-amount" style="display:none">
+                <div class="ac-step-title"><span class="ac-step-num">3</span> اختر مبلغ التحويل</div>
+                <div class="ac-amounts" id="ac-amounts"></div>
+                <button class="btn bp btn-w" id="ac-start-transfer" onclick="acStartTransfer()" style="margin-top:9px"><i class="fas fa-paper-plane"></i> إرسال طلب التحويل</button>
+              </div>
+              <div class="ac-step" id="ac-step-confirm" style="display:none">
+                <div class="ac-step-title"><span class="ac-step-num">4</span> رمز تأكيد التحويل</div>
+                <div style="font-size:10px;color:var(--t2);margin-top:6px">سيتم تحويل المبلغ إلى الرقم الثابت الموجود في إعدادات الموقع.</div>
+                <div style="display:flex;gap:7px;margin-top:8px">
+                  <input class="inp" id="ac-confirm" inputmode="numeric" placeholder="رمز التحويل">
+                  <button class="btn bok" id="ac-confirm-btn" onclick="acConfirmTransfer()" style="flex-shrink:0">تأكيد التحويل</button>
+                </div>
+              </div>
+              <div class="ac-status" id="ac-status"></div>
+              <div class="ac-note"><i class="fas fa-shield-halved"></i> رمز SMS يستخدم للتحقق من ملكية الخط فقط، والعملية تتم عبر خادم الموقع إلى واجهة آسياسيل.</div>
             </div>
           </div>
           <div class="card">
@@ -2758,8 +2810,8 @@ body { padding-top: 0 !important; }
             <label>من عملة</label>
             <div class="cdd" id="cv-from-cdd">
               <button class="cdd-trigger" id="cv-from-btn" onclick="toggleCDD('cv-from-cdd',event)" style="width:100%">
-                <span id="cv-from-flag" style="font-size:18px">🇪🇬</span>
-                <span id="cv-from-code" style="font-weight:800">USD</span>
+                <span id="cv-from-flag" style="font-size:18px">🇮🇶</span>
+                <span id="cv-from-code" style="font-weight:800">IQD</span>
                 <i class="fas fa-chevron-down cdd-arrow"></i>
               </button>
               <div class="cdd-menu" id="cv-from-menu"></div>
@@ -2787,7 +2839,7 @@ body { padding-top: 0 !important; }
           <div id="cv-rate-info" style="text-align:center;font-size:11px;color:var(--t2);margin-bottom:6px"></div>
         </div>
         <div class="card" style="max-width:480px;margin:12px auto">
-          <div style="font-size:12px;font-weight:700;color:var(--t1);margin-bottom:10px"><i class="fas fa-table-cells"></i> جدول العملات (مقابل USD)</div>
+          <div style="font-size:12px;font-weight:700;color:var(--t1);margin-bottom:10px"><i class="fas fa-table-cells"></i> جدول العملات (مقابل الدولار الأمريكي)</div>
           <div id="cv-table"></div>
         </div>
       </div>
@@ -2808,7 +2860,7 @@ body { padding-top: 0 !important; }
             <div class="card" style="margin-bottom:10px">
               <div class="card-hd"><div class="card-ttl"><i class="fas fa-phone-volume"></i> تواصل معنا</div></div>
               <div style="display:flex;flex-direction:column;gap:8px">
-                <button class="btn bs2 btn-w" onclick="openTG()"><i class="fab fa-telegram" style="color:#2CA5E0;font-size:15px"></i> تيليغرام</button>
+                <button class="btn bs2 btn-w" onclick="openTG()"><i class="fab fa-telegram" style="color:#2CA5E0;font-size:15px"></i> تلجرام</button>
                 <button class="btn bs2 btn-w" onclick="openWA()"><i class="fab fa-whatsapp" style="color:#25d366;font-size:15px"></i> واتساب</button>
               </div>
             </div>
@@ -2825,7 +2877,7 @@ body { padding-top: 0 !important; }
                 </details>
                 <details style="background:var(--bg2);border-radius:var(--r);padding:10px 12px;cursor:pointer">
                   <summary style="font-size:12px;font-weight:700;color:var(--t0);list-style:none">ما هي طرق الدفع المتاحة؟</summary>
-                  <p style="font-size:11px;color:var(--t2);margin-top:6px;line-height:1.6">محفظة فودافون كاش، إنستاباي، USDT TRC20، Wise، وتحويل بنكي.</p>
+                  <p style="font-size:11px;color:var(--t2);margin-top:6px;line-height:1.6">فودافون كاش، إنستاباي، USDT TRC20، Wise، وتحويل بنكي.</p>
                 </details>
               </div>
             </div>
@@ -2904,7 +2956,7 @@ body { padding-top: 0 !important; }
               <div id="adm-svcs-content"></div>
             </div>
             <div id="adm-sub-smmparty" class="adm-sub">
-              <div class="adm-sec-hd"><div class="adm-sec-ttl"><i class="fas fa-plug"></i> SMMParty API</div><button class="btn bs2 btn-sm" onclick="loadSmmBal()"><i class="fas fa-rotate-right"></i> الرصيد</button></div>
+              <div class="adm-sec-hd"><div class="adm-sec-ttl"><i class="fas fa-plug"></i> مزودو SMM API</div><button class="btn bs2 btn-sm" onclick="loadSmmBal()"><i class="fas fa-rotate-right"></i> الرصيد</button></div>
               <div id="smm-bal" style="margin-bottom:14px"></div>
               <div class="card" style="padding:14px;margin-bottom:12px">
                 <div style="font-size:12px;font-weight:700;color:var(--t1);margin-bottom:10px">إعداد API Key</div>
@@ -3000,11 +3052,11 @@ const CFG = {
     authDomain: "tiktokzoom-97c9d.firebaseapp.com",
     databaseURL: "https://tiktokzoom-97c9d-default-rtdb.firebaseio.com",
     projectId: "tiktokzoom-97c9d",
-    storageBucket: "sadairaq-new-db.appspot.com",
+    storageBucket: "tiktokzoom-97c9d.appspot.com",
     messagingSenderId: "123456789012",
     appId: "1:123456789012:web:abcdef123456"
   },
-  admin: { u: "hsydgyg5@gmail.com", p: "SrIraq!9vQ#4mL7@xK2" }, // حساب صدى العراق الجديد
+  admin: { u: "", p: "" },  // تُجلب من السيرفر
   smm: {
     key: "",  // legacy — تُجلب من السيرفر
     url: "https://smmparty.com/api/v2",
@@ -3015,34 +3067,35 @@ const CFG = {
   },
   tg: { token: "", chat: "" },  // تُجلب من السيرفر
   settings: {
-    walletNum: "01000000000",
-    tgLink: "https://t.me/sadairaq_support",
-    waNum: "201000000000",
+    walletNum: "",
+    tgLink: "",
+    waNum: "",
     usdRate: 1250,
-    iqdPerUsd: 1250,
-    minCharge: 4,
+    minCharge: 1,
     markup: 30,
     svcLimit: 20000,
     importEnabled: true,
     autoExec: true
   },
   pms: [
-    {id:"vodafone", nm:"محفظة فودافون كاش",    ds:"تحويل فوري",   ico:"📱", col:"#e60000"},
-    {id:"instapay", nm:"إنستاباي",        ds:"InstaPay",      ico:"💳", col:"#00a651"},
-    {id:"usdt",     nm:"USDT TRC20",      ds:"عملة مشفرة",   ico:"🔐", col:"#26a17b"},
-    {id:"wise",     nm:"Wise",             ds:"تحويل دولي",   ico:"💸", col:"#00b9ff"},
-    {id:"bank",     nm:"تحويل بنكي",      ds:"حساب بنكي",    ico:"🏦", col:"#4b9eff"}
+    {id:"vodafone", nm:"فودافون كاش", ds:"تحويل فوري", ico:"📱", col:"#e60000"},
+    {id:"instapay", nm:"إنستاباي", ds:"تحويل فوري", ico:"💳", col:"#00a651"},
+    {id:"usdt", nm:"USDT TRC20", ds:"عملة مشفرة", ico:"🔐", col:"#26a17b"},
+    {id:"wise", nm:"Wise", ds:"تحويل دولي", ico:"💸", col:"#00b9ff"},
+    {id:"bank", nm:"تحويل بنكي", ds:"حساب بنكي", ico:"🏦", col:"#4b9eff"},
+    {id:"asiacell", nm:"آسياسيل", ds:"تحويل رصيد آسياسيل", ico:"📲", col:"#19d37f", acct:"07763308188", senderLabel:"رقم آسياسيل"}
   ],
   curs: [
-    {c:"USD",n:"دولار أمريكي",f:"🇺🇸",r:1}
+    {c:"IQD",n:"دينار عراقي", f:"🇮🇶",r:1},
+    {c:"USD",n:"دولار أمريكي", f:"🇺🇸",r:1250}
   ],
   platforms: [
     {id:"all",       ico:"fas fa-layer-group", clr:"#a29bfe", lbl:"الكل"},
-    {id:"Instagram", ico:"fab fa-instagram",   clr:"#E1306C", lbl:"إنستغرام"},
+    {id:"Instagram", ico:"fab fa-instagram",   clr:"#E1306C", lbl:"انستجرام"},
     {id:"Tiktok",    ico:"fab fa-tiktok",       clr:"#ffffff", lbl:"تيك توك"},
     {id:"Facebook",  ico:"fab fa-facebook",     clr:"#1877F2", lbl:"فيسبوك"},
     {id:"Youtube",   ico:"fab fa-youtube",      clr:"#FF0000", lbl:"يوتيوب"},
-    {id:"Telegram",  ico:"fab fa-telegram",     clr:"#2CA5E0", lbl:"تيليغرام"},
+    {id:"Telegram",  ico:"fab fa-telegram",     clr:"#2CA5E0", lbl:"تلجرام"},
     {id:"Twitter",   ico:"fab fa-twitter",      clr:"#1DA1F2", lbl:"تويتر"},
     {id:"Snapchat",  ico:"fab fa-snapchat",     clr:"#FFFC00", lbl:"سناب"},
     {id:"Whatsapp",  ico:"fab fa-whatsapp",     clr:"#25d366", lbl:"واتساب"},
@@ -3053,14 +3106,13 @@ const CFG = {
     "تم استلام رسالتك بنجاح.",
     "هل تحتاج مساعدة في شيء آخر؟",
     "يمكنك متابعة طلباتك من قسم طلباتي.",
-    "للشحن السريع استخدم محفظة فودافون كاش أو إنستاباي."
+    "للشحن السريع استخدم فودافون كاش أو إنستاباي."
   ]
 };
 
 // ── STATE ────────────────────────────────────────────────
 let CU = null, BAL = 0, SVCS = {}, NOTES = [];
-const FIXED_IQD_PER_USD = 1250;
-let CUR = "USD";
+let CUR = "USD"; localStorage.setItem("tz_c", "USD");
 let SEL_PM = "vodafone", ORD_F = "all";
 let SEL_PLAT = "all", SEL_CAT = null, SEL_SVC = null;
 let DB = null, FB_OK = false;
@@ -3068,8 +3120,8 @@ let DB = null, FB_OK = false;
 let ALL_CATS = {}, ALL_SVCS_ARR = [];
 
 // ── LOCAL CACHE SYSTEM ─────────────────────────────────
-const CACHE_KEY   = "sadairaq_svcs_v1";
-const CACHE_VER   = "sadairaq_svcs_ver";
+const CACHE_KEY   = "ks_svcs_v1";
+const CACHE_VER   = "ks_svcs_ver";
 const CACHE_TTL   = 60 * 60 * 1000; // ساعة واحدة
 
 function svcsToCache(arr) {
@@ -3108,9 +3160,7 @@ async function loadServerConfig() {
     const res = await fetch('/api/config');
     if (!res.ok) return;
     const cfg = await res.json();
-    // تم تعطيل تحميل حساب الأدمن القديم: الحساب الوحيد هو حساب صدى العراق المحلي المحدد أعلاه.
     if (cfg.smmKey) CFG.smm.key = cfg.smmKey;
-    CFG.settings.usdRate = FIXED_IQD_PER_USD; CFG.settings.iqdPerUsd = FIXED_IQD_PER_USD;
     if (cfg.tgToken) CFG.tg.token = cfg.tgToken;
     if (cfg.tgChat) CFG.tg.chat = cfg.tgChat;
     _configLoaded = true;
@@ -3122,23 +3172,9 @@ let fbReady = (async function() {
   await loadServerConfig();
   try {
     firebase.initializeApp(CFG.firebase);
-    const _REAL_DB = firebase.database();
-    const DB_ROOT = "sadairaq_v1";
-    DB = { ref: (path) => _REAL_DB.ref(DB_ROOT + "/" + String(path || "").replace(/^\/+/, "")) };
+    DB = firebase.database();
     FB_OK = true;
-    // تهيئة مساحة قاعدة بيانات صدى العراق المنفصلة عن بيانات المشروع القديمة.
-    DB.ref("meta").update({
-      siteName: "صدى العراق",
-      currency: "USD",
-      currencyName: "دولار أمريكي",
-      adminEmail: CFG.admin.u,
-      databaseVersion: "1.0.0"
-    }).catch(()=>{});
-    DB.ref("config/paymentMethods").once("value").then(s => {
-      if (!s.exists()) DB.ref("config/paymentMethods").set(CFG.pms);
-    }).catch(()=>{});
-    DB.ref("settings").once("value").then(s => { if (s.exists()) Object.assign(CFG.settings, s.val()); CFG.settings.usdRate=FIXED_IQD_PER_USD; CFG.settings.iqdPerUsd=FIXED_IQD_PER_USD; buildPms(); });
-    DB.ref("config/paymentMethods").once("value").then(s => { if (s.exists()) { const data=s.val(); if(Array.isArray(data)&&data.length) CFG.pms=data; buildPms(); } else { savePmsToFirebase(); } }).catch(()=>{});
+    DB.ref("settings").once("value").then(s => { if (s.exists()) Object.assign(CFG.settings, s.val()); buildPms(); });
     DB.ref("config/smm").once("value").then(s => { if (s.exists() && s.val().key) CFG.smm.key = s.val().key; });
   } catch(e) { console.warn("Firebase unavailable:", e.message); }
 })();
@@ -3146,7 +3182,7 @@ let fbReady = (async function() {
 // ── HELPERS ──────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const mk = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt !== undefined) e.textContent = txt; return e; };
-const fmtN = egp => { const c = CFG.curs.find(x => x.c === CUR) || {c:"USD",r:1}; const v = egp/c.r; return `${v.toFixed(v>=100?0:v>=10?1:2)} ${c.c}`; };
+const fmtN = iqd => { const v = (Number(iqd)||0) / 1250; return `${v.toFixed(v>=100?0:v>=10?1:2)} USD`; };
 const gid = p => `${p}-${String(Math.floor(10000000 + Math.random()*90000000))}`;
 const ACLR = {
   Tiktok:"linear-gradient(135deg,#010101,#69C9D0)",
@@ -3181,7 +3217,6 @@ const AICO = {
 
 // ── INIT ─────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
-  CUR = "USD"; localStorage.setItem("sadairaq_currency","USD");
   buildCurDD();
   buildSbCurOptions();
   buildOrdChips();
@@ -3273,17 +3308,23 @@ function setBtnLoading(id, loading) {
   else b.innerHTML = '<i class="fas fa-arrow-right-to-bracket"></i> تسجيل الدخول';
 }
 
-function doLogin() {
+async function doLogin() {
   const u = ($("l-user").value||"").trim();
   const p = $("l-pass").value||"";
   if (!u||!p) { showErr("err-login","أدخل اسم المستخدم وكلمة المرور"); return; }
   setBtnLoading("btn-login", true);
-  // Admin — works offline
-  if (u===CFG.admin.u && p===CFG.admin.p) {
-    CU = {u:"admin",name:"المشرف",role:"admin",bal:999999,level:"مسؤول",tg:"",ph:"",joined:new Date().toISOString()};
-    BAL = 999999; localStorage.setItem("sadairaq_user",JSON.stringify(CU));
-    setBtnLoading("btn-login",false); launchApp(); toast("تم الدخول كمسؤول","ok"); return;
-  }
+  // Admin login — authenticated on the PHP server so the password is not stored in the HTML.
+  try {
+    const ar = await fetch("/api/auth", {method:"POST", headers:{"Content-Type":"application/json"}, credentials:"same-origin", body:JSON.stringify({username:u,password:p})});
+    if (ar.ok) {
+      const ad = await ar.json();
+      if (ad && ad.ok && ad.role === "admin") {
+        CU = {u:ad.username||u,name:"المشرف",role:"admin",bal:999999,level:"مسؤول",tg:"",ph:"",joined:new Date().toISOString()};
+        BAL = 999999; localStorage.setItem("tz_u",JSON.stringify(CU));
+        setBtnLoading("btn-login",false); launchApp(); toast("تم الدخول كمسؤول","ok"); return;
+      }
+    }
+  } catch(e) { /* السيرفر غير متاح، نكمل لتسجيل المستخدم */ }
   if (!FB_OK) { setBtnLoading("btn-login",false); showErr("err-login","تعذر الاتصال بقاعدة البيانات"); return; }
   DB.ref("users/"+u).once("value").then(snap=>{
     setBtnLoading("btn-login",false);
@@ -3292,7 +3333,7 @@ function doLogin() {
     if (d.password!==p) { showErr("err-login","كلمة المرور غير صحيحة"); return; }
     CU={u,name:d.name||u,role:"user",bal:d.balance||0,level:d.level||"مبتدئ",tg:d.telegram||"",ph:d.phone||"",joined:d.joined||new Date().toISOString(),spent:d.totalSpent||0,ords:d.totalOrders||0};
     BAL=CU.bal; DB.ref("users/"+u).update({lastLogin:new Date().toISOString()});
-    localStorage.setItem("sadairaq_user",JSON.stringify(CU));
+    localStorage.setItem("tz_u",JSON.stringify(CU));
     launchApp(); toast("أهلاً "+u,"ok"); tgSend("👤 دخول: "+u);
   }).catch(e=>{ setBtnLoading("btn-login",false); showErr("err-login","خطأ: "+e.message); });
 }
@@ -3309,7 +3350,7 @@ function doRegister() {
     const d={password:p,name:u,balance:0,level:"مبتدئ",telegram:tg,phone:ph,joined:new Date().toISOString(),totalSpent:0,totalOrders:0};
     DB.ref("users/"+u).set(d).then(()=>{
       CU={...d,u,role:"user",bal:0,tg,ph,spent:0,ords:0}; BAL=0;
-      localStorage.setItem("sadairaq_user",JSON.stringify(CU)); launchApp(); toast("تم إنشاء حسابك!","ok"); tgSend("🆕 مستخدم جديد: "+u);
+      localStorage.setItem("tz_u",JSON.stringify(CU)); launchApp(); toast("تم إنشاء حسابك!","ok"); tgSend("🆕 مستخدم جديد: "+u);
     });
   }).catch(e=>showErr("err-reg","خطأ: "+e.message));
 }
@@ -3341,7 +3382,7 @@ function showHero(){
   if(p)p.classList.remove('open'); if(h)h.classList.remove('hidden');
 }
 function checkSavedAuth() {
-  const s = localStorage.getItem("sadairaq_user"); if (!s) return;
+  const s = localStorage.getItem("tz_u"); if (!s) return;
   try {
     CU = JSON.parse(s);
     if (CU.role!=="admin" && FB_OK) {
@@ -3349,11 +3390,11 @@ function checkSavedAuth() {
         BAL = snap.exists()?snap.val():CU.bal||0; CU.bal=BAL; launchApp();
       }).catch(()=>{ BAL=CU.bal||0; launchApp(); });
     } else { BAL=CU.role==="admin"?999999:CU.bal||0; launchApp(); }
-  } catch(e) { localStorage.removeItem("sadairaq_user"); }
+  } catch(e) { localStorage.removeItem("tz_u"); }
 }
 
 function logout() {
-  CU=null; BAL=0; localStorage.removeItem("sadairaq_user");
+  CU=null; BAL=0; localStorage.removeItem("tz_u");
   $("app").classList.remove("on"); $("auth-page").style.display="";
   document.body.classList.remove("app-active"); // إيقاف حماية النسخ
   showHero(); closeModal(); toast("تم تسجيل الخروج","inf");
@@ -3400,8 +3441,8 @@ function updateUI() {
   const hb=$("home-bal"); if(hb) hb.textContent=fmtN(BAL);
   const wb=$("wal-bal"); if(wb) wb.textContent=fmtN(BAL);
   const cur=CFG.curs.find(c=>c.c===CUR);
-  const hc=$("home-cur"); if(hc) hc.textContent=cur?`${cur.n} · ${cur.c}`:"USD";
-  const wc=$("wal-cur"); if(wc) wc.textContent=cur?cur.c:"USD";
+  const hc=$("home-cur"); if(hc) hc.textContent=cur?`${cur.n} · ${cur.c}`:"EGP";
+  const wc=$("wal-cur"); if(wc) wc.textContent=cur?cur.c:"EGP";
   const bp=$("bal-prog"); if(bp) bp.style.width=Math.min(BAL/50,100)+"%";
   const hg=$("home-greet"); if(hg) hg.textContent="مرحباً "+( CU.name||u)+" 👋";
   const ob=$("order-bal-info"); if(ob) ob.textContent="رصيدك: "+fmtN(BAL);
@@ -3524,14 +3565,15 @@ function buildCurDD() {
     menu.querySelectorAll(".cdd-option").forEach(o=>{o.style.display=o.textContent.toLowerCase().includes(q)?"":"none";});
   });
   si.appendChild(sinp); menu.appendChild(si);
-  const saved=CFG.curs.find(c=>c.c===CUR);
+  const saved=CFG.curs.find(c=>c.c==="USD");
+  CUR="USD";
   if (saved) { const fl=$("cur-fl"); if(fl) fl.textContent=saved.f; const cd=$("cur-cd"); if(cd) cd.textContent=saved.c; }
-  CFG.curs.forEach(cur=>{
+  [saved].filter(Boolean).forEach(cur=>{
     const opt=mk("div","cdd-option"+(cur.c===CUR?" selected":""));
     const flag=mk("span","",cur.f+" "); const code=mk("strong","",cur.c+" "); const name=mk("span","",cur.n);
     opt.appendChild(flag); opt.appendChild(code); opt.appendChild(name);
     opt.addEventListener("click",()=>{
-      CUR=cur.c; localStorage.setItem("sadairaq_currency",CUR);
+      CUR=cur.c; localStorage.setItem("tz_c",CUR);
       const fl=$("cur-fl"); if(fl) fl.textContent=cur.f; const cd=$("cur-cd"); if(cd) cd.textContent=cur.c;
       menu.querySelectorAll(".cdd-option").forEach(o=>o.classList.remove("selected")); opt.classList.add("selected");
       closeAllCDD(); updateUI();
@@ -3592,11 +3634,11 @@ function selectPlat(platId, btn) {
 // ── CATEGORY DROPDOWN ────────────────────────────────────
 // خريطة مطابقة المنصة بالكلمات المفتاحية
 const PLAT_KEYWORDS = {
-  Instagram: ["instagram","insta","إنستغرام","انستا"],
+  Instagram: ["instagram","insta","انستجرام","انستا"],
   Tiktok:    ["tiktok","تيك","tikto"],
   Facebook:  ["facebook","فيسبوك","fb"],
   Youtube:   ["youtube","يوتيوب","yt"],
-  Telegram:  ["telegram","تيليغرام","tg"],
+  Telegram:  ["telegram","تلجرام","tg"],
   Twitter:   ["twitter","تويتر","x "],
   Snapchat:  ["snapchat","سناب","snap"],
   Whatsapp:  ["whatsapp","واتساب","whats"],
@@ -3671,9 +3713,9 @@ function buildSvcDD(cat) {
   if (!svcs.length) { menu.appendChild(mk("div","cdd-empty","لا توجد خدمات في هذه الفئة")); return; }
   svcs.forEach((s,idx)=>{
     const dispId = s.smmpartyId ? String(s.smmpartyId) : String(100+idx);
-    const priceUsd = s.price || 0;
-    const curObj = CFG.curs.find(x=>x.c===CUR)||{r:1,c:"USD"};
-    const priceFmt = (priceUsd/curObj.r).toFixed(priceUsd/curObj.r>=10?2:4) + " " + CUR;
+    const priceEgp = s.price || 0;
+    const curObj = CFG.curs.find(x=>x.c===CUR)||{r:1,c:"EGP"};
+    const priceFmt = ((priceEgp || 0) / 1250).toFixed(((priceEgp || 0) / 1250)>=10?2:4) + " USD";
 
     // Row: [icon] [name (flex)] [id badge] [price]
     const opt = mk("div","cdd-option");
@@ -4002,20 +4044,21 @@ function renderPmForm(pmId) {
 
   // ── بيانات كل طريقة دفع ──
   const accs={
-    vodafone:{l:"رقم محفظة فودافون كاش", v:S.vodafoneNumber||S.walletNum||"01000000000", s:"محفظة فودافون كاش", cur:"USD", icon:"📱"},
-    instapay:{l:"رقم إنستاباي",    v:S.instapayNumber||S.walletNum||"01000000000", s:"InstaPay",    cur:"USD", icon:"💳"},
+    vodafone:{l:"رقم فودافون كاش", v:S.vodafoneNumber||S.walletNum||"01000000000", s:"فودافون كاش", cur:"EGP", icon:"📱"},
+    instapay:{l:"رقم إنستاباي",    v:S.instapayNumber||S.walletNum||"01000000000", s:"InstaPay",    cur:"EGP", icon:"💳"},
     usdt:    {l:"عنوان USDT TRC20",v:S.usdtAddress||"TRx...",                      s:"USDT TRC20", cur:"USD", icon:"🔐"},
     wise:    {l:"Wise Email",       v:S.wiseEmail||"pay@zoomsmm.com",               s:"Wise",        cur:"USD", icon:"💸"},
-    bank:    {l:"رقم الحساب",      v:S.bankAccount||"0000-0000-0000",              s:S.bankName||"البنك", cur:"USD", icon:"🏦"},
+    bank:    {l:"رقم الحساب",      v:S.bankAccount||"0000-0000-0000",              s:S.bankName||"البنك", cur:"EGP", icon:"🏦"},
   };
-  if (pmObj?.acct) accs[pmId]={l:pmObj.nm, v:pmObj.acct, s:pmObj.nm, cur:"USD", icon:pmObj.ico||"💳"};
-  const acc = accs[pmId] || {l:pmObj?.nm||pmId, v:pmObj?.acct||"—", s:pmObj?.nm||pmId, cur:"USD", icon:"💳"};
+  if (pmObj?.acct) accs[pmId]={l:pmObj.nm, v:pmObj.acct, s:pmObj.nm, cur:"EGP", icon:pmObj.ico||"💳"};
+  const acc = accs[pmId] || {l:pmObj?.nm||pmId, v:pmObj?.acct||"—", s:pmObj?.nm||pmId, cur:"EGP", icon:"💳"};
 
   // ── حساب الأسعار ──
-  const usdRate  = FIXED_IQD_PER_USD;
-  const userCur  = {c:"USD",r:1,n:"دولار أمريكي",f:"🇺🇸"};
-  // العملة الوحيدة للمستخدم هي الدولار، وسعر الصرف الثابت يُعرض للدينار العراقي فقط.
-  const usdInCur = (usdRate / userCur.r).toFixed(2);
+  const usdRate  = 1250;                          // كام جنيه في الدولار (سعر المنصة الداخلي)
+  const userCur  = {c:"USD",r:1250,n:"دولار أمريكي",f:"🇺🇸"};
+  // userCur.r = كام جنيه في وحدة عملة المستخدم (مثلاً USD: r=30 يعني 1$=30ج)
+  // نحول: الدولار الواحد = usdRate جنيه = usdRate/userCur.r من عملة المستخدم
+  const usdInCur = (usdRate / userCur.r).toFixed(userCur.r>=1?2:4);
 
   // ── بطاقة العنوان/الرقم مع زر نسخ ──
   const wb = mk("div");
@@ -4043,20 +4086,24 @@ function renderPmForm(pmId) {
   const priceBar = mk("div");
   priceBar.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;padding-top:8px;border-top:1px solid var(--bd)";
 
-  // سعر الدولار بالـ USD
+  // سعر الدولار بالـ EGP
   const egpChip = mk("div");
   egpChip.style.cssText = "display:flex;align-items:center;gap:5px;background:rgba(91,164,255,.1);border:1px solid rgba(91,164,255,.2);border-radius:20px;padding:3px 10px";
-  egpChip.innerHTML = `<i class="fas fa-dollar-sign" style="font-size:10px;color:var(--blue)"></i><span style="font-size:11px;font-weight:700;color:var(--blue)">1$ = ${FIXED_IQD_PER_USD.toLocaleString("en-US")} دينار عراقي</span>`;
+  egpChip.innerHTML = `<i class="fas fa-dollar-sign" style="font-size:10px;color:var(--blue)"></i><span style="font-size:11px;font-weight:700;color:var(--blue)">1$ = 1,250 IQD</span>`;
 
-  // سعر الصرف الثابت بالدينار العراقي
+  // سعر الدولار بعملة المستخدم (لو مش EGP)
   const curChip = mk("div");
   curChip.style.cssText = "display:flex;align-items:center;gap:5px;background:rgba(61,232,160,.1);border:1px solid rgba(61,232,160,.2);border-radius:20px;padding:3px 10px";
-  curChip.innerHTML = `<span style="font-size:13px">🇮🇶</span><span style="font-size:11px;font-weight:700;color:var(--grn)">1$ = ${FIXED_IQD_PER_USD.toLocaleString("en-US")} د.ع</span>`;
+  if (CUR !== "USD") {
+    curChip.innerHTML = `<span style="font-size:13px">${userCur.f||""}</span><span style="font-size:11px;font-weight:700;color:var(--grn)">1$ = ${usdInCur} ${CUR}</span>`;
+  } else {
+    curChip.innerHTML = `<i class="fas fa-coins" style="font-size:10px;color:var(--grn)"></i><span style="font-size:11px;font-weight:700;color:var(--grn)">${acc.s}</span>`;
+  }
 
   // نوع العملة المطلوبة
   const payInChip = mk("div");
   payInChip.style.cssText = "display:flex;align-items:center;gap:5px;background:rgba(255,200,66,.1);border:1px solid rgba(255,200,66,.2);border-radius:20px;padding:3px 10px;margin-right:auto";
-  const payLabel = acc.cur === "USD" ? `ادفع بـ USD` : `ادفع بـ USD`;
+  const payLabel = `قيمة الشحن تُضاف بالدولار USD`;
   payInChip.innerHTML = `<i class="fas fa-credit-card" style="font-size:10px;color:var(--ylw)"></i><span style="font-size:11px;font-weight:700;color:var(--ylw)">${payLabel}</span>`;
 
   priceBar.appendChild(egpChip);
@@ -4067,11 +4114,10 @@ function renderPmForm(pmId) {
 
   // ── أزرار المبالغ السريعة مع عرض القيمة بعملة المستخدم ──
   const qa=mk("div","qa");
-  [4,8,16,20].forEach(a=>{
+  [5,10,20,50].forEach(a=>{
     const b=mk("button","qa-b");
-    const inCurVal = a*FIXED_IQD_PER_USD;
-    const inCur = inCurVal.toLocaleString("en-US");
-    b.innerHTML = `<div style="font-size:12px;font-weight:800">$${a}</div><div style="font-size:9px;color:var(--t2);margin-top:1px">≈ ${inCur} د.ع</div>`;
+    const inCur = Number(a).toFixed(2);
+    b.innerHTML = `<div style="font-size:12px;font-weight:800">${a}</div><div style="font-size:9px;color:var(--t2);margin-top:1px">$${inCur}</div>`;
     b.style.cssText = "background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);padding:7px;text-align:center;cursor:pointer;font-family:var(--font);transition:var(--tr)";
     b.addEventListener("click",()=>{const el=$("pay-amt");if(el){el.value=a;el.focus();}});
     qa.appendChild(b);
@@ -4089,32 +4135,19 @@ function renderPmForm(pmId) {
   ].forEach(([id,lbl,type,ph])=>{
     const f=mk("div","fld"); f.appendChild(mk("label","",lbl));
     const i=mk("input","inp"); i.type=type; i.id=id; i.placeholder=ph||lbl;
-    f.appendChild(i);
-    if(id === "pay-amt") {
-      const cv=mk("div","","سعر الصرف ثابت: 5,000 د.ع = 4 USD");
-      cv.id="pay-iqd-preview";
-      cv.style.cssText="font-size:11px;color:var(--grn);margin-top:5px;text-align:center;font-weight:700";
-      f.appendChild(cv);
-      i.addEventListener("input",()=>{
-        const usd=parseFloat(i.value)||0;
-        cv.textContent=`سعر الصرف ثابت: 1 USD = ${FIXED_IQD_PER_USD.toLocaleString("en-US")} د.ع · المبلغ يعادل ${(usd*FIXED_IQD_PER_USD).toLocaleString("en-US")} د.ع`;
-      });
-    }
-    form.appendChild(f);
+    f.appendChild(i); form.appendChild(f);
   });
 }
 function submitPay() {
   if (!CU) { toast("سجّل دخولك","err"); return; }
   const amt=$("pay-amt")?.value; const snd=($("pay-snd")?.value||"").trim();
   const pm=CFG.pms.find(p=>p.id===SEL_PM);
-  if (!amt||parseFloat(amt)<CFG.settings.minCharge) { toast("المبلغ الحد الأدنى "+CFG.settings.minCharge+" USD","wrn"); return; }
+  if (!amt||parseFloat(amt)<CFG.settings.minCharge) { toast("الحد الأدنى للإضافة $"+CFG.settings.minCharge,"wrn"); return; }
   if (!snd) { toast("أدخل معلومات المرسل","wrn"); return; }
   if (!FB_OK) { toast("تعذر الاتصال","err"); return; }
   const pid=gid("PAY");
-  const amountUsd=parseFloat(amt);
-  const amountIqd=Math.round(amountUsd*FIXED_IQD_PER_USD);
-  DB.ref("payments").push({id:pid,user:CU.u,amount:amountUsd,amountUsd,amountIqd,exchangeRate:FIXED_IQD_PER_USD,sender:snd,transactionId:($('pay-tid')?.value||""),method:SEL_PM,methodName:pm?.nm||SEL_PM,status:"pending",createdAt:new Date().toISOString()}).then(()=>{
-    tgSend(`💰 طلب شحن جديد\n#${pid}\n👤 ${CU.u}\n💵 ${amountUsd} USD\n💴 ${amountIqd.toLocaleString("en-US")} د.ع\n${pm?.nm||SEL_PM}\n📱 ${snd}`);
+  DB.ref("payments").push({id:pid,user:CU.u,amount:parseFloat(amt),sender:snd,transactionId:($("pay-tid")?.value||""),method:SEL_PM,methodName:pm?.nm||SEL_PM,status:"pending",createdAt:new Date().toISOString()}).then(()=>{
+    tgSend(`💰 طلب شحن جديد\n#${pid}\n👤 ${CU.u}\n💵 $${amt}\n${pm?.nm||SEL_PM}\n📱 ${snd}`);
     toast("✅ تم إرسال طلب الشحن #"+pid,"ok");
     $("pay-amt").value=""; $("pay-snd").value=""; $("pay-tid").value="";
     loadPayHist();
@@ -4132,7 +4165,7 @@ function showPayModal(p){
     // Details grid
     const rows=[
       ["رقم الطلب", p.id||p._k||"—", "fas fa-hashtag"],
-      ["المبلغ", fmtN(p.amount||0)+" USD", "fas fa-coins"],
+      ["المبلغ", fmtN(p.amount||0), "fas fa-coins"],
       ["طريقة الدفع", p.methodName||p.method||"—", "fas fa-credit-card"],
       ["رقم/اسم المرسل", p.sender||"—", "fas fa-mobile-alt"],
       ["رقم العملية", p.transactionId||"—", "fas fa-receipt"],
@@ -4165,7 +4198,7 @@ function loadPayHist() {
       row.onmouseover=()=>row.style.borderColor="var(--c2)"; row.onmouseout=()=>row.style.borderColor="var(--bd)";
       const lft=mk("div");lft.style.flex="1";
       const top2=mk("div");top2.style.cssText="display:flex;align-items:center;gap:8px;margin-bottom:3px";
-      const am=mk("div","",fmtN(p.amount||0)+" USD");am.style.cssText="font-weight:800;font-size:13px;color:var(--t0)";
+      const am=mk("div","",fmtN(p.amount||0));am.style.cssText="font-weight:800;font-size:13px;color:var(--t0)";
       top2.appendChild(am); top2.appendChild(mk("span","bdg "+st.c,st.l));
       lft.appendChild(top2);
       const sub=mk("div","",(p.methodName||p.method||"")+(p.transactionId?" · #"+p.transactionId:"")+" · "+dt);sub.style.cssText="font-size:10px;color:var(--t2)";lft.appendChild(sub);
@@ -4235,7 +4268,7 @@ function openTG(){window.open(CFG.settings.tgLink,"_blank");}
 function openWA(){window.open("https://wa.me/"+CFG.settings.waNum,"_blank");}
 
 // ── CURRENCY CONVERTER ────────────────────────────────────
-var CV_FROM = "USD", CV_TO = "USD";
+var CV_FROM = "IQD", CV_TO = "USD";
 function buildCvDD(menuId, codeId, flagId, stateKey) {
   var menu = document.getElementById(menuId); if(!menu) return;
   menu.innerHTML = "";
@@ -4292,6 +4325,97 @@ function initConverter(){
   buildCvTable();
 }
 
+
+
+// ═════════════════════════════════════════════════════════════
+// ASIACELL REAL CREDIT TRANSFER — server-side session flow
+// ═════════════════════════════════════════════════════════════
+const AC_AMOUNTS = [1000,2000,3000,4000,5000,6000,7000,8000,9000,10000];
+let AC_SELECTED = 5000;
+function acUSD(iqd){ return (Number(iqd||0)/1250); }
+function acSetStatus(msg, type){
+  const el=document.getElementById('ac-status'); if(!el)return;
+  el.textContent=msg||'';
+  el.style.color=type==='ok'?'var(--grn)':type==='err'?'var(--red)':'var(--t1)';
+}
+function acBuildAmounts(){
+  const box=document.getElementById('ac-amounts'); if(!box)return;
+  box.innerHTML='';
+  AC_AMOUNTS.forEach(a=>{
+    const b=document.createElement('button'); b.className='ac-amt'+(a===AC_SELECTED?' on':'');
+    b.innerHTML='<div class="iqd">'+a.toLocaleString('ar-IQ')+' د.ع</div><div class="usd">$'+acUSD(a).toFixed(2)+'</div>';
+    b.addEventListener('click',()=>{AC_SELECTED=a;document.querySelectorAll('.ac-amt').forEach(x=>x.classList.remove('on'));b.classList.add('on');});
+    box.appendChild(b);
+  });
+}
+function acJson(url, payload){
+  return fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(payload||{})}).then(async r=>{const t=await r.text();let d={};try{d=t?JSON.parse(t):{};}catch(_){d={error:t||('HTTP '+r.status)};} if(!r.ok||d.error)throw new Error(d.error||('HTTP '+r.status));return d;});
+}
+async function acRequestLogin(){
+  const phone=(document.getElementById('ac-phone')?.value||'').trim();
+  const btn=document.getElementById('ac-login-btn');
+  if(!CU || !FB_OK){acSetStatus('تعذر بدء شحن آسياسيل: تأكد من تسجيل الدخول واتصال قاعدة البيانات','err');return;}
+  if(!phone){acSetStatus('أدخل رقم آسياسيل أولاً','err');return;}
+  if(btn){btn.disabled=true;btn.textContent='جاري الإرسال...';}
+  try{
+    const d=await acJson('/api/asiacell',{action:'login',phone});
+    document.getElementById('ac-step-sms').style.display='block';
+    acSetStatus(d.message||'تم إرسال رمز SMS إلى الرقم.','ok');
+  }catch(e){acSetStatus('❌ '+e.message,'err');}
+  finally{if(btn){btn.disabled=false;btn.innerHTML='<i class="fas fa-message"></i> إرسال الكود';}}
+}
+async function acVerifyLogin(){
+  const code=(document.getElementById('ac-sms')?.value||'').trim(); const btn=document.getElementById('ac-sms-btn');
+  if(!code){acSetStatus('أدخل رمز SMS','err');return;}
+  if(btn){btn.disabled=true;btn.textContent='جاري التحقق...';}
+  try{
+    const d=await acJson('/api/asiacell',{action:'verify_sms',passcode:code});
+    document.getElementById('ac-step-amount').style.display='block'; acBuildAmounts(); acSetStatus(d.message||'تم التحقق من الخط بنجاح.','ok');
+  }catch(e){acSetStatus('❌ '+e.message,'err');}
+  finally{if(btn){btn.disabled=false;btn.textContent='تحقق';}}
+}
+async function acStartTransfer(){
+  const btn=document.getElementById('ac-start-transfer');
+  if(!AC_SELECTED){acSetStatus('اختر مبلغ التحويل','err');return;}
+  if(btn){btn.disabled=true;btn.textContent='جاري إرسال الطلب...';}
+  try{
+    const d=await acJson('/api/asiacell',{action:'start_transfer',amount:AC_SELECTED});
+    document.getElementById('ac-step-confirm').style.display='block';
+    acSetStatus((d.message||'تم إرسال رمز تأكيد التحويل.')+' · القيمة $'+Number(d.usd).toFixed(2),'ok');
+  }catch(e){acSetStatus('❌ '+e.message,'err');}
+  finally{if(btn){btn.disabled=false;btn.innerHTML='<i class="fas fa-paper-plane"></i> إرسال طلب التحويل';}}
+}
+async function acConfirmTransfer(){
+  const code=(document.getElementById('ac-confirm')?.value||'').trim(); const btn=document.getElementById('ac-confirm-btn');
+  if(!code){acSetStatus('أدخل رمز تأكيد التحويل','err');return;}
+  if(btn){btn.disabled=true;btn.textContent='جاري التأكيد...';}
+  try{
+    const d=await acJson('/api/asiacell',{action:'confirm_transfer',passcode:code});
+    const usd=Number(d.usd||acUSD(AC_SELECTED));
+    // credit the user's USD balance once per Asiacell transfer PID.
+    if(FB_OK && CU){
+      const txKey=String(d.transferPid||d.pid||Date.now()).replace(/[^A-Za-z0-9_-]/g,'_');
+      const marker=DB.ref('asiacellTransfers/'+txKey);
+      const exists=await marker.once('value');
+      if(!exists.exists()){
+        await marker.set({user:CU.u,amountIQD:AC_SELECTED,amountUSD:usd,rateIQDPerUSD:1250,phone:d.phone||'',receiver:d.receiver||'',status:'completed',createdAt:new Date().toISOString()});
+        await DB.ref('users/'+CU.u+'/balance').transaction(v=>(Number(v)||0)+usd);
+        await DB.ref('payments').push({id:gid('AC'),user:CU.u,amount:usd,amountUSD:usd,amountIQD:AC_SELECTED,rate:1250,method:'asiacell',methodName:'آسياسيل',sender:d.phone||'',receiver:d.receiver||'',status:'approved',createdAt:new Date().toISOString(),automatic:true});
+        BAL += usd;
+        localStorage.setItem('tz_u',JSON.stringify(Object.assign({},CU,{bal:BAL})));
+        updateUI();
+      }
+    }
+    acSetStatus('✅ تم التحويل بنجاح، وتمت إضافة $'+usd.toFixed(2)+' إلى رصيدك.','ok');
+    document.getElementById('ac-step-sms').style.display='none';
+    document.getElementById('ac-step-amount').style.display='none';
+    document.getElementById('ac-step-confirm').style.display='none';
+    document.getElementById('ac-sms').value='';document.getElementById('ac-confirm').value='';
+  }catch(e){acSetStatus('❌ '+e.message,'err');}
+  finally{if(btn){btn.disabled=false;btn.textContent='تأكيد التحويل';}}
+}
+
+document.addEventListener('DOMContentLoaded',()=>{acBuildAmounts();});
 
 // ── NOTIFICATIONS ─────────────────────────────────────────
 function pollNotifs() {
@@ -4387,21 +4511,20 @@ function renderSmmProvidersList(container){
 }
 
 function saveSmmProvidersToFB(){
-  return fbReady.then(function(){
-  if(!FB_OK){
-    toast('⚠️ قاعدة البيانات مش متصلة — راجع إعدادات Firebase (CFG.firebase)، التعديل مش هيتحفظ','err');
-    throw new Error('FB_NOT_CONNECTED');
-  }
-  var obj={};
-  CFG.smm.providers.forEach(function(p){
-    obj[p.id]={name:p.name,url:p.url,key:p.key||''};
-  });
-  var p1=DB.ref('config/smmProviders').set(obj);
-  var p2=CFG.smm.activeProvider ? DB.ref('config/smmActive').set(CFG.smm.activeProvider) : Promise.resolve();
-  return Promise.all([p1,p2]).catch(function(e){
-    toast('❌ فشل الحفظ في قاعدة البيانات: '+e.message,'err');
-    throw e;
-  });
+  return fbReady.then(async function(){
+    var obj={};
+    CFG.smm.providers.forEach(function(p){ obj[p.id]={name:p.name,url:p.url,key:p.key||''}; });
+    var tasks=[];
+    if(FB_OK){
+      tasks.push(DB.ref('config/smmProviders').set(obj));
+      tasks.push(CFG.smm.activeProvider ? DB.ref('config/smmActive').set(CFG.smm.activeProvider) : Promise.resolve());
+    }
+    // Server-side private copy fixes HTTP 404 and keeps provider keys off provider URLs.
+    try{
+      var sr=await fetch('/api/providers',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({providers:CFG.smm.providers,activeProvider:CFG.smm.activeProvider})});
+      if(!sr.ok) throw new Error('تعذر حفظ المزود على الخادم');
+    }catch(e){ if(!FB_OK) throw e; }
+    await Promise.all(tasks);
   });
 }
 
@@ -4409,14 +4532,13 @@ function modalAddSmmProvider(onDone, editProv){
   var isEdit=!!editProv;
   openModal((isEdit?'تعديل مزود':'إضافة مزود SMM جديد'), function(body){
     var fields=[
-      ['prov-name','اسم المزود',editProv?.name||'','text','مثال: SMMParty'],
-      ['prov-url','رابط API المزود',editProv?.url||'','url','https://example.com/api/v2'],
-      ['prov-key','مفتاح API',editProv?.key||'','password','أدخل مفتاح المزود هنا'],
+      ['prov-name','اسم المزود',editProv?.name||'','text','مثال: المزود الأول'],
+      ['prov-url','رابط API المزود',editProv?.url||'','text','https://example.com/api/v2'],
+      ['prov-key','مفتاح المزود (API Key)',editProv?.key||'','password','أدخل مفتاح المزود هنا'],
     ];
     fields.forEach(function(f){
       var fld=mk('div','fld');fld.appendChild(mk('label','',f[1]));
       var inp=mk('input','inp');inp.id=f[0];inp.value=f[2];inp.type=f[3];inp.placeholder=f[4];
-      if(isEdit && f[0]==='prov-id') inp.readOnly=true;
       fld.appendChild(inp);body.appendChild(fld);
     });
     // زر اختبار قبل الحفظ
@@ -4447,18 +4569,16 @@ function modalAddSmmProvider(onDone, editProv){
       var nm2=document.getElementById('prov-name')?.value.trim();
       var ur2=document.getElementById('prov-url')?.value.trim();
       var ky2=document.getElementById('prov-key')?.value.trim();
-      var id2=isEdit ? editProv.id : ('prov_' + Date.now());
-      if(!nm2||!ur2||!ky2){toast('اسم المزود ورابط API والمفتاح كلها مطلوبة','err');return;}
-      try { new URL(ur2); } catch(e) { toast('رابط API غير صالح','err'); return; }
-      var addedNew=false, prevSnapshot=CFG.smm.providers.slice();
-      if(isEdit){
+      if(!nm2||!ur2||!ky2){toast('اسم المزود والرابط والمفتاح مطلوبة','err');return;}
+      var prevSnapshot=CFG.smm.providers.map(function(x){return Object.assign({},x);});
+      var id2=isEdit ? editProv.id : (nm2.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'') || ('provider-'+Date.now()));
+      if(!isEdit){
+        while(CFG.smm.providers.find(function(p){return p.id===id2;})) id2='provider-'+Date.now();
+        CFG.smm.providers.push({id:id2,name:nm2,url:ur2,key:ky2});
+        if(!CFG.smm.activeProvider) CFG.smm.activeProvider=id2;
+      } else {
         var ex=CFG.smm.providers.find(function(p){return p.id===id2;});
         if(ex){ex.name=nm2;ex.url=ur2;ex.key=ky2;}
-      } else {
-        if(CFG.smm.providers.find(function(p){return p.id===id2;})){toast('المعرف موجود بالفعل','err');return;}
-        CFG.smm.providers.push({id:id2,name:nm2,url:ur2,key:ky2});
-        addedNew=true;
-        if(!CFG.smm.activeProvider) CFG.smm.activeProvider=id2;
       }
       saveBtn.disabled=true;
       try{
@@ -4508,12 +4628,12 @@ function checkPendingPays(){
 }
 
 async function loadSmmBal(){
-  const el=$("smm-bal");if(!el)return;el.innerHTML="";const s=mk("span","","جاري الاتصال بـ SMMParty...");s.style.cssText="font-size:12px;color:var(--t2)";el.appendChild(s);
+  const el=$("smm-bal");if(!el)return;el.innerHTML="";const s=mk("span","","جاري الاتصال بالمزود...");s.style.cssText="font-size:12px;color:var(--t2)";el.appendChild(s);
   try{
     const d=await smmCall({action:"balance"});el.innerHTML="";
     if(d?.balance!==undefined){const b=parseFloat(d.balance);const wrap=mk("div");wrap.style.cssText="display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg2);border-radius:var(--r);border:1px solid var(--bd)";
       const bv=mk("div","","$"+b.toFixed(2));bv.style.cssText="font-family:var(--font);font-size:26px;font-weight:800;color:var(--blue)";
-      const rd=mk("div");rd.appendChild(mk("div","","= "+fmtN(b)));rd.children[0].style.cssText="font-size:11px;color:var(--t2)";rd.appendChild(mk("span","bdg bg","✅ متصل"));
+      const rd=mk("div");rd.appendChild(mk("div","","= "+fmtN(b*CFG.settings.usdRate)));rd.children[0].style.cssText="font-size:11px;color:var(--t2)";rd.appendChild(mk("span","bdg bg","✅ متصل"));
       wrap.appendChild(bv);wrap.appendChild(rd);el.appendChild(wrap);}
     else throw new Error(d.error||"فشل الاتصال");
   }catch(e){el.innerHTML="";el.appendChild(mk("span","bdg br","❌ "+e.message));}
@@ -4553,6 +4673,7 @@ async function importSmm(){
     };
     const limit   = parseInt(CFG.settings.svcLimit)||20000;
     const markup  = (parseFloat(CFG.settings.markup)||30)/100;
+    const usdRate = 1250;
     const slice   = list.slice(0, limit);
 
     // ── حذف القديم ──
@@ -4571,13 +4692,13 @@ async function importSmm(){
         for(const[k,v] of Object.entries(am)) if(cat.includes(k)){app=v;break;}
       }
       const smmRateUsd = parseFloat(s.rate||0);
-      const baseUsd    = smmRateUsd;
-      const finalUsd   = baseUsd * (1 + markup);
+      const baseEgp    = smmRateUsd * usdRate;
+      const finalEgp   = baseEgp * (1 + markup);
       const key = DB.ref("services").push().key;
       allItems.push([key, {
         app, name:s.name||"خدمة", category:s.category||app,
-        price:    parseFloat(finalUsd.toFixed(4)),
-        basePrice:parseFloat(baseUsd.toFixed(4)),
+        price:    parseFloat(finalEgp.toFixed(4)),
+        basePrice:parseFloat(baseEgp.toFixed(4)),
         smmRateUsd, smmRate:smmRateUsd,
         min:parseInt(s.min)||100, max:parseInt(s.max)||10000,
         quality:s.type||"SMM", speed:"24-48h",
@@ -4607,7 +4728,7 @@ async function importSmm(){
     if(FB_OK) DB.ref("settings/svcsVersion").set(newVer);
     loadAllSvcs(true);
     if(importBtn) importBtn.innerHTML = origBtnHTML;
-    toast(`✅ تم استيراد ${total} خدمة · الأسعار بالدولار الأمريكي · هامش: ${Math.round(markup*100)}%`, "ok");
+    toast(`✅ تم استيراد ${total} خدمة · سعر الصرف: 1$ = 1,250 د.ع · هامش: ${Math.round(markup*100)}%`, "ok");
   }catch(e){
     if(importBtn) importBtn.innerHTML = origBtnHTML;
     toast("❌ "+e.message,"err");
@@ -4646,27 +4767,27 @@ async function checkSmmSt(smmId,fbKey){
 }
 
 async function smmCall(params, retries=2){
-  // تحديد الـ provider الحالي
   const provId = CFG.smm.activeProvider || (CFG.smm.providers[0]?.id) || '';
   const activeProv = CFG.smm.providers.find(p=>p.id===provId);
   const body=new URLSearchParams({...params});
   if(provId) body.set('provider', provId);
-  // إرسال url و key مؤقتاً للسيرفر لو الـ provider مش موجود فيه
+  // Backward compatibility: server can migrate an older Firebase-only provider on first call.
   if(activeProv?.url) body.set('_url', activeProv.url);
   if(activeProv?.key) body.set('_key', activeProv.key);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000);
+  const timeout = setTimeout(() => controller.abort(), 25000);
   try {
-    const res=await fetch("/api/smm.php?"+body.toString(), { signal: controller.signal });
+    const res=await fetch("/api/smm?"+body.toString(), { signal: controller.signal, credentials:"same-origin" });
     clearTimeout(timeout);
-    if(!res.ok) throw new Error("HTTP "+res.status);
-    const data=await res.json();
+    const raw=await res.text();
+    let data=null; try{data=raw?JSON.parse(raw):{};}catch(_){data={error:raw||('HTTP '+res.status)};}
+    if(!res.ok) throw new Error(data?.error||("HTTP "+res.status));
     if(data?.error) throw new Error(data.error);
     return data;
   } catch(e) {
     clearTimeout(timeout);
     if (retries > 0 && (e.name === 'AbortError' || e.message.includes('fetch'))) {
-      await new Promise(r => setTimeout(r, 1500));
+      await new Promise(r => setTimeout(r, 1000));
       return smmCall(params, retries - 1);
     }
     if (e.name === 'AbortError') throw new Error('انتهت مهلة الاتصال — حاول مجدداً');
@@ -4677,15 +4798,20 @@ async function smmCall(params, retries=2){
 // ── تحميل قائمة الـ providers من Firebase وتطبيقها ──
 async function loadSmmProviders(){
   await fbReady;
-  if(!FB_OK) return;
   try {
-    const snap = await DB.ref('config/smmProviders').once('value');
-    if(snap.exists()){
-      const data = snap.val();
-      CFG.smm.providers = Object.entries(data).map(([id,p])=>({id,...p}));
-      if(!CFG.smm.activeProvider && CFG.smm.providers.length>0){
-        CFG.smm.activeProvider = CFG.smm.providers[0].id;
+    if(FB_OK){
+      const snap = await DB.ref('config/smmProviders').once('value');
+      if(snap.exists()){
+        const data = snap.val();
+        CFG.smm.providers = Object.entries(data).map(([id,p])=>({id,...p}));
+        const act = await DB.ref('config/smmActive').once('value');
+        if(act.exists() && act.val()) CFG.smm.activeProvider=act.val();
+        if(!CFG.smm.activeProvider && CFG.smm.providers.length>0) CFG.smm.activeProvider=CFG.smm.providers[0].id;
       }
+    }
+    // Sync Firebase provider data to private PHP storage to remove the 404 path dependency.
+    if(CFG.smm.providers.length){
+      try{await fetch('/api/providers',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({providers:CFG.smm.providers,activeProvider:CFG.smm.activeProvider})});}catch(_){ }
     }
   } catch(e){ console.warn('loadSmmProviders:', e); }
 }
@@ -4751,7 +4877,7 @@ function modalAddSvcById(){
       const sid=idInp.value;const name=(nm.value||"").trim();const app=$("qs-app-btn")?.getAttribute("data-val")||"Other";const margin=parseFloat(mg.value||"20")/100;
       if(!sid||!name){toast("أدخل SMM ID واسم الخدمة","wrn");return;}if(!FB_OK){toast("تعذر الاتصال","err");return;}
       sv2.disabled=true;sv2.textContent="جاري الإضافة...";
-      try{const list=await smmCall({action:"services"});const svc=Array.isArray(list)?list.find(s=>String(s.service)===String(sid)):null;const bp=svc?parseFloat(svc.rate||0):0;const fp=bp*(1+margin);
+      try{const list=await smmCall({action:"services"});const svc=Array.isArray(list)?list.find(s=>String(s.service)===String(sid)):null;const bp=svc?parseFloat(svc.rate||0)*1250:0;const fp=bp*(1+margin);
         await DB.ref("services").push({app,name,category:svc?.category||app,price:fp,min:svc?parseInt(svc.min||100):100,max:svc?parseInt(svc.max||10000):10000,quality:svc?(svc.type||"SMM"):"SMM",speed:"24-48h",source:"smmparty",smmpartyId:parseInt(sid),refill:svc?(svc.refill||false):false,cancel:svc?(svc.cancel||false):false,desc:svc?(svc.category||""):"",createdAt:new Date().toISOString(),createdBy:CU?.u||"admin"});
         closeModal();loadAllSvcs();toast("✅ تم إضافة الخدمة","ok");
       }catch(e){sv2.disabled=false;sv2.innerHTML='<i class="fas fa-floppy-disk"></i> إضافة وتفعيل الخدمة';toast("❌ "+e.message,"err");}
@@ -4788,7 +4914,7 @@ function modalAddSvc(){
       if(!FB_OK){toast("تعذر الاتصال","err");return;}
       const app=$("as-app-btn")?.getAttribute("data-val");const name=($("as-nm")?.value||"").trim();const price=$("as-pr")?.value;const cat=($("as-cat")?.value||"").trim()||app||"عام";
       if(!app||!name||!price){toast("أدخل التطبيق والاسم والسعر","wrn");return;}
-      DB.ref("services").push({app,name,category:cat,price:parseFloat(price),min:parseInt($("as-mn")?.value)||100,max:parseInt($("as-mx")?.value)||10000,quality:$("as-ql-btn")?.getAttribute("data-val")||"عادي",speed:$("as-sp")?.value||"24-48h",source:"local",createdAt:new Date().toISOString(),createdBy:CU?.u||"admin"}).then(()=>{closeModal();loadAllSvcs();toast("✅ تم حفظ الخدمة","ok");}).catch(e=>toast("❌ "+e.message,"err"));
+      DB.ref("services").push({app,name,category:cat,price:parseFloat(price)*1250,min:parseInt($("as-mn")?.value)||100,max:parseInt($("as-mx")?.value)||10000,quality:$("as-ql-btn")?.getAttribute("data-val")||"عادي",speed:$("as-sp")?.value||"24-48h",source:"local",createdAt:new Date().toISOString(),createdBy:CU?.u||"admin"}).then(()=>{closeModal();loadAllSvcs();toast("✅ تم حفظ الخدمة","ok");}).catch(e=>toast("❌ "+e.message,"err"));
     });
     const xb=mk("button","btn bs2 btn-lg","إلغاء");xb.style.flex="1";xb.addEventListener("click",closeModal);
     btns.appendChild(sv);btns.appendChild(xb);body.appendChild(btns);
@@ -4853,7 +4979,7 @@ function admPays(){
 
 function modalSettings(){
   openModal("إعدادات النظام",body=>{
-    const box=mk("div","smm-box");const ttl=mk("div","smm-ttl");ttl.innerHTML='<i class="fas fa-plug"></i> SMMParty API';box.appendChild(ttl);
+    const box=mk("div","smm-box");const ttl=mk("div","smm-ttl");ttl.innerHTML='<i class="fas fa-plug"></i> مزودو SMM API';box.appendChild(ttl);
     const kw=mk("div");kw.style.position="relative";const ki=mk("input","inp");ki.type="password";ki.id="sys-key";ki.value=CFG.smm.key;ki.style.cssText="font-family:var(--mono);padding-left:32px";
     const kb=mk("button");kb.style.cssText="position:absolute;left:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--t2);font-size:13px";kb.innerHTML='<i class="fas fa-eye"></i>';kb.addEventListener("click",()=>{ki.type=ki.type==="password"?"text":"password";kb.innerHTML=ki.type==="password"?'<i class="fas fa-eye"></i>':'<i class="fas fa-eye-slash"></i>';});kw.appendChild(ki);kw.appendChild(kb);
     const kf=mk("div","fld");kf.appendChild(mk("label","","API Key"));kf.appendChild(kw);box.appendChild(kf);
@@ -4861,13 +4987,12 @@ function modalSettings(){
     const tb=mk("button","btn bs2","");tb.innerHTML='<i class="fas fa-wifi"></i> اختبار الاتصال';tb.addEventListener("click",async()=>{const k=$("sys-key")?.value;tb.textContent="جاري...";try{const ok2=CFG.smm.key;CFG.smm.key=k;const d=await smmCall({action:"balance"});CFG.smm.key=ok2;if(d?.balance!==undefined)toast("✅ متصل! $"+parseFloat(d.balance).toFixed(2),"ok");else throw new Error(d.error||"فشل");}catch(e){toast("❌ "+e.message,"err");}finally{tb.innerHTML='<i class="fas fa-wifi"></i> اختبار الاتصال';}});
     const sb=mk("button","btn bp","");sb.innerHTML='<i class="fas fa-floppy-disk"></i> حفظ';sb.addEventListener("click",()=>{const k=$("sys-key")?.value;if(!k)return;CFG.smm.key=k;if(FB_OK)DB.ref("config/smm").set({key:k});toast("✅ تم حفظ API Key","ok");});
     btns2.appendChild(tb);btns2.appendChild(sb);box.appendChild(btns2);body.appendChild(box);
-    const fields=[["sys-wl","رقم محفظة فودافون كاش",CFG.settings.vodafoneNumber||CFG.settings.walletNum||""],["sys-ip","رقم إنستاباي",CFG.settings.instapayNumber||""],["sys-ud","عنوان USDT TRC20",CFG.settings.usdtAddress||""],["sys-we","Wise Email",CFG.settings.wiseEmail||""],["sys-ba","رقم الحساب البنكي",CFG.settings.bankAccount||""],["sys-bn","اسم البنك",CFG.settings.bankName||""],["sys-us","سعر الدولار (USD)",String(CFG.settings.usdRate)],["sys-tg","رابط تيليغرام",CFG.settings.tgLink],["sys-wa","رقم واتساب",CFG.settings.waNum]];
+    const fields=[["sys-wl","رقم فودافون كاش",CFG.settings.vodafoneNumber||CFG.settings.walletNum||""],["sys-ip","رقم إنستاباي",CFG.settings.instapayNumber||""],["sys-ud","عنوان USDT TRC20",CFG.settings.usdtAddress||""],["sys-we","Wise Email",CFG.settings.wiseEmail||""],["sys-ba","رقم الحساب البنكي",CFG.settings.bankAccount||""],["sys-bn","اسم البنك",CFG.settings.bankName||""],["sys-us","سعر الصرف الثابت (د.ع لكل 1 USD)",String(CFG.settings.usdRate)],["sys-tg","رابط تلجرام",CFG.settings.tgLink],["sys-wa","رقم واتساب",CFG.settings.waNum]];
     fields.forEach(([id,lbl,val])=>{const f=mk("div","fld");f.appendChild(mk("label","",lbl));const i=mk("input","inp");i.type="text";i.id=id;i.value=val;f.appendChild(i);body.appendChild(f);});
     const sall=mk("button","btn bp btn-w btn-lg","");sall.innerHTML='<i class="fas fa-floppy-disk"></i> حفظ جميع الإعدادات';
     sall.addEventListener("click",()=>{
       const pairs=[["sys-wl","walletNum"],["sys-wl","vodafoneNumber"],["sys-ip","instapayNumber"],["sys-ud","usdtAddress"],["sys-we","wiseEmail"],["sys-ba","bankAccount"],["sys-bn","bankName"],["sys-us","usdRate"],["sys-tg","tgLink"],["sys-wa","waNum"]];
       const upd={};pairs.forEach(([id2,key])=>{const v=$(id2)?.value;if(v){upd[key]=isNaN(v)?v:parseFloat(v);CFG.settings[key]=upd[key];}});
-      upd.usdRate=FIXED_IQD_PER_USD; upd.iqdPerUsd=FIXED_IQD_PER_USD; CFG.settings.usdRate=FIXED_IQD_PER_USD; CFG.settings.iqdPerUsd=FIXED_IQD_PER_USD;
       if(FB_OK)DB.ref("settings").update(upd);
       const k=$("sys-key")?.value;if(k&&FB_OK){CFG.smm.key=k;DB.ref("config/smm").set({key:k});}
       toast("✅ تم حفظ الإعدادات","ok");closeModal();buildPms();
@@ -5034,7 +5159,7 @@ function buildSbCurOptions(){
     menu.querySelectorAll(".cdd-option").forEach(function(o){ o.style.display=o.textContent.toLowerCase().includes(q)?"":"none"; });
   });
   sw.appendChild(si); menu.appendChild(sw);
-  var curs=CFG.curs||[];
+  var curs=(CFG.curs||[]).filter(function(cur){return cur.c==="USD";});
   curs.forEach(function(cur){
     var opt=document.createElement("div");
     opt.className="cdd-option"+(cur.c===CUR?" selected":"");
@@ -5042,7 +5167,7 @@ function buildSbCurOptions(){
     var code=document.createElement("strong"); code.className="cdd-opt-name"; code.textContent=cur.c+" - "+cur.n;
     opt.appendChild(flag); opt.appendChild(code);
     opt.addEventListener("click",function(){
-      CUR=cur.c; localStorage.setItem("sadairaq_currency",CUR);
+      CUR=cur.c; localStorage.setItem("tz_c",CUR);
       // Update topbar trigger
       var fl=$("cur-fl"); if(fl) fl.textContent=cur.f;
       var cd=$("cur-cd"); if(cd) cd.textContent=cur.c;
@@ -5136,13 +5261,13 @@ function modalManageCats() {
 function addSampleSvcs() {
   if (!FB_OK) { toast("تعذر الاتصال","err"); return; }
   const smp = [
-    {app:"Tiktok",name:"متابعين تيك توك عرب",category:"Tiktok | متابعين | عرب",price:0.4,min:100,max:10000,quality:"ممتاز",speed:"24h",source:"local"},
-    {app:"Tiktok",name:"لايكات تيك توك سريعة",category:"Tiktok | لايكات",price:0.1667,min:100,max:50000,quality:"سريع",speed:"1h",source:"local"},
-    {app:"Instagram",name:"متابعين إنستغرام حقيقيين",category:"Instagram | متابعين | حقيقيين",price:0.5,min:100,max:20000,quality:"حقيقيين",speed:"48h",source:"local"},
-    {app:"Instagram",name:"لايكات إنستغرام",category:"Instagram | لايكات",price:0.1333,min:50,max:50000,quality:"عادي",speed:"1h",source:"local"},
-    {app:"Youtube",name:"مشاهدات يوتيوب",category:"Youtube | مشاهدات",price:0.1333,min:1000,max:100000,quality:"عادي",speed:"3h",source:"local"},
-    {app:"Facebook",name:"معجبين صفحة فيسبوك",category:"Facebook | معجبين",price:0.2667,min:100,max:10000,quality:"جيد",speed:"24h",source:"local"},
-    {app:"Telegram",name:"أعضاء قناة تيليغرام",category:"Telegram | أعضاء",price:0.3333,min:100,max:50000,quality:"عادي",speed:"24h",source:"local"}
+    {app:"Tiktok",name:"متابعين تيك توك عرب",category:"Tiktok | متابعين | عرب",price:15000,min:100,max:10000,quality:"ممتاز",speed:"24h",source:"local"},
+    {app:"Tiktok",name:"لايكات تيك توك سريعة",category:"Tiktok | لايكات",price:6250,min:100,max:50000,quality:"سريع",speed:"1h",source:"local"},
+    {app:"Instagram",name:"متابعين انستجرام حقيقيين",category:"Instagram | متابعين | حقيقيين",price:18750,min:100,max:20000,quality:"حقيقيين",speed:"48h",source:"local"},
+    {app:"Instagram",name:"لايكات انستجرام",category:"Instagram | لايكات",price:5000,min:50,max:50000,quality:"عادي",speed:"1h",source:"local"},
+    {app:"Youtube",name:"مشاهدات يوتيوب",category:"Youtube | مشاهدات",price:5000,min:1000,max:100000,quality:"عادي",speed:"3h",source:"local"},
+    {app:"Facebook",name:"معجبين صفحة فيسبوك",category:"Facebook | معجبين",price:10000,min:100,max:10000,quality:"جيد",speed:"24h",source:"local"},
+    {app:"Telegram",name:"أعضاء قناة تلجرام",category:"Telegram | أعضاء",price:12500,min:100,max:50000,quality:"عادي",speed:"24h",source:"local"}
   ];
   Promise.all(smp.map(s => DB.ref("services").push({...s,createdAt:new Date().toISOString()}))).then(() => {
     loadAllSvcs(); toast("✅ تم إضافة "+smp.length+" خدمات تجريبية","ok");
@@ -5234,7 +5359,7 @@ function buildPmForm(body, existing, onSubmit) {
 
   // Fields
   var fields = [
-    {id:'pm-nm',   label:'اسم طريقة الدفع',  val:existing?.nm||'',  placeholder:'مثال: محفظة فودافون كاش'},
+    {id:'pm-nm',   label:'اسم طريقة الدفع',  val:existing?.nm||'',  placeholder:'مثال: فودافون كاش'},
     {id:'pm-ds',   label:'وصف قصير',          val:existing?.ds||'',  placeholder:'مثال: تحويل فوري'},
     {id:'pm-acct', label:'رقم الحساب / العنوان', val:existing?.acct||CFG.settings.walletNum||'', placeholder:'رقم الحساب أو العنوان'},
     {id:'pm-sender-label', label:'تسمية حقل المرسل', val:existing?.senderLabel||'رقم المحوّل منه', placeholder:'مثال: رقم المحوّل منه'}
@@ -5323,6 +5448,8 @@ function loadPmsFromFirebase() {
     if (!snap.exists()) return;
     var data = snap.val();
     if (Array.isArray(data) && data.length) {
+      const hasAsia = data.some(p=>p && p.id==='asiacell');
+      if (!hasAsia) data.push({id:'asiacell',nm:'آسياسيل',ds:'تحويل رصيد آسياسيل',ico:'📲',col:'#19d37f',acct:'07763308188',senderLabel:'رقم آسياسيل'});
       CFG.pms = data;
       buildPms();
     }
@@ -5467,7 +5594,7 @@ async function deleteAllServices() {
 async function restoreAllServices() {
   if (!FB_OK) { toast("تعذر الاتصال","err"); return; }
   if (CFG.settings.importEnabled === false) { toast("⛔ الاستيراد موقوف — فعّله من إعدادات SMMParty","wrn"); return; }
-  if (!CFG.smm.key) { toast("أدخل API Key أولاً من قسم SMMParty","err"); return; }
+  if (!CFG.smm.key) { toast("أدخل API Key أولاً من قسم مزودي SMM","err"); return; }
   if (!confirm("استرداد الخدمات من SMMParty؟ سيتم مسح الخدمات الحالية واستيراد الجديدة.")) return;
 
   const el = document.getElementById("adm-svcs-content");
@@ -5488,7 +5615,7 @@ async function restoreAllServices() {
     const limit  = parseInt(CFG.settings.svcLimit) || 200;
     const markup  = (parseFloat(CFG.settings.markup) || 30) / 100;
     // ── سعر الدولار الحقيقي من الإعدادات ──
-    const usdRate = FIXED_IQD_PER_USD;
+    const usdRate = 1250;
 
     // Delete old services
     await DB.ref("services").remove();
@@ -5501,7 +5628,7 @@ async function restoreAllServices() {
       for (const [k,v] of Object.entries(am)) {
         if ((s.name||"").toLowerCase().includes(k)) { app = v; break; }
       }
-      const baseEgp  = parseFloat(s.rate||0);                       // سعر المزود بالدولار لكل 1000
+      const baseEgp  = parseFloat(s.rate||0) * 1250;             // rate هو $/1000 × EGP/$ = EGP/1000
       const finalEgp = baseEgp * (1 + markup);                       // + هامش الربح
       const key = DB.ref("services").push().key;
       batch["services/" + key] = {
@@ -5525,7 +5652,7 @@ async function restoreAllServices() {
 
     loadAllSvcs();
     loadAdmSvcsFull();
-    toast("✅ تم استرداد " + n + " خدمة · الأسعار بالدولار الأمريكي · هامش: " + Math.round(markup*100) + "%","ok");
+    toast("✅ تم استرداد " + n + " خدمة · سعر الصرف الثابت: 1$ = 1,250 د.ع · هامش: " + Math.round(markup*100) + "%","ok");
   } catch(e) {
     toast("❌ " + e.message,"err");
     loadAdmSvcsFull();
@@ -5609,7 +5736,7 @@ function showAdmPayModal(p){
     var rows=[
       ['fas fa-hashtag','رقم الطلب', p.id||p._k||'—'],
       ['fas fa-user','المستخدم', p.user||'—'],
-      ['fas fa-coins','المبلغ', fmtN(p.amount||0)+' USD'],
+      ['fas fa-coins','المبلغ', fmtN(p.amount||0)+' EGP'],
       ['fas fa-credit-card','طريقة الدفع', p.methodName||p.method||'—'],
       ['fas fa-mobile-alt','رقم/اسم المرسل', p.sender||'—'],
       ['fas fa-receipt','رقم العملية', p.transactionId||'—'],
@@ -5916,7 +6043,7 @@ function renderAdmSettings(){
   var s_price=mk('div','card');s_price.style.cssText='padding:14px;margin-bottom:12px';
   s_price.innerHTML='<div style="font-size:13px;font-weight:700;color:var(--t0);margin-bottom:12px;display:flex;align-items:center;gap:7px"><i class="fas fa-percent" style="color:var(--ylw)"></i> الأسعار وهامش الربح</div>';
   var priceFlds=[
-    ['sys-us','سعر الصرف الثابت',String(CFG.settings.usdRate),'number','مثال: 50'],
+    ['sys-us','سعر الصرف الثابت',String(CFG.settings.usdRate),'number','ثابت: 1250'],
     ['sys-mk','هامش الربح %',String(CFG.settings.markup||30),'number','مثال: 30 (يعني 30%)'],
     ['sys-sl','حد الخدمات (عدد الخدمات المستوردة)',String(CFG.settings.svcLimit||200),'number','مثال: 200'],
   ];
@@ -5928,10 +6055,10 @@ function renderAdmSettings(){
   // Live preview
   var prev=mk('div');prev.style.cssText='background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);padding:10px 12px;font-size:11.5px;color:var(--t1);margin-top:4px;margin-bottom:10px';
   function updatePrev(){
-    var ur=parseFloat(document.getElementById('sys-us')?.value)||30;
+    var ur=1250;
     var mk2=parseFloat(document.getElementById('sys-mk')?.value)||30;
-    var base=(1*ur); var final2=base*(1+mk2/100);
-    prev.innerHTML='<i class="fas fa-calculator" style="color:var(--blue)"></i> مثال: خدمة سعرها <b>$1/1000</b> → تكلفة <b>'+base.toFixed(3)+' USD/1000</b> → سعر بيع <b style="color:var(--blue)">'+final2.toFixed(3)+' USD/1000</b> (هامش '+mk2+'%)';
+    var base=ur; var final2=base*(1+mk2/100);
+    prev.innerHTML='<i class="fas fa-calculator" style="color:var(--blue)"></i> مثال: خدمة سعرها <b>$1/1000</b> → تكلفة <b>'+base.toFixed(3)+' EGP/1000</b> → سعر بيع <b style="color:var(--blue)">'+final2.toFixed(3)+' EGP/1000</b> (هامش '+mk2+'%)';
   }
   document.getElementById('sys-us')?.addEventListener('input',updatePrev);
   document.getElementById('sys-mk')?.addEventListener('input',updatePrev);
@@ -5939,16 +6066,16 @@ function renderAdmSettings(){
   setTimeout(updatePrev,100);
   var svb2=mk('button','btn bp btn-w','');svb2.innerHTML='<i class="fas fa-floppy-disk"></i> حفظ إعدادات الأسعار';
   svb2.addEventListener('click',function(){
-    var ur=parseFloat(document.getElementById('sys-us')?.value)||30;
+    var ur=1250;
     var mk3=parseFloat(document.getElementById('sys-mk')?.value)||30;
     var sl=parseInt(document.getElementById('sys-sl')?.value)||200;
-    CFG.settings.usdRate=FIXED_IQD_PER_USD; CFG.settings.iqdPerUsd=FIXED_IQD_PER_USD; CFG.settings.markup=mk3; CFG.settings.svcLimit=sl;
-    if(FB_OK)DB.ref('settings').update({usdRate:FIXED_IQD_PER_USD,iqdPerUsd:FIXED_IQD_PER_USD,markup:mk3,svcLimit:sl});
+    CFG.settings.usdRate=1250; CFG.settings.markup=mk3; CFG.settings.svcLimit=sl;
+    if(FB_OK)DB.ref('settings').update({usdRate:1250,markup:mk3,svcLimit:sl});
     toast('✅ تم حفظ إعدادات الأسعار — أعد استيراد الخدمات لتطبيق الهامش الجديد','ok');
   });
   s_price.appendChild(svb2);el.appendChild(s_price);
 
-  var fields=[['sys-wl','رقم محفظة فودافون كاش',CFG.settings.vodafoneNumber||CFG.settings.walletNum||''],['sys-ip','رقم إنستاباي',CFG.settings.instapayNumber||''],['sys-ud','عنوان USDT TRC20',CFG.settings.usdtAddress||''],['sys-we','Wise Email',CFG.settings.wiseEmail||''],['sys-ba','رقم الحساب البنكي',CFG.settings.bankAccount||''],['sys-bn','اسم البنك',CFG.settings.bankName||''],['sys-tg','رابط تيليغرام',CFG.settings.tgLink],['sys-wa','رقم واتساب',CFG.settings.waNum]];
+  var fields=[['sys-wl','رقم فودافون كاش',CFG.settings.vodafoneNumber||CFG.settings.walletNum||''],['sys-ip','رقم إنستاباي',CFG.settings.instapayNumber||''],['sys-ud','عنوان USDT TRC20',CFG.settings.usdtAddress||''],['sys-we','Wise Email',CFG.settings.wiseEmail||''],['sys-ba','رقم الحساب البنكي',CFG.settings.bankAccount||''],['sys-bn','اسم البنك',CFG.settings.bankName||''],['sys-tg','رابط تلجرام',CFG.settings.tgLink],['sys-wa','رقم واتساب',CFG.settings.waNum]];
   var s2=mk('div','card');s2.style.padding='14px';
   s2.innerHTML='<div style="font-size:13px;font-weight:700;color:var(--t0);margin-bottom:12px;display:flex;align-items:center;gap:7px"><i class="fas fa-credit-card" style="color:var(--blue)"></i> إعدادات طرق الدفع</div>';
   fields.forEach(([id,lbl,val])=>{var f=mk('div','fld');f.appendChild(mk('label','',lbl));var i=mk('input','inp');i.type='text';i.id=id;i.value=val;f.appendChild(i);s2.appendChild(f);});
