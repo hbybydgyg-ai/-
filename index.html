@@ -6461,7 +6461,7 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 ═══════════════════════════════════════════════════════════════ */
 (function(){
   'use strict';
-  const SADA_VERSION='1.2.0';
+  const SADA_VERSION='1.2.1';
   const RATE=1250;
   const ATHIR_NUMBER='07903221783';
     window.SadaIraqVersion=SADA_VERSION;
@@ -6699,7 +6699,8 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 
   // Prevent accidental exposure of the backend receiver in wallet UI.
   function hideReceiverText(){
-    const txt=el('sadairaq-ac-entry')?.querySelector('span span'); if(txt)txt.textContent='اضغط لفتح قسم شحن آسياسيل المستقل';
+    const txt=el('sadairaq-ac-entry')?.querySelector('span span');
+    if(txt && txt.textContent!=='اضغط لفتح قسم شحن آسياسيل المستقل') txt.textContent='اضغط لفتح قسم شحن آسياسيل المستقل';
   }
 
   // Provider import separation: keep full provider catalog under providerServices and only selected services in local services.
@@ -6724,6 +6725,8 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 
   document.addEventListener('DOMContentLoaded',()=>{addStyles();addVersionBadge();bindRechargeEntries();hideReceiverText();loadServerSettings();setTimeout(showAllServicesOnOrder,250)});
   if(document.readyState!=='loading'){addStyles();addVersionBadge();bindRechargeEntries();hideReceiverText();loadServerSettings();setTimeout(showAllServicesOnOrder,250);}
-  new MutationObserver(()=>{bindRechargeEntries();hideReceiverText();}).observe(document.body,{childList:true,subtree:true});
+  // لا نستخدم مراقب DOM عامًا هنا: bindRechargeEntries يكفي عند إنشاء واجهة المحفظة،
+  // ومراقبة document.body كانت تعيد تشغيل نفسها بسبب تغيير نص قسم آسياسيل، ما يسبب
+  // حلقة MutationObserver تستهلك المعالج وتجمّد أزرار تسجيل الدخول/الواجهة.
 })();
 </script>
