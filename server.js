@@ -2,18 +2,26 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const dns = require('dns').promises;
+const net = require('net');
 const {URL} = require('url');
 
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.5.9';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
 const FIXED_RATE = 1250; // 1 USD = 1,250 IQD
 const sessions = new Map();
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+const RATE_BUCKETS = new Map();
+const RATE_RULES = { auth:{window:60_000,max:12}, provider:{window:60_000,max:20}, order:{window:60_000,max:20}, general:{window:60_000,max:60} };
+function clientIp(req){ return String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim(); }
+function rateLimit(req,bucket='general'){ const r=RATE_RULES[bucket]||RATE_RULES.general; const key=clientIp(req)+'|'+bucket; const now=Date.now(); let x=RATE_BUCKETS.get(key); if(!x||now-x.started>r.window)x={started:now,count:0}; x.count++; RATE_BUCKETS.set(key,x); if(x.count>r.max){ return Math.ceil((x.started+r.window-now)/1000); } return 0; }
+setInterval(()=>{ const now=Date.now(); for(const [k,v] of RATE_BUCKETS) if(now-v.started>120_000) RATE_BUCKETS.delete(k); for(const [k,v] of sessions) if(now-(v.createdAt||0)>SESSION_TTL_MS) sessions.delete(k); }, 120_000).unref();
 
 function ensureData() { if (!fs.existsSync(DATA)) fs.mkdirSync(DATA, {recursive:true}); }
 function readJSON(file, fallback) {
@@ -43,18 +51,18 @@ function parseCookies(req){
   return out;
 }
 function sid(req){ return parseCookies(req).sadairaq_sid || ''; }
-function session(req){ const id=sid(req); return id ? sessions.get(id) : null; }
+function session(req){ const id=sid(req); if(!id) return null; const v=sessions.get(id); if(!v) return null; if(Date.now()-(v.createdAt||0)>SESSION_TTL_MS){sessions.delete(id);return null;} return v;}
 function setSession(res, value){
   const id=crypto.randomBytes(24).toString('hex');
   sessions.set(id,{...value,createdAt:Date.now()});
-  const secure = (false ? 'Secure; ' : '');
+  const secure = (String(process.env.COOKIE_SECURE||'auto').toLowerCase()==='true' || (String(process.env.COOKIE_SECURE||'auto').toLowerCase()==='auto' && String(res._forwardedProto||'').toLowerCase()==='https')) ? 'Secure; ' : '';
   res.setHeader('Set-Cookie',`sadairaq_sid=${encodeURIComponent(id)}; Path=/; HttpOnly; SameSite=Lax; ${secure}Max-Age=86400`);
 }
 async function bodyJSON(req){
-  let raw='';
-  for await (const chunk of req) raw += chunk;
+  const limit=256*1024; let raw='';
+  for await (const chunk of req){ raw += chunk; if(Buffer.byteLength(raw,'utf8')>limit){ const e=new Error('حجم الطلب أكبر من المسموح'); e.statusCode=413; throw e; } }
   if(!raw) return {};
-  try{return JSON.parse(raw)}catch(_){return {};}
+  try{return JSON.parse(raw)}catch(_){ const e=new Error('JSON غير صالح'); e.statusCode=400; throw e; }
 }
 function cookieRefresh(res, req){ const s=session(req); if(s) { const id=sid(req); if(id) res.setHeader('X-Session','ok'); } }
 function isAdmin(req){ return session(req)?.role === 'admin'; }
@@ -88,6 +96,20 @@ function normalizeProviderBalance(d){
 function normalizeProviderCurrency(d){
   return String(d?.currency||d?.data?.currency||d?.result?.currency||d?.account?.currency||'USD').toUpperCase();
 }
+
+function normalizeProviderServices(d){
+  if(Array.isArray(d)) return d;
+  if(Array.isArray(d?.services)) return d.services;
+  if(Array.isArray(d?.data)) return d.data;
+  if(Array.isArray(d?.result)) return d.result;
+  if(Array.isArray(d?.items)) return d.items;
+  for(const key of ['services','data','result','items']){
+    const obj=d?.[key];
+    if(obj && typeof obj==='object' && !Array.isArray(obj)) return Object.entries(obj).map(([service,v])=>({service,...(v&&typeof v==='object'?v:{value:v})}));
+  }
+  return [];
+}
+
 function providerActionSucceeded(action,d,orderId=''){
   if(action!=='cancel') return true;
   const okCancel=(v)=>v===1||v==='1'||v===true||(v&&typeof v==='object'&&!v.error&&(v.cancel===1||v.success===true));
@@ -105,9 +127,25 @@ function normalizeWhatsAppUrl(v){
 function normalizeWhatsAppNumber(v){
   const url=normalizeWhatsAppUrl(v); const m=url.match(/wa\.me\/(\d+)/i); return m?m[1]: '9647762267959';
 }
+function isPrivateAddress(address){
+  const a=String(address||'').toLowerCase();
+  if(net.isIPv4(a)){ const p=a.split('.').map(Number); return p[0]===10 || p[0]===127 || (p[0]===169&&p[1]===254) || p[0]===0 || (p[0]===192&&p[1]===168) || (p[0]===172&&p[1]>=16&&p[1]<=31); }
+  if(net.isIPv6(a)){ return a==='::1'||a.startsWith('fc')||a.startsWith('fd')||a.startsWith('fe8')||a.startsWith('fe9')||a.startsWith('fea')||a.startsWith('feb'); }
+  return false;
+}
+async function validateProviderUrl(raw){
+  const u=new URL(String(raw||'').trim());
+  if(!/^https?:$/.test(u.protocol)) throw new Error('API URL يجب أن يبدأ بـ http:// أو https://');
+  const h=u.hostname.toLowerCase(); if(h==='localhost'||h.endsWith('.localhost')||h.endsWith('.local')||h.endsWith('.internal')) throw new Error('عنوان المزود غير مسموح');
+  const records=await dns.lookup(h,{all:true,verbatim:true}); if(!records.length) throw new Error('تعذر حل اسم مزود API');
+  if(records.some(x=>isPrivateAddress(x.address))) throw new Error('عنوان API داخلي أو خاص غير مسموح');
+  return u;
+}
+
 async function providerRequest(prov,params,timeoutMs=30000){
   if(!prov?.url||!prov?.key) throw new Error('بيانات المزود غير مكتملة');
   const rawUrl=String(prov.url).trim();
+  await validateProviderUrl(rawUrl);
   const base=rawUrl.replace(/\/+$/,'');
   const endpoints=[base,base+'/'].filter((v,i,a)=>a.indexOf(v)===i);
   const payload=new URLSearchParams();
@@ -119,7 +157,7 @@ async function providerRequest(prov,params,timeoutMs=30000){
       const controller=new AbortController();
       const timer=setTimeout(()=>controller.abort(),timeoutMs);
       try{
-        const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8','Accept':'application/json,text/plain,*/*','User-Agent':'SadaIraq/1.5.0'},body:payload.toString(),redirect:'follow',signal:controller.signal});
+        const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8','Accept':'application/json,text/plain,*/*','User-Agent':'SadaIraq/1.5.9'},body:payload.toString(),redirect:'follow',signal:controller.signal});
         const text=await r.text();
         let d={};
         try{d=text?JSON.parse(text):{};}catch(_){d={raw:text};}
@@ -134,6 +172,28 @@ async function providerRequest(prov,params,timeoutMs=30000){
         if(retryable&&attempt<3){await new Promise(r=>setTimeout(r,250*attempt));continue;}
         break;
       }finally{clearTimeout(timer);}
+    }
+  }
+  // Compatibility fallbacks for READ operations only. Never retry order creation here,
+  // because a provider could accept an order even when the response is unusual.
+  if(['balance','services'].includes(String(params?.action||''))){
+    for(const endpoint of endpoints){
+      const variants = [
+        {method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json,text/plain,*/*','User-Agent':'SadaIraq/1.5.9'}, body:JSON.stringify(Object.fromEntries(payload.entries()))},
+        {method:'GET', headers:{'Accept':'application/json,text/plain,*/*','User-Agent':'SadaIraq/1.5.9'}, body:null, url:endpoint+'?'+payload.toString()}
+      ];
+      for(const v of variants){
+        const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),timeoutMs);
+        try{
+          const r=await fetch(v.url||endpoint,{method:v.method,headers:v.headers,body:v.body,redirect:'follow',signal:controller.signal});
+          const t=await r.text(); let d={}; try{d=t?JSON.parse(t):{};}catch(_){d={raw:t};}
+          if(!r.ok) continue;
+          if(d&&typeof d==='object'&&d.error) continue;
+          return d;
+        }catch(_){
+          // keep trying compatible read formats
+        }finally{clearTimeout(timer);}
+      }
     }
   }
   if(lastError?.name==='AbortError') throw lastError;
@@ -234,11 +294,11 @@ async function apiAsiacell(req,res){
 }
 
 async function apiSmm(req,res,urlObj){
+  const wait=rateLimit(req,'provider'); if(wait) return json(res,429,{error:'طلبات المزود كثيرة، أعد المحاولة لاحقاً'},{'Retry-After':String(wait)});
   if(!isAdmin(req)) return json(res,403,{error:'غير مصرح'});
   const store=readJSON('providers.json',{activeProvider:'',providers:{}});
   const providerId=String(urlObj.searchParams.get('provider')||store.activeProvider||'');
   let prov=(store.providers||{})[providerId];
-  if(!prov && isAdmin(req)){ const u=String(urlObj.searchParams.get('_url')||''); const k=String(urlObj.searchParams.get('_key')||''); if(/^https?:\/\//i.test(u)&&k)prov={name:'اختبار',url:u,key:k}; }
   if(!prov)return json(res,404,{error:'لا يوجد مزود محفوظ أو جلسة الإدارة منتهية'});
   const action=String(urlObj.searchParams.get('action')||'balance');
   if(!['balance','services','add','status','cancel'].includes(action))return json(res,422,{error:'عملية غير مدعومة'});
@@ -263,10 +323,15 @@ function writeNotificationSeen(v){ writeJSON('notification_seen.json',v&&typeof 
 function notifId(){ return 'N'+Date.now().toString(36)+crypto.randomBytes(3).toString('hex'); }
 function sanitizeNotification(n){ return {id:String(n.id||''),title:String(n.title||''),message:String(n.message||''),url:String(n.url||''),required:!!n.required,active:n.active!==false,createdAt:n.createdAt||new Date().toISOString(),updatedAt:n.updatedAt||n.createdAt||new Date().toISOString()}; }
 
+function ownedProviderOrder(username,providerId,providerOrderId){
+  const rows=readJSON('orders.json',[]); return Array.isArray(rows) && rows.some(x=>String(x.user||'')===String(username||'') && String(x.providerId||'')===String(providerId||'') && String(x.providerOrderId||'')===String(providerOrderId||''));
+}
+
 async function routeAPI(req,res,urlObj){
   const p=normalizedPath(urlObj.pathname);
   if(p==='/api/config'){ const cfg=readJSON('settings.json',{}); const waUrl=normalizeWhatsAppUrl(cfg.waUrl||cfg.waNum||'https://wa.me/9647762267959'); return json(res,200,{appName:APP_NAME,version:APP_VERSION,currency:'USD',exchangeRate:FIXED_RATE,fixedRecharge:'5000 IQD = 4 USD',rateTable:[1000,2000,3000,4000,5000,6000,7000,8000,9000,10000].map(i=>({iqd:i,usd:i/FIXED_RATE})),supportWhatsappUrl:waUrl,supportWhatsappNumber:normalizeWhatsAppNumber(waUrl),telegramChannelUrl:'https://t.me/jbhbhg58'}); }
   if(p==='/api/auth' && req.method==='POST'){
+    const wait=rateLimit(req,'auth'); if(wait) return json(res,429,{ok:false,error:'محاولات كثيرة، أعد المحاولة بعد '+wait+' ثانية'},{'Retry-After':String(wait)});
     const b=await bodyJSON(req); const u=String(b.username||'').trim(); const pw=String(b.password||'');
     if(String(b.action||'')==='register'){
       if(!/^[a-zA-Z0-9_]+$/.test(u)) return json(res,422,{ok:false,error:'اسم المستخدم يجب أن يكون بالإنجليزية والأرقام فقط'});
@@ -297,6 +362,7 @@ async function routeAPI(req,res,urlObj){
     return json(res,200,{ok:true,mastercard:cfg.mastercard});
   }
   if(p==='/api/provider/diagnostics' && req.method==='POST'){
+    const wait=rateLimit(req,'provider'); if(wait)return json(res,429,{ok:false,error:'طلبات فحص المزود كثيرة، أعد المحاولة لاحقاً'},{'Retry-After':String(wait)});
     if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
     const b=await bodyJSON(req); const prov={name:String(b.name||'مزود'),url:String(b.url||'').trim(),key:String(b.key||'').trim()};
     if(!/^https?:\/\//i.test(prov.url)||!prov.key)return json(res,422,{ok:false,error:'رابط API أو مفتاح API غير صالح'});
@@ -307,7 +373,7 @@ async function routeAPI(req,res,urlObj){
       out.connection={ok:true}; out.balance={ok:true,balance,currency:normalizeProviderCurrency(bd),raw:bd};
     }catch(e){ out.balance={ok:false,error:e.name==='AbortError'?'انتهت مهلة جلب الرصيد':e.message}; }
     try{
-      const sd=await providerRequest(prov,{action:'services'}); const list=Array.isArray(sd)?sd:(Array.isArray(sd.services)?sd.services:(Array.isArray(sd.data)?sd.data:[]));
+      const sd=await providerRequest(prov,{action:'services'}); const list=normalizeProviderServices(sd);
       if(!list.length) throw new Error('المزود لم يرجع أي خدمات');
       out.services={ok:true,count:list.length}; out.connection={ok:true};
     }catch(e){ out.services={ok:false,error:e.name==='AbortError'?'انتهت مهلة جلب الخدمات':e.message}; }
@@ -330,20 +396,22 @@ async function routeAPI(req,res,urlObj){
   if(p==='/api/notifications/seen' && req.method==='POST'){
     const s=session(req); if(!s||s.role!=='user')return json(res,401,{ok:false,error:'يجب تسجيل الدخول'}); const b=await bodyJSON(req); const id=String(b.id||''); if(!id)return json(res,422,{ok:false,error:'معرف الإشعار مطلوب'}); const seen=readNotificationSeen(); seen[s.username]=seen[s.username]||{}; seen[s.username][id]=new Date().toISOString(); writeNotificationSeen(seen); return json(res,200,{ok:true});
   }
-  if(p==='/api/provider/balance' && req.method==='GET'){ if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'}); const {prov,pid}=getProviderById(urlObj.searchParams.get('provider')); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'}); try{const d=await providerRequest(prov,{action:'balance'}); const balance=normalizeProviderBalance(d); if(balance===null)return json(res,502,{ok:false,error:'المزود لم يرجع قيمة رصيد صالحة',raw:d}); return json(res,200,{ok:true,providerId:pid,providerName:prov.name||pid,balance,currency:normalizeProviderCurrency(d),raw:d,checkedAt:new Date().toISOString()});}catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});} }
+  if(p==='/api/provider/balance' && req.method==='GET'){ const wait=rateLimit(req,'provider'); if(wait)return json(res,429,{ok:false,error:'طلبات الرصيد كثيرة، أعد المحاولة لاحقاً'},{'Retry-After':String(wait)}); if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'}); const {prov,pid}=getProviderById(urlObj.searchParams.get('provider')); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'}); try{const d=await providerRequest(prov,{action:'balance'}); const balance=normalizeProviderBalance(d); if(balance===null)return json(res,502,{ok:false,error:'المزود لم يرجع قيمة رصيد صالحة',raw:d}); return json(res,200,{ok:true,providerId:pid,providerName:prov.name||pid,balance,currency:normalizeProviderCurrency(d),raw:d,checkedAt:new Date().toISOString()});}catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});} }
   if(p==='/api/provider/test' && req.method==='POST'){
+    const wait=rateLimit(req,'provider'); if(wait)return json(res,429,{ok:false,error:'طلبات اختبار المزود كثيرة، أعد المحاولة لاحقاً'},{'Retry-After':String(wait)});
     if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
     const b=await bodyJSON(req); const prov={name:String(b.name||'مزود مؤقت'),url:String(b.url||'').trim(),key:String(b.key||'').trim()};
     if(!/^https?:\/\//i.test(prov.url)||!prov.key) return json(res,422,{ok:false,error:'رابط API أو مفتاح API غير صالح'});
     const out={connection:{ok:false},balance:{ok:false},services:{ok:false}};
     try{ const d=await providerRequest(prov,{action:'balance'}); const balance=normalizeProviderBalance(d); if(balance===null) throw new Error('API لم يرجع رصيداً رقمياً'); out.connection={ok:true}; out.balance={ok:true,balance,currency:normalizeProviderCurrency(d)}; }
     catch(e){ out.balance={ok:false,error:e.name==='AbortError'?'انتهت مهلة جلب الرصيد':e.message}; }
-    try{ const d=await providerRequest(prov,{action:'services'}); const list=Array.isArray(d)?d:(d.services||d.data||[]); out.services={ok:Array.isArray(list)&&list.length>0,count:Array.isArray(list)?list.length:0,error:Array.isArray(list)&&list.length?'':'لم يرجع خدمات'}; if(out.services.ok && !out.connection.ok) out.connection={ok:true}; }
+    try{ const d=await providerRequest(prov,{action:'services'}); const list=normalizeProviderServices(d); out.services={ok:Array.isArray(list)&&list.length>0,count:Array.isArray(list)?list.length:0,error:Array.isArray(list)&&list.length?'':'لم يرجع خدمات'}; if(out.services.ok && !out.connection.ok) out.connection={ok:true}; }
     catch(e){ out.services={ok:false,error:e.name==='AbortError'?'انتهت مهلة جلب الخدمات':e.message}; }
     if(!out.connection.ok) out.connection={ok:false,error:out.balance.error||out.services.error||'فشل الاتصال بالمزود'};
     return json(res,200,{ok:out.connection.ok&&out.balance.ok&&out.services.ok,providerName:prov.name,diagnostics:out,checkedAt:new Date().toISOString()});
   }
   if(p==='/api/order/create' && req.method==='POST'){
+    const wait=rateLimit(req,'order'); if(wait)return json(res,429,{ok:false,error:'طلبات كثيرة، أعد المحاولة بعد قليل'},{'Retry-After':String(wait)});
     const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'});
     const b=await bodyJSON(req); const providerId=String(b.providerId||''); const serviceId=String(b.serviceId||''); const link=String(b.link||'').trim(); const quantity=Number(b.quantity);
     if(!providerId||!serviceId||!link||!Number.isInteger(quantity)||quantity<=0)return json(res,422,{ok:false,error:'بيانات الطلب غير مكتملة'});
@@ -360,12 +428,14 @@ async function routeAPI(req,res,urlObj){
     }catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});}
   }
   if(p==='/api/order/status' && req.method==='POST'){
-    const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'}); const b=await bodyJSON(req); const providerId=String(b.providerId||''); const providerOrderId=String(b.providerOrderId||''); if(!providerId||!providerOrderId)return json(res,422,{ok:false,error:'بيانات التحقق ناقصة'}); const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
+    const wait=rateLimit(req,'order'); if(wait)return json(res,429,{ok:false,error:'طلبات كثيرة، أعد المحاولة بعد قليل'},{'Retry-After':String(wait)});
+    const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'}); const b=await bodyJSON(req); const providerId=String(b.providerId||''); const providerOrderId=String(b.providerOrderId||''); if(!providerId||!providerOrderId)return json(res,422,{ok:false,error:'بيانات التحقق ناقصة'}); if(!ownedProviderOrder(username,providerId,providerOrderId))return json(res,403,{ok:false,error:'هذا الطلب لا يتبع حسابك'}); const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
     try{const d=await providerRequest(prov,{action:'status',order:providerOrderId}); const status=String(d.status||''); return json(res,200,{ok:true,providerOrderId,status,normalizedStatus:normalizeProviderStatus(status),remains:d.remains,startCount:d.start_count??d.startCount,charge:d.charge,currency:d.currency||'USD',raw:d,checkedAt:new Date().toISOString()});}
     catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});}
   }
   if(p==='/api/order/cancel' && req.method==='POST'){
-    const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'}); const b=await bodyJSON(req); const providerId=String(b.providerId||''); const providerOrderId=String(b.providerOrderId||''); if(!providerId||!providerOrderId)return json(res,422,{ok:false,error:'بيانات الإلغاء ناقصة'}); const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
+    const wait=rateLimit(req,'order'); if(wait)return json(res,429,{ok:false,error:'طلبات كثيرة، أعد المحاولة بعد قليل'},{'Retry-After':String(wait)});
+    const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'}); const b=await bodyJSON(req); const providerId=String(b.providerId||''); const providerOrderId=String(b.providerOrderId||''); if(!providerId||!providerOrderId)return json(res,422,{ok:false,error:'بيانات الإلغاء ناقصة'}); if(!ownedProviderOrder(username,providerId,providerOrderId))return json(res,403,{ok:false,error:'هذا الطلب لا يتبع حسابك'}); const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
     try{const d=await providerRequest(prov,{action:'cancel',orders:providerOrderId}); if(!providerActionSucceeded('cancel',d,providerOrderId)) return json(res,502,{ok:false,error:'المزود لم يؤكد إلغاء الطلب',providerRaw:d}); appendJsonLedger('orders.json',{event:'cancel',user:username,providerId,providerOrderId,status:'cancelled',createdAt:new Date().toISOString(),providerRaw:d}); return json(res,200,{ok:true,providerOrderId,status:'cancelled',providerRaw:d,updatedAt:new Date().toISOString()});}
     catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});}
   }
@@ -388,23 +458,31 @@ async function routeAPI(req,res,urlObj){
     writeJSON('providers.json',readJSON('providers.json',{activeProvider:'',providers:{}}));
     return json(res,200,{ok:true,message:'تم تنظيف بيانات Railway والبدء من جديد'});
   }
+  if(p==='/api/provider/secret' && req.method==='GET') {
+    if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
+    const id=String(urlObj.searchParams.get('provider')||''); const {prov}=getProviderById(id); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
+    return json(res,200,{ok:true,providerId:id,key:String(prov.key||'')});
+  }
   if(p==='/api/providers'){
     const store=readJSON('providers.json',{activeProvider:'',providers:{}});
     if(req.method==='GET'){
       if(!isAdmin(req)) return json(res,403,{error:'غير مصرح'});
-      const safe={}; for(const [id,v] of Object.entries(store.providers||{})) safe[id]={id,name:v.name||id,url:v.url||'',key:v.key||''};
+      const safe={}; for(const [id,v] of Object.entries(store.providers||{})) safe[id]={id,name:v.name||id,url:v.url||'',hasKey:!!v.key};
       return json(res,200,{activeProvider:store.activeProvider||'',providers:safe});
     }
     if(req.method==='POST'){
       if(!isAdmin(req)) return json(res,403,{error:'غير مصرح'});
-      const b=await bodyJSON(req); const list=Array.isArray(b.providers)?b.providers:[]; const out={};
+      const b=await bodyJSON(req); const list=Array.isArray(b.providers)?b.providers:[];
+      const incoming={};
       for(const item of list){
         if(!item||typeof item!=='object') continue;
         const id=String(item.id||'').replace(/[^a-zA-Z0-9_-]/g,''); const name=String(item.name||'').trim(); const apiUrl=String(item.url||'').trim(); const key=String(item.key||'').trim();
-        if(id&&name&&/^https?:\/\//i.test(apiUrl)&&key) out[id]={name,url:apiUrl,key};
+        const preserved=String((store.providers||{})[id]?.key||''); if(id&&name&&/^https?:\/\//i.test(apiUrl)&&(key||preserved)) incoming[id]={name,url:apiUrl,key:key||preserved};
       }
-      writeJSON('providers.json',{activeProvider:String(b.activeProvider||''),providers:out,updatedAt:new Date().toISOString()});
-      return json(res,200,{ok:true,count:Object.keys(out).length});
+      const out = b.mode==='merge' ? {...(store.providers||{}), ...incoming} : incoming;
+      const active = String(b.activeProvider!==undefined ? b.activeProvider : (store.activeProvider||''));
+      writeJSON('providers.json',{activeProvider:active,providers:out,updatedAt:new Date().toISOString()});
+      return json(res,200,{ok:true,count:Object.keys(out).length,activeProvider:active});
     }
   }
   if(p==='/api/smm') return apiSmm(req,res,urlObj);
@@ -432,12 +510,15 @@ function serveStatic(req,res,urlObj){
 ensureData();
 const server=http.createServer(async (req,res)=>{
   try{
+    res._forwardedProto=String(req.headers['x-forwarded-proto']||'').split(',')[0].trim();
     res.setHeader('X-Content-Type-Options','nosniff');
     res.setHeader('X-Frame-Options','SAMEORIGIN');
     res.setHeader('Referrer-Policy','strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');
+    if(res._forwardedProto==='https') res.setHeader('Strict-Transport-Security','max-age=15552000; includeSubDomains');
     const u=new URL(req.url,`http://${req.headers.host||'localhost'}`);
     if(u.pathname.startsWith('/api/')) return routeAPI(req,res,u);
     return serveStatic(req,res,u);
-  }catch(e){ return json(res,500,{error:'Server error',message:e.message}); }
+  }catch(e){ const st=Number(e?.statusCode)||500; return json(res,st,{error:st===500?'Server error':e.message}); }
 });
 server.listen(PORT,'0.0.0.0',()=>console.log(`${APP_NAME} running on port ${PORT}`));
