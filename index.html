@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0a0e1a">
-<title>صدى العراق · v1.5.1</title>
+<title>صدى العراق · v1.5.3</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
@@ -6721,7 +6721,7 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 ═══════════════════════════════════════════════════════════════ */
 (function(){
   'use strict';
-  const SADA_VERSION='1.5.1';
+  const SADA_VERSION='1.5.3';
   const RATE=1250;
   const ATHIR_NUMBER='07903221783';
     window.SadaIraqVersion=SADA_VERSION;
@@ -7012,11 +7012,10 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 ═══════════════════════════════════════════════════════════════ */
 (function(){
   'use strict';
-  const V='1.5.1', RATE=1250, DEFAULT_WA='https://wa.me/9647762267959';
+  const V='1.5.3', RATE=1250, DEFAULT_WA='https://wa.me/9647762267959';
   const $=id=>document.getElementById(id), txt=v=>String(v??''), api=(p,o)=>fetch(p,Object.assign({credentials:'include',cache:'no-store',headers:{'Content-Type':'application/json'}},o||{})).then(async r=>{const t=await r.text();let d={};try{d=t?JSON.parse(t):{}}catch(_){d={error:t||('HTTP '+r.status)}};if(!r.ok||d.error)throw new Error(d.error||('HTTP '+r.status));return d;});
   const ensure=fn=>document.readyState==='loading'?document.addEventListener('DOMContentLoaded',fn,{once:true}):fn();
   window.SECTION_META=window.SECTION_META||{};
-  let SECTION_META=window.SECTION_META;
   window.SadaIraqVersion=V;
 
   function safe(v){return txt(v).replace(/[&<>\"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[m]));}
@@ -7089,7 +7088,7 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
   const oldParse=window.parseSvcsArr||parseSvcsArr;
   window.parseSvcsArr=function(arr){
     ALL_CATS={}; ALL_SVCS_ARR=[]; SVCS={};
-    Object.keys(SECTION_META).forEach(g=>{ALL_CATS[g]=[]});
+    Object.keys(window.SECTION_META).forEach(g=>{ALL_CATS[g]=[]});
     (arr||[]).forEach(s=>{
       s.apps=normalizeApps(s); s.groups=normalizeGroups(s); s.app=s.apps[0]||s.app||'Other'; s.category=s.groups[0]||s.category||s.app;
       SVCS[s.fbKey]=s; ALL_SVCS_ARR.push(s);
@@ -7126,9 +7125,9 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
   /* category dropdown includes multi-group services and platform-aware filtering */
   window.buildCatDD=function(platId){
     const menu=$('cat-options');if(!menu)return;menu.innerHTML='';let cats=Object.keys(ALL_CATS||{});
-    if(SEL_PLAT){cats=cats.filter(c=>{const list=ALL_CATS[c]||[];const meta=SECTION_META[c];return list.some(s=>normalizeApps(s).includes(SEL_PLAT))||(meta?.platforms||[]).includes(SEL_PLAT);});}
+    if(SEL_PLAT){cats=cats.filter(c=>{const list=ALL_CATS[c]||[];const meta=window.SECTION_META[c];return list.some(s=>normalizeApps(s).includes(SEL_PLAT))||(meta?.platforms||[]).includes(SEL_PLAT);});}
     if(!cats.length){menu.appendChild(mk('div','cdd-empty','لا توجد أقسام لهذه المنصة'));return;}
-    cats.sort((a,b)=>a.localeCompare(b,'ar')).forEach(cat=>{const list=(ALL_CATS[cat]||[]).filter(s=>!SEL_PLAT||normalizeApps(s).includes(SEL_PLAT));const meta=SECTION_META[cat]||{};const opt=mk('div','cdd-option');opt.style.cssText='gap:8px';const first=list[0];const img=mk('img','sada-svc-thumb');img.src=first?.image||meta.image||'sadairaq-logo.jpg';img.onerror=()=>img.src='sadairaq-logo.jpg';opt.appendChild(img);opt.appendChild(mk('span','cdd-opt-name',cat));opt.appendChild(mk('span','cdd-opt-badge',String(list.length)));const hint=mk('span','',list.length?'':'قسم جديد');hint.style.cssText='font-size:9px;color:var(--t3);margin-inline-start:auto';opt.appendChild(hint);opt.onclick=()=>{SEL_CAT=cat;$('cat-label').textContent=cat;closeAllCDD();window.buildSvcDD(cat)};menu.appendChild(opt)});
+    cats.sort((a,b)=>a.localeCompare(b,'ar')).forEach(cat=>{const list=(ALL_CATS[cat]||[]).filter(s=>!SEL_PLAT||normalizeApps(s).includes(SEL_PLAT));const meta=window.SECTION_META[cat]||{};const opt=mk('div','cdd-option');opt.style.cssText='gap:8px';const first=list[0];const img=mk('img','sada-svc-thumb');img.src=first?.image||meta.image||'sadairaq-logo.jpg';img.onerror=()=>img.src='sadairaq-logo.jpg';opt.appendChild(img);opt.appendChild(mk('span','cdd-opt-name',cat));opt.appendChild(mk('span','cdd-opt-badge',String(list.length)));const hint=mk('span','',list.length?'':'قسم جديد');hint.style.cssText='font-size:9px;color:var(--t3);margin-inline-start:auto';opt.appendChild(hint);opt.onclick=()=>{SEL_CAT=cat;$('cat-label').textContent=cat;closeAllCDD();window.buildSvcDD(cat)};menu.appendChild(opt)});
   };
 
   /* ----- real provider orders, server first, no manual success ----- */
@@ -7252,9 +7251,9 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
   function categoryKey(name){return txt(name).trim().toLowerCase().replace(/[^a-z0-9\u0600-\u06ff_-]+/g,'_').slice(0,90)||('cat_'+Date.now())}
   window.loadAdmCatsFull=async function(){
     const el=$('adm-cats-panel');if(!el)return;el.innerHTML='';
-    const metaSnap=FB_OK?await DB.ref('categoryMeta').once('value').catch(()=>null):null; if(metaSnap?.exists())metaSnap.forEach(c=>{const v=c.val()||{};if(v.name)SECTION_META[v.name]=v});
+    const metaSnap=FB_OK?await DB.ref('categoryMeta').once('value').catch(()=>null):null; if(metaSnap?.exists())metaSnap.forEach(c=>{const v=c.val()||{};if(v.name)window.SECTION_META[v.name]=v});
     const hd=mk('div');hd.style.cssText='display:flex;align-items:center;justify-content:space-between;margin-bottom:12px';hd.appendChild(mk('div','adm-sec-ttl','الأقسام والمنصات'));const add=mk('button','btn bp btn-sm','+ إضافة قسم كامل');add.onclick=()=>openCategoryEditor();hd.appendChild(add);el.appendChild(hd);
-    const w=mk('div');const cats=[...new Set(Object.keys(ALL_CATS||{}).concat(Object.keys(SECTION_META||{})))].sort((a,b)=>a.localeCompare(b,'ar'));cats.forEach(cat=>{const list=ALL_CATS[cat]||[];const first=list[0];const meta=SECTION_META[cat]||{};const row=mk('div');row.style.cssText='display:flex;align-items:center;gap:9px;padding:10px 0;border-bottom:1px solid var(--bd)';const img=mk('img','sada-svc-thumb');img.src=first?.image||meta.image||'sadairaq-logo.jpg';img.onerror=()=>img.src='sadairaq-logo.jpg';const inf=mk('div');inf.style.cssText='flex:1';inf.innerHTML='<div style="font-weight:900;color:var(--t0)">'+safe(cat)+'</div><div style="font-size:9px;color:var(--t2)">'+list.length+' خدمة • '+safe([...new Set(list.flatMap(normalizeApps))].map(appLabel).join(' • ') || 'قسم متاح للاختيار')+'</div>';const ed=mk('button','btn bs2 btn-sm','تعديل');ed.onclick=()=>openCategoryEditor(cat);const del=mk('button','btn bdng btn-sm','حذف');del.onclick=async()=>{if(!confirm('حذف القسم '+cat+' من جميع الخدمات؟'))return;const ups={};list.forEach(s=>{const gs=normalizeGroups(s).filter(g=>g!==cat);ups['services/'+s.fbKey]={groups:gs,categories:gs,category:gs[0]||''}});if(Object.keys(ups).length)await DB.ref().update(ups);await DB.ref('categoryMeta/'+categoryKey(cat)).remove();delete SECTION_META[cat];await touchServicesVersion();loadAllSvcs(true);setTimeout(loadAdmCatsFull,200);toast('✅ تم حذف القسم من الخدمات','ok')};const ac=mk('div');ac.style.cssText='display:flex;gap:5px';ac.appendChild(ed);ac.appendChild(del);row.appendChild(img);row.appendChild(inf);row.appendChild(ac);w.appendChild(row)});if(!w.children.length)w.appendChild(mk('div','empty','لا توجد أقسام بعد'));el.appendChild(w);
+    const w=mk('div');const cats=[...new Set(Object.keys(ALL_CATS||{}).concat(Object.keys(window.SECTION_META||{})))].sort((a,b)=>a.localeCompare(b,'ar'));cats.forEach(cat=>{const list=ALL_CATS[cat]||[];const first=list[0];const meta=window.SECTION_META[cat]||{};const row=mk('div');row.style.cssText='display:flex;align-items:center;gap:9px;padding:10px 0;border-bottom:1px solid var(--bd)';const img=mk('img','sada-svc-thumb');img.src=first?.image||meta.image||'sadairaq-logo.jpg';img.onerror=()=>img.src='sadairaq-logo.jpg';const inf=mk('div');inf.style.cssText='flex:1';inf.innerHTML='<div style="font-weight:900;color:var(--t0)">'+safe(cat)+'</div><div style="font-size:9px;color:var(--t2)">'+list.length+' خدمة • '+safe([...new Set(list.flatMap(normalizeApps))].map(appLabel).join(' • ') || 'قسم متاح للاختيار')+'</div>';const ed=mk('button','btn bs2 btn-sm','تعديل');ed.onclick=()=>openCategoryEditor(cat);const del=mk('button','btn bdng btn-sm','حذف');del.onclick=async()=>{if(!confirm('حذف القسم '+cat+' من جميع الخدمات؟'))return;const ups={};list.forEach(s=>{const gs=normalizeGroups(s).filter(g=>g!==cat);ups['services/'+s.fbKey]={groups:gs,categories:gs,category:gs[0]||''}});if(Object.keys(ups).length)await DB.ref().update(ups);await DB.ref('categoryMeta/'+categoryKey(cat)).remove();delete window.SECTION_META[cat];await touchServicesVersion();loadAllSvcs(true);setTimeout(loadAdmCatsFull,200);toast('✅ تم حذف القسم من الخدمات','ok')};const ac=mk('div');ac.style.cssText='display:flex;gap:5px';ac.appendChild(ed);ac.appendChild(del);row.appendChild(img);row.appendChild(inf);row.appendChild(ac);w.appendChild(row)});if(!w.children.length)w.appendChild(mk('div','empty','لا توجد أقسام بعد'));el.appendChild(w);
   };
   async function openCategoryEditor(existing){
     let meta={};
@@ -7292,10 +7291,10 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
         const platforms=[...row.querySelectorAll('[data-on="1"]')].map(b=>b.dataset.app);const key=categoryKey(name);save.disabled=true;
         try{
           await DB.ref('categoryMeta/'+key).set({name,image:imageHidden.value||'sadairaq-logo.jpg',platforms,updatedAt:new Date().toISOString(),updatedBy:CU?.u||'admin'});
-          SECTION_META[name]={name,image:imageHidden.value||'sadairaq-logo.jpg',platforms};
+          window.SECTION_META[name]={name,image:imageHidden.value||'sadairaq-logo.jpg',platforms};
           if(existing&&existing!==name){
             const list=ALL_CATS[existing]||[];const updates={};list.forEach(sv=>{const gs=normalizeGroups(sv).map(g=>g===existing?name:g);updates['services/'+sv.fbKey]={groups:gs,categories:gs,category:gs[0]||name};});
-            if(Object.keys(updates).length)await DB.ref().update(updates);await DB.ref('categoryMeta/'+categoryKey(existing)).remove();delete SECTION_META[existing];
+            if(Object.keys(updates).length)await DB.ref().update(updates);await DB.ref('categoryMeta/'+categoryKey(existing)).remove();delete window.SECTION_META[existing];
           }
           await touchServicesVersion();closeModal();loadAllSvcs(true);setTimeout(loadAdmCatsFull,200);toast('✅ تم حفظ القسم وتحديثه للمستخدمين','ok');
         }catch(e){toast('❌ '+e.message,'err');save.disabled=false;}
@@ -7319,7 +7318,7 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 
   /* ----- support URL + settings sync on startup ----- */
   async function syncSettings(){try{const d=await api('/api/settings',{method:'GET'});if(d?.settings){CFG.settings.waUrl=d.settings.waUrl||DEFAULT_WA;CFG.settings.waNum=d.settings.waNum||'9647762267959';}}catch(_){CFG.settings.waUrl=CFG.settings.waUrl||DEFAULT_WA}}
-  async function syncSectionMeta(){try{if(FB_OK&&DB){const s=await DB.ref('categoryMeta').once('value');SECTION_META={};window.SECTION_META=SECTION_META;if(s.exists())s.forEach(c=>{const v=c.val()||{};if(v.name)SECTION_META[v.name]=v});if(typeof window.parseSvcsArr==='function'&&Array.isArray(ALL_SVCS_ARR))window.parseSvcsArr(ALL_SVCS_ARR);}}catch(_){}}
+  async function syncSectionMeta(){try{if(FB_OK&&DB){const s=await DB.ref('categoryMeta').once('value');window.SECTION_META={};window.SECTION_META=window.SECTION_META;if(s.exists())s.forEach(c=>{const v=c.val()||{};if(v.name)window.SECTION_META[v.name]=v});if(typeof window.parseSvcsArr==='function'&&Array.isArray(ALL_SVCS_ARR))window.parseSvcsArr(ALL_SVCS_ARR);}}catch(_){}}
 
   /* ----- no dashboard button for regular users, start at new order ----- */
   const oldLaunch=window.launchApp;
@@ -7338,7 +7337,7 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 <script>
 (function(){
 'use strict';
-const V='1.5.2';
+const V='1.5.3';
 const $=id=>document.getElementById(id);
 const safe=v=>String(v??'').replace(/[&<>\"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[m]));
 const api=window.apiJSON||((p,o)=>fetch(p,Object.assign({credentials:'include',cache:'no-store',headers:{'Content-Type':'application/json'}},o||{})).then(async r=>{const t=await r.text();let d={};try{d=t?JSON.parse(t):{}}catch(_){d={error:t}}if(!r.ok||d.error)throw new Error(d.error||('HTTP '+r.status));return d;}));
@@ -7479,7 +7478,7 @@ setTimeout(init140,1200);
 })();
 
 </script>
-<!-- Sada Iraq v1.5.2 final repair block -->
+<!-- Sada Iraq v1.5.3 final repair block -->
 <style id="sadairaq-v152-repair">
 #sadairaq-v152-actions{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 12px}
 #sadairaq-v152-actions .btn{min-height:38px;font-weight:800}
