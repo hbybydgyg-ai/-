@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0a0e1a">
-<title>صدى العراق · v1.5.11</title>
+<title>صدى العراق · v1.5.13</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
@@ -5883,6 +5883,214 @@ function tgSend(msg){fetch(`https://api.telegram.org/bot${CFG.tg.token}/sendMess
   document.addEventListener('click',e=>{const t=e.target.closest?.('[data-page="order"],#nav-order,[onclick*="order"]');if(t)setTimeout(()=>window.loadAllSvcs().catch(()=>{}),180)},true);
 })();
 </script>
+
+<script id="sadairaq-v1512-real-final">
+(function(){
+  'use strict';
+  const RATE12=1250;
+  const ICON12={Instagram:'platform-icons/instagram.svg',Tiktok:'platform-icons/tiktok.svg',Facebook:'platform-icons/facebook.svg',Youtube:'platform-icons/youtube.svg',Telegram:'platform-icons/telegram.svg',Twitter:'platform-icons/twitter.svg',Snapchat:'platform-icons/snapchat.svg',Whatsapp:'platform-icons/whatsapp.svg',Linkedin:'platform-icons/linkedin.svg',Other:'platform-icons/other.svg'};
+  const esc12=v=>String(v??'').trim();
+  const app12=s=>{
+    const a=String(s?.app||((Array.isArray(s?.apps)&&s.apps[0])||(Array.isArray(s?.platforms)&&s.platforms[0])||'Other')).trim();
+    return ICON12[a]?a:'Other';
+  };
+  const img12=s=>ICON12[app12(s)]||ICON12.Other;
+  const priceIQD12=s=>{
+    const su=Number(s?.sellingUsd);
+    if(Number.isFinite(su) && su>=0) return Number((su*RATE12).toFixed(4));
+    const p=Number(s?.price);
+    if(!Number.isFinite(p)||p<0)return 0;
+    return p;
+  };
+  const priceUSD12=s=>priceIQD12(s)/RATE12;
+  const parse12=async(res)=>{const t=await res.text();let d={};try{d=t?JSON.parse(t):{}}catch(_){d={error:t||('HTTP '+res.status)}}if(!res.ok||d.error){const e=new Error(d.error||('HTTP '+res.status));e.uncertain=!!d.uncertain;e.stage=d.stage||'';e.providerResponse=d.providerResponse;throw e;}return d;};
+  const api12=window.apiJSON||((url,opt={})=>fetch(url,Object.assign({credentials:'include',cache:'no-store'},opt)).then(parse12));
+
+  async function freshBalance12(){
+    if(!CU||!FB_OK||!DB)return Number(BAL||0);
+    const ref=userDbRef(CU.u); const snap=await ref.once('value'); const u=snap.exists()?(snap.val()||{}):{};
+    const b=Number(u.balance||0); if(Number.isFinite(b)){
+      BAL=b;CU.bal=b;CU.spent=Number(u.totalSpent||CU.spent||0);CU.ords=Number(u.totalOrders||CU.ords||0);localStorage.setItem('tz_u',JSON.stringify(CU));try{updateUI()}catch(_){}
+      return b;
+    }
+    return Number(BAL||0);
+  }
+  let balListener12=null;
+  function bindBalance12(){
+    if(!CU||!FB_OK||!DB)return;
+    if(balListener12){try{balListener12.off()}catch(_){}balListener12=null;}
+    balListener12=userDbRef(CU.u);
+    balListener12.on('value',snap=>{
+      if(!CU||CU.u!==String(snap.val()?.username||CU.u)) return;
+      const u=snap.val()||{}; const b=Number(u.balance||0);
+      if(Number.isFinite(b)){BAL=b;CU.bal=b;CU.spent=Number(u.totalSpent||CU.spent||0);CU.ords=Number(u.totalOrders||CU.ords||0);localStorage.setItem('tz_u',JSON.stringify(CU));try{updateUI()}catch(_){} }
+    });
+  }
+
+  // Keep platform images consistent: provider/brand logos are never used as service thumbnails.
+  async function migrateServices12(){
+    if(!FB_OK||!DB||CU?.role!=='admin')return;
+    try{
+      const snap=await DB.ref('services').once('value'); const up={};
+      const detect=(name)=>{
+        const n=esc12(name).toLowerCase();
+        for(const [keys,a] of [['instagram','Instagram'],['انستا','Instagram'],['انستجرام','Instagram'],['انستغرام','Instagram'],['tiktok','Tiktok'],['تيك توك','Tiktok'],['تيكتوك','Tiktok'],['facebook','Facebook'],['فيسبوك','Facebook'],['youtube','Youtube'],['يوتيوب','Youtube'],['telegram','Telegram'],['تيليجرام','Telegram'],['تلجرام','Telegram'],['twitter','Twitter'],['تويتر','Twitter'],['snapchat','Snapchat'],['سناب','Snapchat'],['whatsapp','Whatsapp'],['واتساب','Whatsapp'],['linkedin','Linkedin'],['لينكد','Linkedin']]) if(n.includes(keys))return a;
+        return 'Other';
+      };
+      snap.forEach(c=>{
+        const v=c.val()||{}; const isSvc=typeof v==='object'; if(!isSvc)return;
+        const detected=detect(v.name); const isSmm=v.source==='smmparty'||v.providerId||v.smmpartyId||v.providerServiceId;
+        const patch={}; let changed=false;
+        if(isSmm && v.image!=='platform-icons/'+detected.toLowerCase()+'.svg'){patch.image=img12({app:detected});changed=true;}
+        const su=Number(v.sellingUsd), p=Number(v.price);
+        // Old manual services stored the user-entered USD number in `price` and also wrote a misleading
+        // sellingUsd of price/1250. Convert only obviously suspicious legacy local values such as 10 -> $10.
+        if(v.source==='local' && Number.isFinite(p) && p>0 && p<1000 && (!Number.isFinite(su) || Math.abs(su-(p/RATE12))<0.000001)){
+          patch.price=Number((p*RATE12).toFixed(4));patch.basePrice=patch.price;patch.sellingUsd=Number(p.toFixed(6));patch.free=false;changed=true;
+        }
+        if(changed)up['services/'+c.key]=patch;
+      });
+      if(Object.keys(up).length){await DB.ref().update(up);try{localStorage.removeItem('ks_svcs_v1')}catch(_){}try{await DB.ref('settings/svcsVersion').set(String(Date.now()))}catch(_){} }
+    }catch(e){console.warn('v1.5.13 service migration',e)}
+  }
+
+  // Stable wallet: render once, never rebuild the Mastercard section repeatedly.
+  let walletRender12Timer=0;
+  const oldAddMC12=window.addMastercardUserCard;
+  function stableWallet12(){
+    if(walletRender12Timer)return;
+    walletRender12Timer=setTimeout(()=>{walletRender12Timer=0;try{window.renderWallet158?window.renderWallet158():oldAddMC12?.()}catch(_){}},50);
+  }
+  const nav12=window.nav;
+  window.nav=function(name){const r=nav12?.apply(this,arguments);if(name==='wallet')stableWallet12();if(name==='order')setTimeout(()=>{try{window.loadAllSvcs?.();window.buildCatDD?.('all');window.buildSvcDD?.('__all__')}catch(_){}},80);return r;};
+
+  // Correct final service price display and provider image handling in the active service picker.
+  const oldSvcDD12=window.buildSvcDD;
+  window.buildSvcDD=function(cat){
+    try{
+      const menu=document.getElementById('svc-options'); if(!menu)return oldSvcDD12?.(cat);
+      menu.innerHTML=''; const c=cat||'__all__'; let list=(c==='__all__'?(ALL_SVCS_ARR||[]):(ALL_CATS?.[c]||[])).slice(); const plat=String(SEL_PLAT||'all');
+      if(c==='__all__'&&plat!=='all'){const p=plat.toLowerCase();list=list.filter(s=>String(s.app||'other').toLowerCase()===p||((Array.isArray(s.apps)?s.apps:Array.isArray(s.platforms)?s.platforms:[]).map(String).some(a=>a.toLowerCase()===p)));}
+      const seen=new Set();list=list.filter(s=>{const k=s.fbKey||s.providerServiceId||s.smmpartyId||s.name;if(seen.has(k))return false;seen.add(k);return true});list.sort((a,b)=>esc12(a.name).localeCompare(esc12(b.name),'ar'));
+      if(!list.length){const e=document.createElement('div');e.className='cdd-empty';e.textContent='لا توجد خدمات ضمن الاختيار';menu.appendChild(e);return;}
+      list.forEach((svc)=>{
+        const opt=document.createElement('div');opt.className='cdd-option';opt.style.cssText='gap:9px;padding:10px 12px;align-items:center;min-height:66px';
+        const im=document.createElement('img');im.className='sada-svc-thumb';im.src=img12(svc);im.onerror=()=>{im.src=ICON12.Other};
+        const info=document.createElement('div');info.style.cssText='flex:1;min-width:0';
+        const nm=document.createElement('div');nm.className='svc-main-name';nm.textContent=svc.name||'خدمة';
+        const meta=document.createElement('div');meta.style.cssText='font-size:8.5px;color:var(--t3);margin-top:3px';meta.textContent='#'+String(svc.smmpartyId||svc.providerServiceId||'local');
+        info.append(nm,meta);const pr=document.createElement('div');pr.className='svc-main-price';pr.style.cssText='font-size:11.5px;font-weight:900;color:var(--blue);white-space:nowrap';pr.textContent='$'+priceUSD12(svc).toFixed(4)+'/1000';opt.append(im,info,pr);
+        opt.onclick=()=>{SEL_SVC=svc;selectService(svc);closeAllCDD()};menu.appendChild(opt);
+      });
+    }catch(e){console.warn('buildSvcDD v1.5.13',e);try{oldSvcDD12?.(cat)}catch(_){}}
+  };
+
+  // Final real order flow: Firebase is the source of truth for the user's wallet.
+  window.submitOrder=async function(){
+    if(!CU){toastFinal?.('سجّل دخولك أولاً','err');return;}
+    if(!SEL_SVC){toastFinal?.('اختر الخدمة أولاً','wrn');return;}
+    const link=esc12(document.getElementById('order-link')?.value); const qty=parseInt(document.getElementById('order-qty')?.value,10); const svc=SEL_SVC;
+    const price=priceIQD12(svc); const total=(qty/1000)*price;
+    if(!/^https?:\/\//i.test(link))return toastFinal?.('أدخل رابطاً صحيحاً يبدأ بـ https:// أو http://','err');
+    if(!Number.isInteger(qty)||qty<(Number(svc.min)||100)||qty>(Number(svc.max)||10000))return toastFinal?.('الكمية خارج حدود الخدمة','err');
+    if(!Number.isFinite(total)||total<0)return toastFinal?.('قيمة الطلب غير صالحة','err');
+    if(!FB_OK||!DB)return toastFinal?.('قاعدة البيانات غير متصلة','err');
+    const btn=document.querySelector('#order-form-card button.btn.bp.btn-w');if(btn){btn.disabled=true;btn.innerHTML='<span class="btn-spin"></span> جاري تنفيذ الطلب الحقيقي...'}
+    let reserved=false, providerRes=null, localId=null;
+    const ur=userDbRef(CU.u);
+    try{
+      bindBalance12(); await freshBalance12();
+      // Never block a free provider service on wallet balance.
+      if(total>0){
+        const tx=await ur.transaction(u=>{if(!u)return u;const b=Number(u.balance||0);if(!Number.isFinite(b)||b<total)return;u.balance=b-total;return u;});
+        if(!tx.committed)throw new Error('رصيد حسابك غير كافٍ — تم التحقق من الرصيد الحقيقي في Firebase');
+        reserved=true;
+      }
+      const providerId=String(svc.providerId||''); const serviceId=String(svc.smmpartyId||svc.providerServiceId||'');
+      const isProvider=svc.source==='smmparty'||(providerId&&serviceId);
+      if(isProvider){
+        if(!providerId||!serviceId)throw new Error('الخدمة غير مرتبطة بمزود API حقيقي');
+        const provisional='REQ_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+        providerRes=await api12('/api/order/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({providerId,serviceId,link,quantity:qty,localId:provisional})});
+      }
+      localId=await (window.nextOrderNumber?window.nextOrderNumber():Promise.reject(new Error('تعذر إنشاء رقم الطلب')));
+      const now=new Date().toISOString();
+      const order={id:String(localId),user:CU.u,serviceId:svc.fbKey||svc.id||'',serviceName:svc.name||'خدمة',desc:svc.desc||'',link,quantity:qty,price:Number(price),total:Number(total),status:providerRes?'pending':'completed',createdAt:now,serviceApp:svc.app||'Other',apps:Array.isArray(svc.apps)?svc.apps:[],groups:Array.isArray(svc.groups)?svc.groups:[],quality:svc.quality||'',speed:svc.speed||'',providerId:providerRes?.providerId||providerId||null,providerName:providerRes?.providerName||'',providerOrderId:providerRes?.providerOrderId?String(providerRes.providerOrderId):null,smmpartyOrderId:providerRes?.providerOrderId?String(providerRes.providerOrderId):null,cancel:svc.cancel===true,free:total===0};
+      const pushed=await DB.ref('orders').push(order); if(!pushed?.key)throw new Error('تعذر حفظ الطلب');
+      if(total>0){await ur.transaction(u=>{if(!u)return u;u.totalSpent=Number(u.totalSpent||0)+total;u.totalOrders=Number(u.totalOrders||0)+1;return u;});}
+      await freshBalance12(); if(total>0){CU.spent=Number(CU.spent||0)+total;CU.ords=Number(CU.ords||0)+1;localStorage.setItem('tz_u',JSON.stringify(CU));}
+      try{updateUI()}catch(_){};
+      try{tgSend('🛒 طلب '+(providerRes?'حقيقي':'مجاني')+'\n#'+order.id+'\n👤 '+CU.u+'\n🛒 '+order.serviceName+'\n💰 $'+(total/RATE12).toFixed(4)+'\n'+(providerRes?'🔢 Provider #'+order.providerOrderId:'')+'\n🔗 '+link)}catch(_){ }
+      toastFinal?.(providerRes?'✅ تم إرسال الطلب فعلياً إلى المزود — رقم المزود: '+order.providerOrderId:'✅ تم إنشاء الطلب المجاني #'+order.id,'ok');nav('orders');
+    }catch(e){
+      // Definite provider rejection/network errors are refundable. An uncertain timeout is NOT refunded,
+      // because the external provider could have accepted the order before the connection failed.
+      if(reserved && !e.uncertain){try{await ur.transaction(u=>{if(!u)return u;u.balance=Number(u.balance||0)+total;return u;});await freshBalance12();}catch(_){} }
+      if(e.uncertain){
+        toastFinal?.('⚠️ تعذر تأكيد رد المزود. لم تتم إعادة المبلغ تلقائياً حتى لا يتحول الطلب إلى مجاني إذا كان المزود قبله. لا تضغط مرة ثانية؛ راجع رقم الطلب/سجل المزود.','err');
+      }else{
+        toastFinal?.('❌ لم يتم إنشاء الطلب: '+(e.message||e),'err');
+      }
+    }finally{if(btn){btn.disabled=false;btn.innerHTML='<i class="fas fa-circle-check"></i> تأكيد الطلب والتنفيذ الفوري'}}
+  };
+
+  // Reliable admin recharge approval: one click = one credit, race-safe, plus Railway session sync.
+  async function approvePayment12(paymentKey,p){
+    if(!FB_OK||!DB)throw new Error('قاعدة البيانات غير متصلة');
+    const pref=DB.ref('payments/'+paymentKey);
+    const claim=await pref.transaction(v=>{
+      if(!v||v.status!=='pending')return;
+      return {...v,status:'processing',processingAt:new Date().toISOString(),processingBy:CU?.u||'admin'};
+    });
+    if(!claim.committed)throw new Error('طلب الشحن تمت معالجته مسبقاً');
+    try{
+      const amount=Number(p.amount||0); if(!Number.isFinite(amount)||amount<=0)throw new Error('مبلغ شحن غير صالح');
+      const uref=userDbRef(p.user);
+      const ut=await uref.transaction(u=>{if(!u)return u;u.balance=Number(u.balance||0)+amount;u.lastRecharge=new Date().toISOString();return u;});
+      if(!ut.committed)throw new Error('لم يتم تعديل رصيد المستخدم');
+      const newBalance=Number(ut.snapshot.val()?.balance||0);
+      await pref.update({status:'approved',approvedAt:new Date().toISOString(),creditedAmount:amount,creditedBalance:newBalance});
+      try{await api12('/api/admin/user-balance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:p.user,balance:newBalance})});}catch(_){ }
+      return newBalance;
+    }catch(e){try{await pref.update({status:'pending',processingError:e.message});}catch(_){} throw e;}
+  }
+  // Wrap existing pending-payment action buttons after admin UI is created.
+  function patchPaymentButtons12(){
+    if(CU?.role!=='admin'||!FB_OK||!DB)return;
+    document.querySelectorAll('#pending-pays-list button').forEach(b=>{
+      if(b.dataset.sada1512)return; const txt=(b.textContent||'').trim(); if(!txt.includes('قبول'))return;
+      b.dataset.sada1512='1'; const clone=b.cloneNode(true); b.replaceWith(clone);
+      clone.onclick=async()=>{
+        clone.disabled=true; const row=clone.closest('div');
+        try{
+          const keyEl=row?.dataset?.paymentKey; let key=keyEl;
+          if(!key){
+            // Resolve by visible sibling text: username appears first in the row.
+            const username=String(row?.textContent||'').split('—')[0].trim();
+            const snap=await DB.ref('payments').orderByChild('status').equalTo('pending').once('value');snap.forEach(c=>{if(!key&&String(c.val()?.user||'')===username)key=c.key});
+          }
+          if(!key)throw new Error('تعذر تحديد طلب الشحن');
+          const ps=await DB.ref('payments/'+key).once('value');if(!ps.exists())throw new Error('طلب الشحن غير موجود');
+          const bal=await approvePayment12(key,ps.val());clone.textContent='✅ تم الشحن';toastFinal?.('✅ تم إضافة الرصيد للمستخدم وتثبيت الشحن','ok');checkPendingPays();
+        }catch(e){toastFinal?.('❌ '+e.message,'err');clone.disabled=false}
+      };
+    });
+  }
+
+  // Prefer a direct, authoritative balance refresh on session start.
+  const oldLaunch12=window.launchApp;
+  window.launchApp=function(){const r=oldLaunch12?.apply(this,arguments);setTimeout(()=>{bindBalance12();freshBalance12().catch(()=>{});migrateServices12().catch(()=>{});patchPaymentButtons12()},500);return r;};
+
+  // Re-run payment button patch whenever admin refreshes the list.
+  const oldPending12=window.checkPendingPays;
+  window.checkPendingPays=function(){const r=oldPending12?.apply(this,arguments);setTimeout(patchPaymentButtons12,250);return r;};
+
+  // One stable wallet refresh after Firebase is ready.
+  try{if(window.fbReady?.then)window.fbReady.then(()=>{bindBalance12();setTimeout(migrateServices12,900);});}catch(_){}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{setTimeout(bindBalance12,700);setTimeout(migrateServices12,1400);},{once:true});else{setTimeout(bindBalance12,700);setTimeout(migrateServices12,1400)}
+})();
+</script>
+
 </body>
 </html>
 <script>
@@ -6907,7 +7115,7 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 /* ===== صدى العراق v1.5.11 — FINAL UI / ORDER / IMPORT REPAIR ===== */
 (function(){
   const RATE157=1250;
-  const SADA_BUILD='1.5.11';
+  const SADA_BUILD='1.5.13';
   const s157=window.safe||function(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))};
   const m157=window.mk||function(t,c,x){const e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e};
   const t157=(m,x)=>{try{toast(m,x)}catch(_){}};
@@ -7068,6 +7276,236 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 })();
 </script>
 </body>
+
+
+<!-- Sada Iraq v1.5.14 — authoritative real-order, pricing, balance, recharge and service-image fix -->
+<script id="sadairaq-v1514-authoritative-final">
+(function(){
+  'use strict';
+  const RATE=1250;
+  const ICONS={Instagram:'platform-icons/instagram.svg',Tiktok:'platform-icons/tiktok.svg',Facebook:'platform-icons/facebook.svg',Youtube:'platform-icons/youtube.svg',Telegram:'platform-icons/telegram.svg',Twitter:'platform-icons/twitter.svg',Snapchat:'platform-icons/snapchat.svg',Whatsapp:'platform-icons/whatsapp.svg',Linkedin:'platform-icons/linkedin.svg',Other:'platform-icons/other.svg'};
+  const iconForApp=a=>ICONS[String(a||'Other')]||ICONS.Other;
+  function detectApp13(s){
+    const n=String(s?.app||'').toLowerCase();
+    if(ICONS[s?.app] && String(s?.app)!=='Other') return s.app;
+    const name=String(s?.name||'').toLowerCase();
+    const pairs=[['instagram','Instagram'],['انستا','Instagram'],['انستجرام','Instagram'],['انستغرام','Instagram'],['tiktok','Tiktok'],['تيك توك','Tiktok'],['تيكتوك','Tiktok'],['facebook','Facebook'],['فيسبوك','Facebook'],['youtube','Youtube'],['يوتيوب','Youtube'],['telegram','Telegram'],['تيليجرام','Telegram'],['تلجرام','Telegram'],['twitter','Twitter'],['تويتر','Twitter'],['snapchat','Snapchat'],['سناب','Snapchat'],['whatsapp','Whatsapp'],['واتساب','Whatsapp'],['linkedin','Linkedin'],['لينكد','Linkedin']];
+    for(const [k,v] of pairs) if(name.includes(k)) return v;
+    return 'Other';
+  }
+  function apps13(s){
+    const a=Array.isArray(s?.apps)?s.apps:Array.isArray(s?.platforms)?s.platforms:[];
+    const out=a.map(String).filter(x=>ICONS[x]);
+    if(out.length)return out;
+    return [detectApp13(s)];
+  }
+  function priceUsd13(s){
+    const su=Number(s?.sellingUsd);
+    if(Number.isFinite(su)&&su>=0) return su;
+    const p=Number(s?.price);
+    return Number.isFinite(p)&&p>=0 ? p/RATE : 0;
+  }
+  function priceIqd13(s){ return Number((priceUsd13(s)*RATE).toFixed(4)); }
+  async function jsonFetch13(url,opt={}){
+    const r=await fetch(url,Object.assign({credentials:'include',cache:'no-store'},opt));
+    const t=await r.text(); let d={}; try{d=t?JSON.parse(t):{}}catch(_){d={};}
+    if(!r.ok||d.error){const e=new Error(d.error||('HTTP '+r.status));e.uncertain=!!d.uncertain;e.stage=d.stage||'';e.providerResponse=d.providerResponse;throw e;}
+    return d;
+  }
+  async function balance13(){
+    if(!CU||!FB_OK||!DB)return Number(BAL||0);
+    const snap=await userDbRef(CU.u).once('value');
+    if(!snap.exists())throw new Error('حساب المستخدم غير موجود في قاعدة البيانات');
+    const u=snap.val()||{}; const b=Number(u.balance||0);
+    if(!Number.isFinite(b))throw new Error('رصيد المستخدم غير صالح');
+    BAL=b;CU.bal=b;CU.spent=Number(u.totalSpent||0);CU.ords=Number(u.totalOrders||0);localStorage.setItem('tz_u',JSON.stringify(CU));try{updateUI()}catch(_){};
+    return b;
+  }
+  async function syncServerBalance13(username,balance){
+    try{await jsonFetch13('/api/admin/user-balance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,balance})});}catch(_){/* best effort; Firebase is authoritative */}
+  }
+
+  // Never let an old cached provider balance block an order. The provider API's ADD result is authoritative.
+  window.createProviderOrder=async function(service,link,quantity,localId){
+    const providerId=String(service?.providerId||CFG?.smm?.activeProvider||CFG?.smm?.providers?.[0]?.id||'').trim();
+    const serviceId=String(service?.smmpartyId||service?.providerServiceId||service?.serviceId||'').trim();
+    if(!providerId)throw new Error('لا يوجد مزود حقيقي مرتبط بالخدمة');
+    if(!serviceId)throw new Error('الخدمة لا تحتوي Service ID صالح من المزود');
+    if(!link)throw new Error('الرابط مطلوب');
+    if(!Number.isInteger(Number(quantity))||Number(quantity)<=0)throw new Error('الكمية غير صالحة');
+    return jsonFetch13('/api/order/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({providerId,serviceId,link,quantity:Number(quantity),localId:String(localId||'')})});
+  };
+
+  // Final service picker: correct USD price + platform icon, independent of provider/logo images.
+  window.buildSvcDD=function(cat){
+    const menu=document.getElementById('svc-options'); if(!menu)return;
+    menu.innerHTML=''; const c=cat||'__all__'; let list=(c==='__all__'?(ALL_SVCS_ARR||[]):(ALL_CATS?.[c]||[])).slice();
+    const plat=String(typeof SEL_PLAT!=='undefined'?SEL_PLAT:'all');
+    if(c==='__all__'&&plat!=='all'){list=list.filter(s=>apps13(s).some(a=>String(a).toLowerCase()===plat.toLowerCase()));}
+    const seen=new Set(); list=list.filter(s=>{const k=String(s.fbKey||s.smmpartyId||s.providerServiceId||s.id||s.name);if(seen.has(k))return false;seen.add(k);return true;});
+    list.sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ar'));
+    if(!list.length){const e=document.createElement('div');e.className='cdd-empty';e.textContent='لا توجد خدمات ضمن هذا القسم';menu.appendChild(e);return;}
+    for(const svc of list){
+      const opt=document.createElement('div');opt.className='cdd-option';opt.style.cssText='gap:9px;padding:10px 12px;align-items:center;min-height:66px';
+      const img=document.createElement('img');img.className='sada-svc-thumb';img.src=iconForApp(apps13(svc)[0]);img.onerror=()=>{img.src=ICONS.Other};
+      const info=document.createElement('div');info.style.cssText='flex:1;min-width:0';
+      const nm=document.createElement('div');nm.className='svc-main-name';nm.textContent=svc.name||'خدمة';
+      const meta=document.createElement('div');meta.style.cssText='font-size:8.5px;color:var(--t3);margin-top:3px';meta.textContent='#'+String(svc.smmpartyId||svc.providerServiceId||svc.serviceId||'local');
+      info.append(nm,meta);
+      const pr=document.createElement('div');pr.className='svc-main-price';pr.style.cssText='font-size:11.5px;font-weight:900;color:var(--blue);white-space:nowrap';pr.textContent='$'+priceUsd13(svc).toFixed(4)+'/1000';
+      opt.append(img,info,pr);opt.onclick=()=>{SEL_SVC=svc;try{selectService(svc)}catch(_){};try{closeAllCDD()}catch(_){}};menu.appendChild(opt);
+    }
+  };
+
+  // Final real order: free orders never check wallet; paid orders atomically reserve actual IQD balance.
+  window.submitOrder=async function(){
+    if(!CU){toast?.('سجّل دخولك أولاً','err');return;}
+    if(!SEL_SVC){toast?.('اختر الخدمة أولاً','wrn');return;}
+    const link=String(document.getElementById('order-link')?.value||'').trim();
+    const qty=parseInt(document.getElementById('order-qty')?.value,10);
+    const s=SEL_SVC; const unitIqd=priceIqd13(s); const total=Number(((qty||0)/1000*unitIqd).toFixed(4));
+    if(!/^https?:\/\//i.test(link))return toast?.('أدخل رابطاً صحيحاً يبدأ بـ https:// أو http://','err');
+    if(!Number.isInteger(qty)||qty<(Number(s.min)||100)||qty>(Number(s.max)||10000))return toast?.(`الكمية بين ${(Number(s.min)||100).toLocaleString()} و${(Number(s.max)||10000).toLocaleString()}`,'err');
+    if(!Number.isFinite(total)||total<0)return toast?.('قيمة الطلب غير صالحة','err');
+    if(!FB_OK||!DB)return toast?.('قاعدة البيانات غير متصلة','err');
+    const btn=document.querySelector('#order-form-card button.btn.bp.btn-w');if(btn){btn.disabled=true;btn.innerHTML='<span class="btn-spin"></span> جاري تنفيذ الطلب الحقيقي...';}
+    const ur=userDbRef(CU.u); let reserved=false; let providerCreated=false; let providerRes=null; let spentAdded=false;
+    try{
+      let before=await balance13();
+      // Free service: skip every wallet check/reservation.
+      if(total>0){
+        const tx=await ur.transaction(u=>{
+          if(!u)return u;
+          const b=Number(u.balance||0);
+          if(!Number.isFinite(b)||b<total)return;
+          u.balance=Number((b-total).toFixed(4));
+          return u;
+        });
+        if(!tx.committed)throw new Error(`رصيدك غير كافٍ. المتاح ${Number(before).toFixed(4)} د.ع، المطلوب ${total.toFixed(4)} د.ع`);
+        reserved=true;
+      }
+      const providerId=String(s.providerId||CFG?.smm?.activeProvider||CFG?.smm?.providers?.[0]?.id||'').trim();
+      const serviceId=String(s.smmpartyId||s.providerServiceId||s.serviceId||'').trim();
+      const isProvider=!!providerId&&!!serviceId&&(s.source==='smmparty'||s.source==='provider'||s.providerId||s.smmpartyId||s.providerServiceId);
+      const provisional='REQ_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+      if(isProvider){
+        providerRes=await window.createProviderOrder(s,link,qty,provisional);
+        providerCreated=true;
+        if(!providerRes?.providerOrderId)throw new Error('المزود لم يرجع رقم طلب واضح');
+      }else if(total>0){
+        // A paid local service is allowed only when explicitly local; no fake provider execution.
+        providerCreated=false;
+      }
+      const localId=await (window.nextOrderNumber?window.nextOrderNumber():Promise.reject(new Error('تعذر إنشاء رقم الطلب')));
+      const now=new Date().toISOString();
+      const order={id:String(localId),user:CU.u,serviceId:s.fbKey||s.id||serviceId||'',serviceName:s.name||'خدمة',link,quantity:qty,price:unitIqd,total,status:'pending',createdAt:now,serviceApp:apps13(s)[0]||'Other',apps:apps13(s),quality:s.quality||'',speed:s.speed||'',providerId:providerRes?.providerId||providerId||null,providerName:providerRes?.providerName||'',providerOrderId:providerRes?.providerOrderId?String(providerRes.providerOrderId):null,smmpartyOrderId:providerRes?.providerOrderId?String(providerRes.providerOrderId):null,providerRaw:providerRes?.providerRaw||null,cancel:s.cancel===true,free:total===0};
+      const saved=await DB.ref('orders').push(order);if(!saved?.key)throw new Error('تعذر حفظ الطلب محلياً');
+      if(total>0){await ur.transaction(u=>{if(!u)return u;u.totalSpent=Number(u.totalSpent||0)+total;u.totalOrders=Number(u.totalOrders||0)+1;return u;});spentAdded=true;}
+      await balance13();
+      try{tgSend?.(`🛒 طلب حقيقي لدى المزود\n#${order.id}\n👤 ${CU.u}\n🛒 ${s.name}\n💰 ${total.toFixed(4)} IQD\n🔢 Provider #${order.providerOrderId||'مجاني/محلي'}`)}catch(_){ }
+      try{resetOrderPage?.();nav?.('orders');}catch(_){ }
+      toast?.(providerCreated?`✅ تم إرسال الطلب فعلياً إلى المزود — رقم المزود: ${order.providerOrderId}`:(total===0?'✅ تم إنشاء الطلب المجاني':`✅ تم إنشاء الطلب المحلي #${order.id}`),'ok');
+    }catch(e){
+      if(reserved && !providerCreated){
+        // Refund only when no provider order was created. Unknown timeout/5xx is deliberately NOT refunded.
+        if(!e?.uncertain){
+          try{await ur.transaction(u=>{if(!u)return u;u.balance=Number((Number(u.balance||0)+(total||0)).toFixed(4));if(spentAdded){u.totalSpent=Math.max(0,Number(u.totalSpent||0)-(total||0));u.totalOrders=Math.max(0,Number(u.totalOrders||0)-1);}return u;});await balance13();}catch(_){}
+        }else{
+          try{await balance13();}catch(_){}
+        }
+      }
+      toast?.(e?.uncertain?'⚠️ تعذر تأكيد رد المزود. لم يُعاد المبلغ تلقائياً لمنع تكرار/خدمة مجانية. راجع المزود قبل إعادة الطلب.':'❌ لم يتم إنشاء الطلب: '+(e?.message||e),'err');
+    }finally{if(btn){btn.disabled=false;btn.innerHTML='<i class="fas fa-circle-check"></i> تأكيد الطلب والتنفيذ الفوري';}}
+  };
+
+  // Stable Mastercard card: once rendered, do not destroy/recreate it on every wallet refresh.
+  const oldWallet13=window.renderWallet158;
+  if(oldWallet13){
+    window.renderWallet158=function(){
+      if(document.getElementById('sadairaq-mastercard-card'))return;
+      return oldWallet13.apply(this,arguments);
+    };
+    window.addMastercardUserCard=window.renderWallet158;window.addMC=window.renderWallet158;
+  }
+
+  // Deterministic payment approval for both the payment list and the modal; one click = one credit.
+  const oldShowPay13=window.showAdmPayModal;
+  if(oldShowPay13){
+    window.showAdmPayModal=function(p){
+      window.__SADA_PAYMENT_MODAL__=p;
+      return oldShowPay13.apply(this,arguments);
+    };
+  }
+  async function approve13(key,p){
+    if(!FB_OK||!DB)throw new Error('قاعدة البيانات غير متصلة');
+    const pref=DB.ref('payments/'+key);
+    const claim=await pref.transaction(v=>{if(!v||v.status!=='pending')return;return {...v,status:'processing',processingBy:CU?.u||'admin',processingAt:new Date().toISOString()};});
+    if(!claim.committed)throw new Error('طلب الشحن تمت معالجته مسبقاً');
+    try{
+      const amount=Number(p?.amount||0);if(!Number.isFinite(amount)||amount<=0)throw new Error('مبلغ الشحن غير صالح');
+      const ur=userDbRef(String(p.user||''));
+      const tx=await ur.transaction(u=>{if(!u)return u;u.balance=Number((Number(u.balance||0)+amount).toFixed(4));u.lastRecharge=new Date().toISOString();return u;});
+      if(!tx.committed)throw new Error('تعذر إضافة الرصيد للمستخدم');
+      const nb=Number(tx.snapshot.val()?.balance||0);
+      await pref.update({status:'approved',approvedAt:new Date().toISOString(),creditedAmount:amount,creditedBalance:nb});
+      await syncServerBalance13(String(p.user||''),nb);
+      return nb;
+    }catch(e){try{await pref.update({status:'pending',processingError:String(e.message||e)});}catch(_){};throw e;}
+  }
+  window.approvePayment13=approve13;
+  document.addEventListener('click',async function(ev){
+    const b=ev.target?.closest?.('#modal-mask button');if(!b)return;
+    const t=String(b.textContent||'').trim();if(!/قبول/.test(t))return;
+    const p=window.__SADA_PAYMENT_MODAL__;if(!p?.user)return;
+    ev.preventDefault();ev.stopImmediatePropagation();
+    b.disabled=true;b.dataset.sada13='busy';b.textContent='جاري...';
+    try{
+      // Resolve the current Firebase key by exact object identity fields when possible.
+      const snap=await DB.ref('payments').orderByChild('status').equalTo('pending').once('value');let key=null; snap.forEach(c=>{const x=c.val()||{};if(!key&&String(x.user||'')===String(p.user||'')&&String(x.id||'')===String(p.id||''))key=c.key;});
+      if(!key){snap.forEach(c=>{const x=c.val()||{};if(!key&&String(x.user||'')===String(p.user||'')&&Number(x.amount||0)===Number(p.amount||0))key=c.key;});}
+      if(!key)throw new Error('تعذر تحديد طلب الشحن');
+      const nb=await approve13(key,p);b.textContent='✅ تم الشحن';toast?.(`✅ تم إضافة ${fmtN(p.amount)} للمستخدم وتثبيت الشحن. الرصيد الجديد: ${fmtN(nb)} IQD`,'ok');setTimeout(()=>{try{closeModal();loadAdmPaysFull?.();checkPendingPays?.();}catch(_){}},200);
+    }catch(e){b.disabled=false;b.textContent='✅ قبول وإضافة الرصيد';toast?.('❌ '+(e.message||e),'err');}
+  },true);
+
+  // Fix admin manual user-balance editor: transaction + server sync, so new login sees the same balance.
+  function wireUserEditors13(){
+    if(CU?.role!=='admin'||!FB_OK||!DB)return;
+    document.querySelectorAll('button').forEach(b=>{
+      if(b.dataset.sada13user)return;
+      if(String(b.textContent||'').trim()!=='تعديل الرصيد')return;
+      b.dataset.sada13user='1';const old=b.onclick;b.onclick=null;
+      b.addEventListener('click',async ev=>{
+        ev.stopPropagation();
+        try{
+          const row=b.closest('.adm-tr')||b.parentElement?.parentElement;
+          const username=String(row?.querySelector('div')?.textContent||'').trim().split(/\s+/)[0];
+          if(!username)throw new Error('تعذر تحديد المستخدم');
+          const ref=userDbRef(username);const snap=await ref.once('value');const cur=Number(snap.val()?.balance||0);const val=prompt('الرصيد الجديد (IQD):',String(cur));if(val===null)return;const nb=Number(val);if(!Number.isFinite(nb)||nb<0)throw new Error('الرصيد غير صالح');
+          await ref.transaction(u=>{if(!u)return u;u.balance=Number(nb.toFixed(4));return u;});
+          await syncServerBalance13(username,nb);toast?.('✅ تم تثبيت الرصيد للمستخدم: '+fmtN(nb)+' IQD','ok');
+        }catch(e){toast?.('❌ '+(e.message||e),'err');}
+      },true);
+    });
+  }
+  // Fix all provider-imported service images without deleting anything.
+  async function normalizeServiceImages13(){
+    if(!FB_OK||!DB||CU?.role!=='admin')return;
+    try{
+      const snap=await DB.ref('services').once('value');const up={};snap.forEach(c=>{const s=c.val()||{};const isProvider=s.source==='smmparty'||s.providerId||s.smmpartyId||s.providerServiceId;if(!isProvider)return;const app=apps13(s)[0]||'Other';const im=iconForApp(app);if(s.image!==im)up['services/'+c.key+'/image']=im;if(!s.apps||!Array.isArray(s.apps)||!s.apps.length)up['services/'+c.key+'/apps']=[app];if(!s.platforms||!Array.isArray(s.platforms)||!s.platforms.length)up['services/'+c.key+'/platforms']=[app];});if(Object.keys(up).length)await DB.ref().update(up);
+    }catch(e){console.warn('v1.5.13 image normalization',e)}
+  }
+  // After any import operation, normalize only provider-service thumbnails and keep every existing file/data record.
+  const oldRestore13=window.restoreAllServices;
+  if(oldRestore13){window.restoreAllServices=async function(){const r=await oldRestore13.apply(this,arguments);await normalizeServiceImages13();try{window.loadAllSvcs?.(true)}catch(_){};return r;};window.restoreServiceSection=()=>window.restoreAllServices('section');window.importSmm=window.restoreAllServices;}
+
+  // Keep the UI/current balance fresh on startup and after admin operations.
+  function init13(){try{balance13().catch(()=>{});normalizeServiceImages13().catch(()=>{});wireUserEditors13();}catch(_){} }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(init13,500),{once:true});else setTimeout(init13,500);
+  setInterval(()=>{if(CU&&FB_OK&&DB&&!document.hidden)balance13().catch(()=>{});},30000);
+})();
+</script>
+
 </html>
 <script>
 /* ═══════════════════════════════════════════════════════════════
@@ -7076,7 +7514,7 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 ═══════════════════════════════════════════════════════════════ */
 (function(){
   'use strict';
-  const SADA_VERSION='1.5.11';
+  const SADA_VERSION='1.5.13';
   const RATE=1250;
   const ATHIR_NUMBER='07903221783';
     window.SadaIraqVersion=SADA_VERSION;
@@ -7367,12 +7805,12 @@ function admPays(){nav('admin');setTimeout(()=>admNavTo('payments',null),150);}
 ═══════════════════════════════════════════════════════════════ */
 (function(){
   'use strict';
-  const V='1.5.11', RATE=1250, DEFAULT_WA='https://wa.me/9647762267959';
+  const V='1.5.13', RATE=1250, DEFAULT_WA='https://wa.me/9647762267959';
   const $=id=>document.getElementById(id), txt=v=>String(v??''), api=(p,o)=>fetch(p,Object.assign({credentials:'include',cache:'no-store',headers:{'Content-Type':'application/json'}},o||{})).then(async r=>{const t=await r.text();let d={};try{d=t?JSON.parse(t):{}}catch(_){d={error:t||('HTTP '+r.status)}};if(!r.ok||d.error)throw new Error(d.error||('HTTP '+r.status));return d;});
   const ensure=fn=>document.readyState==='loading'?document.addEventListener('DOMContentLoaded',fn,{once:true}):fn();
   window.SECTION_META=window.SECTION_META||{};
   window.SadaIraqVersion=V;
-window.SadaIraqBuildId='SADA-1.5.11-ORDER-FIX-20261007';
+window.SadaIraqBuildId='SADA-1.5.13-REAL-ORDER-BALANCE-20261007';
 
   function safe(v){return txt(v).replace(/[&<>\"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[m]));}
   function appLabel(id){const p=(CFG.platforms||[]).find(x=>x.id===id);return p?.lbl||id||'عام';}
@@ -7693,13 +8131,13 @@ window.SadaIraqBuildId='SADA-1.5.11-ORDER-FIX-20261007';
 <script>
 (function(){
 'use strict';
-const V='1.5.11';
+const V='1.5.13';
 const $=id=>document.getElementById(id);
 const safe=v=>String(v??'').replace(/[&<>\"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[m]));
 const api=window.apiJSON||((p,o)=>fetch(p,Object.assign({credentials:'include',cache:'no-store',headers:{'Content-Type':'application/json'}},o||{})).then(async r=>{const t=await r.text();let d={};try{d=t?JSON.parse(t):{}}catch(_){d={error:t}}if(!r.ok||d.error)throw new Error(d.error||('HTTP '+r.status));return d;}));
 const mk=window.mk||((tag,cls,txt)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(txt!==undefined)e.textContent=txt;return e;});
 window.SadaIraqVersion=V;
-window.SadaIraqBuildId='SADA-1.5.11-ORDER-FIX-20261007';
+window.SadaIraqBuildId='SADA-1.5.13-REAL-ORDER-BALANCE-20261007';
 
 function setVersion(){
   const b=$('sadairaq-version-badge');
@@ -8112,7 +8550,7 @@ const oldNav152=window.nav;window.nav=function(name){const r=oldNav152?oldNav152
 const oldRenderSettings152=window.renderAdmSettings;window.renderAdmSettings=function(){try{oldRenderSettings152?.apply(this,arguments)}catch(_){}setTimeout(()=>window.renderMCAdmin?.(),120)};
 function repairNow(){try{ensureServiceActions();ensureSmmImportActions();if($('pg-wallet'))addMastercardV152();}catch(_){} }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(repairNow,120),{once:true});else setTimeout(repairNow,120);
-setTimeout(repairNow,900);setTimeout(repairNow,1800);
+setTimeout(repairNow,250);
 })();
 </script>
 
@@ -8188,7 +8626,7 @@ setTimeout(repairNow,900);setTimeout(repairNow,1800);
   const oldReset158=window.resetOrderPage;
   window.resetOrderPage=function(){try{oldReset158?.()}catch(_){}setOrderAll158();setTimeout(setOrderAll158,30);setTimeout(setOrderAll158,250)};
   const oldNav158=window.nav;
-  window.nav=function(name){const r=oldNav158?oldNav158.apply(this,arguments):undefined;if(name==='order'){setOrderAll158();setTimeout(setOrderAll158,60);setTimeout(setOrderAll158,350);setTimeout(setOrderAll158,1000)}if(name==='wallet'){setTimeout(renderWallet158,30);setTimeout(renderWallet158,300);setTimeout(renderWallet158,900);setTimeout(renderWallet158,1800);setTimeout(renderWallet158,2600)}return r};
+  window.nav=function(name){const r=oldNav158?oldNav158.apply(this,arguments):undefined;if(name==='order'){setOrderAll158();setTimeout(setOrderAll158,60);setTimeout(setOrderAll158,350);setTimeout(setOrderAll158,1000)}if(name==='wallet'){setTimeout(renderWallet158,80)}return r};
 
   async function ensureUserProfile158(){
     if(!CU||!FB_OK||!DB)return;
@@ -8290,7 +8728,7 @@ setTimeout(repairNow,900);setTimeout(repairNow,1800);
     if(he&&hd){he.onclick=ev=>{ev?.preventDefault?.();const open=hd.style.display!=='none';hd.style.display=open?'none':'block';if(hcv)hcv.style.transform=open?'':'rotate(180deg)';};}
   }
   function start158(){try{fixRechargeClicks158();renderWallet158();setOrderAll158()}catch(e){console.warn('v1.5.8 init',e)}}
-  [60,300,700,1200,1800,2600,3600].forEach(ms=>setTimeout(start158,ms));
+  [150].forEach(ms=>setTimeout(start158,ms));
   try{if(window.fbReady&&typeof window.fbReady.then==='function')window.fbReady.then(()=>{setTimeout(setOrderAll158,50);setTimeout(setOrderAll158,500)})}catch(_){}
 })();
 </script>
@@ -8367,7 +8805,7 @@ setTimeout(repairNow,900);setTimeout(repairNow,1800);
 
   function detectAppFinal(name){
     const n=safeFinal(name).toLowerCase();
-    for(const [k,v] of [['instagram','Instagram'],['انستا','Instagram'],['انستجرام','Instagram'],['tiktok','Tiktok'],['تيك توك','Tiktok'],['facebook','Facebook'],['فيسبوك','Facebook'],['youtube','Youtube'],['يوتيوب','Youtube'],['telegram','Telegram'],['تيليجرام','Telegram'],['تلجرام','Telegram'],['twitter','Twitter'],['تويتر','Twitter'],['snapchat','Snapchat'],['سناب','Snapchat'],['whatsapp','Whatsapp'],['واتساب','Whatsapp'],['linkedin','Linkedin'],['لينكد','Linkedin']]) if(n.includes(k)) return v;
+    for(const [k,v] of [['instagram','Instagram'],['انستا','Instagram'],['انستجرام','Instagram'],['انستغرام','Instagram'],['tiktok','Tiktok'],['تيك توك','Tiktok'],['تيكتوك','Tiktok'],['facebook','Facebook'],['فيسبوك','Facebook'],['youtube','Youtube'],['يوتيوب','Youtube'],['telegram','Telegram'],['تيليجرام','Telegram'],['تلجرام','Telegram'],['twitter','Twitter'],['تويتر','Twitter'],['snapchat','Snapchat'],['سناب','Snapchat'],['whatsapp','Whatsapp'],['واتساب','Whatsapp'],['linkedin','Linkedin'],['لينكد','Linkedin']]) if(n.includes(k)) return v;
     return 'Other';
   }
 
@@ -8547,11 +8985,11 @@ setTimeout(repairNow,900);setTimeout(repairNow,1800);
       const provider=document.createElement('select');provider.className='inp';const none=document.createElement('option');none.value='';none.textContent='خدمة محلية بدون مزود';provider.appendChild(none);(CFG.smm.providers||[]).forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=p.name||p.id;provider.appendChild(o)});
       const sid=document.createElement('input');sid.className='inp';sid.placeholder='اختياري: Service ID من المزود';sid.inputMode='numeric';
       const name=document.createElement('input');name.className='inp';name.placeholder='اسم الخدمة';
-      const price=document.createElement('input');price.className='inp';price.type='number';price.min='0';price.step='0.0001';price.placeholder='0 = خدمة مجانية';
+      const price=document.createElement('input');price.className='inp';price.type='number';price.min='0';price.step='0.0001';price.placeholder='مثال: 10 = عشرة دولارات، 0 = مجاني';
       const cat=document.createElement('input');cat.className='inp';cat.placeholder='اسم القسم';
       const min=document.createElement('input');min.className='inp';min.type='number';min.min='1';min.value='100';
       const max=document.createElement('input');max.className='inp';max.type='number';max.min='1';max.value='10000';
-      addField('المنصة',app);addField('المزود (اختياري)',provider);addField('Service ID (اختياري)',sid);addField('اسم الخدمة',name);addField('سعر البيع لكل 1000 (د.ع)',price);addField('القسم',cat);addField('الحد الأدنى',min);addField('الحد الأقصى',max);
+      addField('المنصة',app);addField('المزود (اختياري)',provider);addField('Service ID (اختياري)',sid);addField('اسم الخدمة',name);addField('سعر البيع لكل 1000 (USD)',price);addField('القسم',cat);addField('الحد الأدنى',min);addField('الحد الأقصى',max);
       const hint=document.createElement('div');hint.style.cssText='font-size:10px;color:var(--t2);line-height:1.7;margin:-3px 0 10px';hint.textContent='ضع السعر 0 لإنشاء خدمة مجانية. عند اختيار مزود + Service ID سيتم تنفيذ الطلب عبر المزود الحقيقي.';body.appendChild(hint);
       try{const names=await catsFromDb();if(names[0])cat.value=names[0]}catch(_){ }
       const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;margin-top:6px';
@@ -8563,7 +9001,7 @@ setTimeout(repairNow,900);setTimeout(repairNow,1800);
         if(!nm)return toast('أدخل اسم الخدمة','wrn');if(!Number.isFinite(pr)||pr<0)return toast('السعر غير صالح','wrn');if(pid&&!serviceId)return toast('أدخل Service ID للمزود','wrn');
         save.disabled=true;save.textContent='جاري الحفظ...';
         try{
-          const key=DB.ref('services').push().key;const data={app:app.value,apps:[app.value],platforms:[app.value],name:nm,groups:[group],categories:[group],category:group,price:pr,basePrice:pr, sellingUsd:Number((pr/1250).toFixed(6)),smmRateUsd:pid?Number((pr/1250).toFixed(6)):0,smmRate:pid?Number((pr/1250).toFixed(6)):0,markupPct:0,min:lo,max:hi,quality:'عادي',speed:'24-48h',source:pid?'smmparty':'local',providerId:pid||null,smmpartyId:serviceId||null,providerServiceId:serviceId||null,refill:false,cancel:false,desc:'',image:'sadairaq-logo.jpg',createdAt:new Date().toISOString(),createdBy:CU?.u||'admin',free:pr===0};
+          const key=DB.ref('services').push().key;const priceIQD=Number((pr*1250).toFixed(4));const platformImage=({'Instagram':'platform-icons/instagram.svg','Tiktok':'platform-icons/tiktok.svg','Youtube':'platform-icons/youtube.svg','Facebook':'platform-icons/facebook.svg','Telegram':'platform-icons/telegram.svg','Twitter':'platform-icons/twitter.svg','Snapchat':'platform-icons/snapchat.svg','Whatsapp':'platform-icons/whatsapp.svg','Linkedin':'platform-icons/linkedin.svg','Other':'platform-icons/other.svg'})[app.value]||'platform-icons/other.svg';const data={app:app.value,apps:[app.value],platforms:[app.value],name:nm,groups:[group],categories:[group],category:group,price:priceIQD,basePrice:priceIQD,sellingUsd:Number(pr.toFixed(6)),smmRateUsd:pid?Number(pr.toFixed(6)):0,smmRate:pid?Number(pr.toFixed(6)):0,markupPct:0,min:lo,max:hi,quality:'عادي',speed:'24-48h',source:pid?'smmparty':'local',providerId:pid||null,smmpartyId:serviceId||null,providerServiceId:serviceId||null,refill:false,cancel:false,desc:'',image:platformImage,createdAt:new Date().toISOString(),createdBy:CU?.u||'admin',free:pr===0};
           await DB.ref('services/'+key).set(data);const metaKey=(window.categoryKey?window.categoryKey(group):group.replace(/[^a-zA-Z0-9\u0600-\u06ff_-]+/g,'_'));await DB.ref('categoryMeta/'+metaKey).transaction(v=>{const o=v&&typeof v==='object'?v:{};const keys=Array.isArray(o.serviceKeys)?o.serviceKeys.map(String):[];if(!keys.includes(String(key)))keys.push(String(key));return {...o,name:group,serviceKeys:keys,updatedAt:new Date().toISOString(),updatedBy:CU?.u||'admin'};}).catch(()=>{});
           localStorage.removeItem('ks_svcs_v1');localStorage.setItem('ks_svcs_ver',String(Date.now()));try{await DB.ref('settings/svcsVersion').set(String(Date.now()))}catch(_){ }
           const arr=await (async()=>{const snap=await DB.ref('services').once('value');const a=[];snap.forEach(c=>{const v=c.val();if(v&&typeof v==='object'){v.fbKey=c.key;a.push(v)}});return a})();parseSvcsArr(arr);SEL_PLAT='all';SEL_CAT=group;SEL_SVC=null;window.buildCatDD?.('all');window.buildSvcDD?.(group);window.loadAdmSvcsFull?.();window.loadAdmCatsFull?.();toast(pr===0?'✅ تمت إضافة الخدمة المجانية بنجاح':'✅ تمت إضافة الخدمة بنجاح','ok');closeModal();

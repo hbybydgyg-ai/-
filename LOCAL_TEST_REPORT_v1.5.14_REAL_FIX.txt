@@ -1,0 +1,26 @@
+Sada Iraq v1.5.14 — local verification report
+Date: 2026-10-07
+
+1. JavaScript syntax
+- All 22 inline <script> blocks passed `node --check`.
+- server.js passed `node --check`.
+
+2. Server build identity
+- /api/health returned version 1.5.14.
+- buildId: SADA-1.5.14-REAL-ORDER-BALANCE-20261007.
+
+3. Provider order path (isolated local provider)
+- Provider balance action intentionally returned an error.
+- Despite that balance error, POST /api/order/create successfully reached provider ADD.
+- Paid test returned provider order MOCK-1.
+- Free test returned provider order MOCK-2.
+- Provider counted exactly 2 ADD calls for 2 requested orders; no automatic ADD retry occurred.
+- Server orders ledger recorded both provider order IDs.
+
+4. Real-provider limitation
+- No real external provider API key/credentials were present in the uploaded archive, so an actual paid external order could not be submitted from this environment without inventing credentials. The deployed app uses the configured real provider URL/key on Railway.
+
+5. Data preservation
+- Original data files were restored into the release tree after testing.
+- No original project file was intentionally deleted.
+- New files are additive: platform-icons/* and provider_failures.json plus release notes.

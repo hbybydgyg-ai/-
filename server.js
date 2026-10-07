@@ -10,8 +10,8 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = process.env.APP_VERSION || '1.5.11';
-const BUILD_ID = process.env.BUILD_ID || 'SADA-1.5.11-ORDER-FIX-20261007';
+const APP_VERSION = process.env.APP_VERSION || '1.5.14';
+const BUILD_ID = process.env.BUILD_ID || 'SADA-1.5.14-REAL-ORDER-BALANCE-20261007';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
@@ -143,11 +143,24 @@ function normalizeProviderOrderId(d){
 }
 function providerReturnedError(d){
   if(!d || typeof d!=='object' || Array.isArray(d)) return false;
-  const e=d.error;
-  if(e===true) return true;
-  if(typeof e==='string') return e.trim()!=='';
-  if(e && typeof e==='object') return true;
-  return false;
+  const seen=new Set();
+  const walk=(x,depth=0)=>{
+    if(x===null||x===undefined||depth>3||typeof x!=='object'||seen.has(x)) return false;
+    seen.add(x);
+    const e=x.error;
+    if(e===true) return true;
+    if(typeof e==='string' && e.trim()!=='') return true;
+    if(e && typeof e==='object') return true;
+    for(const k of ['data','result','response','account','wallet']) if(x[k] && walk(x[k],depth+1)) return true;
+    return false;
+  };
+  return walk(d);
+}
+function providerErrorText(d){
+  if(!d||typeof d!=='object') return '';
+  const vals=[d.error,d.message,d.msg,d.reason,d.data?.error,d.data?.message,d.result?.error,d.result?.message];
+  for(const v of vals) if(typeof v==='string'&&v.trim()) return v.trim();
+  return '';
 }
 function safeProviderResponse(d){
   if(d===undefined) return null;
@@ -226,7 +239,7 @@ async function providerRequest(prov,params,timeoutMs=30000){
         const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8','Accept':'application/json,text/plain,*/*','User-Agent':`SadaIraq/${APP_VERSION}`},body:payload.toString(),redirect:'follow',signal:controller.signal});
         const text=await r.text(); let d={}; try{d=text?JSON.parse(text):{};}catch(_){d={raw:text};}
         if(!r.ok){ const err=new Error(`مزود SMM أعاد HTTP ${r.status}${text?': '+String(text).slice(0,180):''}`); err.retryable=[408,425,429].includes(r.status)||r.status>=500; throw err; }
-        if(providerReturnedError(d)) throw new Error(typeof d.error==='string'?d.error:'المزود رفض العملية');
+        if(providerReturnedError(d)){ const err=new Error(providerErrorText(d)||'المزود رفض العملية'); err.providerRejected=true; throw err; }
         return d;
       }catch(e){
         lastError=e; const retryable=e?.name==='AbortError'||e?.retryable;
@@ -486,25 +499,28 @@ async function routeAPI(req,res,urlObj){
     const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'});
     const b=await bodyJSON(req); const providerId=String(b.providerId||'').trim(); const serviceId=String(b.serviceId||'').trim(); const link=String(b.link||'').trim(); const quantity=Number(b.quantity);
     if(!providerId||!serviceId||!link||!Number.isInteger(quantity)||quantity<=0)return json(res,422,{ok:false,error:'بيانات الطلب غير مكتملة',stage:'validate'});
-    const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود المرتبط بالخدمة غير موجود — أعد حفظ مزود API أو ضعه في متغيرات Railway',stage:'provider_lookup',providerId});
+    const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود المرتبط بالخدمة غير موجود. أعد حفظ المزود الحقيقي أو ثبّته بمتغيرات Railway',stage:'provider_lookup',providerId});
     try{
-      // Do not make order creation depend on a separate balance call. Many providers accept add
-      // even when balance is returned in a non-standard format or the balance endpoint is restricted.
+      // The balance endpoint is informational only. A provider may allow add while its
+      // balance endpoint is restricted, differently formatted, or temporarily unavailable.
       let providerBalanceBefore=null;
-      try{ const bd=await providerRequest(prov,{action:'balance'}); providerBalanceBefore=normalizeProviderBalance(bd); }catch(_){ /* balance is informational only */ }
+      try{ const bd=await providerRequest(prov,{action:'balance'}); providerBalanceBefore=normalizeProviderBalance(bd); }catch(_){ }
 
+      // IMPORTANT: order creation is exactly one outbound call. No automatic retry.
       const d=await providerRequest(prov,{action:'add',service:serviceId,link,quantity});
       const providerOrderId=normalizeProviderOrderId(d);
       if(!providerOrderId){
-        appendJsonLedger('provider_failures.json',{stage:'provider_response',user:username,providerId,serviceId,link,quantity,error:'المزود لم يرجع رقم طلب حقيقي',providerResponse:safeProviderResponse(d),createdAt:new Date().toISOString()});
-        return json(res,502,{ok:false,error:'المزود استلم العملية أو رفضها بدون رقم طلب واضح — راجع استجابة المزود',stage:'provider_response',providerResponse:safeProviderResponse(d)});
+        appendJsonLedger('provider_failures.json',{stage:'provider_response',uncertain:true,user:username,providerId,serviceId,link,quantity,error:'المزود لم يرجع رقم طلب واضح',providerResponse:safeProviderResponse(d),createdAt:new Date().toISOString()});
+        return json(res,502,{ok:false,error:'المزود لم يرجع رقم طلب واضح بعد عملية الإرسال. لا تعاود الضغط لتجنب التكرار.',stage:'provider_response',uncertain:true,providerResponse:safeProviderResponse(d)});
       }
       const createdAt=new Date().toISOString();
       appendJsonLedger('orders.json',{localId:String(b.localId||''),user:username,providerId,providerOrderId,serviceId,link,quantity,status:'pending',providerBalanceBefore,createdAt});
       return json(res,200,{ok:true,providerId,providerName:prov.name||providerId,providerOrderId,providerRaw:safeProviderResponse(d),providerBalanceBefore,createdAt});
     }catch(e){
-      appendJsonLedger('provider_failures.json',{stage:'provider_add',user:username,providerId,serviceId,link,quantity,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message,createdAt:new Date().toISOString()});
-      return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود: لم تتم إعادة المحاولة تلقائياً حتى لا يتكرر الطلب':e.message,stage:'provider_add'});
+      const rejected=!!e.providerRejected;
+      const uncertain=!rejected;
+      appendJsonLedger('provider_failures.json',{stage:'provider_add',uncertain,user:username,providerId,serviceId,link,quantity,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message,createdAt:new Date().toISOString()});
+      return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود — لم تتم إعادة المحاولة تلقائياً حتى لا يتكرر الطلب':e.message,stage:'provider_add',uncertain});
     }
   }
 
@@ -538,6 +554,15 @@ async function routeAPI(req,res,urlObj){
     writeJSON('settings.json',{...readJSON('settings.json',{}),orderCounter:0,resetAt:now});
     writeJSON('providers.json',readJSON('providers.json',{activeProvider:'',providers:{}}));
     return json(res,200,{ok:true,message:'تم تنظيف بيانات Railway والبدء من جديد'});
+  }
+  if(p==='/api/admin/user-balance' && req.method==='POST'){
+    if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
+    const b=await bodyJSON(req); const username=String(b.username||'').trim(); const balance=Number(b.balance);
+    if(!username||!Number.isFinite(balance)||balance<0)return json(res,422,{ok:false,error:'بيانات رصيد المستخدم غير صالحة'});
+    const store=readJSON('users.json',{users:{}}); const user=store.users?.[username];
+    if(!user)return json(res,404,{ok:false,error:'المستخدم غير موجود في قاعدة Railway'});
+    user.balance=Number(balance); user.updatedAt=new Date().toISOString(); writeJSON('users.json',store);
+    return json(res,200,{ok:true,username,balance:user.balance,updatedAt:user.updatedAt});
   }
   if(p==='/api/provider/secret' && req.method==='GET') {
     if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
