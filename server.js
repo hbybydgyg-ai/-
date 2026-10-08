@@ -10,13 +10,13 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.28';
-const BUILD_ID = 'SADA-1.5.28-ORDER-STATUS-INVOICE-CATEGORY-IMAGE-20261008';
+const APP_VERSION = '1.5.29';
+const BUILD_ID = 'SADA-1.5.29-TELEGRAM-PHOTO-PROVIDER-PERSIST-20261008';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
 const FIXED_RATE = 1250; // 1 USD = 1,250 IQD
-// v1.5.28: signed stateless sessions survive Railway restarts/instance changes.
+// v1.5.29: signed stateless sessions survive Railway restarts/instance changes.
 const sessions = new Map(); // legacy sessions kept only during rolling deployments
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || 'sadairaq-session-secret-change-me');
@@ -124,7 +124,7 @@ function session(req){
   if(stateless){
     if(!/^[a-zA-Z0-9_@.\-]+$/.test(String(stateless.username||''))) return null;
     if(stateless.role==='admin' && String(stateless.username)!==String(ADMIN_USER)) return null;
-    // v1.5.28: do NOT require users.json for an already signed user session.
+    // v1.5.29: do NOT require users.json for an already signed user session.
     // Firebase/custom-app users may outlive Railway's ephemeral local filesystem.
     return stateless;
   }
@@ -471,10 +471,19 @@ async function apiAsiacell(req,res){
 async function apiSmm(req,res,urlObj){
   const wait=rateLimit(req,'provider'); if(wait) return json(res,429,{error:'طلبات المزود كثيرة، أعد المحاولة لاحقاً'},{'Retry-After':String(wait)});
   if(!isAdmin(req)) return json(res,403,{error:'غير مصرح'});
-  const store=readJSON('providers.json',{activeProvider:'',providers:{}});
+  const store=providerStore();
   const providerId=String(urlObj.searchParams.get('provider')||store.activeProvider||'');
   let prov=(store.providers||{})[providerId];
-  if(!prov)return json(res,404,{error:'لا يوجد مزود محفوظ أو جلسة الإدارة منتهية'});
+  // أثناء إضافة/اختبار مزود قبل أول حفظ، اسمح للإدارة فقط بإرسال بيانات الاختبار مؤقتاً.
+  if(!prov){
+    const tempUrl=String(urlObj.searchParams.get('_url')||'').trim();
+    const tempKey=String(urlObj.searchParams.get('_key')||'').trim();
+    if(tempUrl&&tempKey&&providerId){
+      try{prov={id:providerId,name:providerId,url:normalizeProviderApiUrl(tempUrl),key:tempKey};}
+      catch(_){return json(res,422,{error:'رابط API للمزود غير صالح'});}
+    }
+  }
+  if(!prov)return json(res,404,{error:'لا يوجد مزود محفوظ أو بيانات مزود صالحة'});
   const action=String(urlObj.searchParams.get('action')||'balance');
   if(!['balance','services','add','status','cancel'].includes(action))return json(res,422,{error:'عملية غير مدعومة'});
   if(!isAdmin(req))return json(res,403,{error:'غير مصرح'});
@@ -587,7 +596,38 @@ async function telegramRequest(method,payload,timeoutMs=8000){
   finally{clearTimeout(timer);}
 }
 async function telegramTestConnection(){const r=await telegramRequest('getMe',{});telegramLog({kind:'connection_test',ok:r.ok,status:r.status,description:r.description||r.error||'',messageId:r.messageId||null});return r;}
-async function sendTelegramDetailed(text,meta={}){const r=await telegramRequest('sendMessage',{chat_id:telegramConfig().chat,text:String(text),disable_web_page_preview:true});telegramLog({kind:meta.kind||'message',ok:r.ok,status:r.status,description:r.description||r.error||'',messageId:r.messageId||null,orderId:meta.orderId||null});return r;}
+async function sendTelegramDetailed(text,meta={}){
+  const cfg=telegramConfig();
+  const caption=String(text||'').slice(0,1024);
+  let r;
+  const imagePath=path.join(ROOT,'telegram-notification.png');
+  if(cfg.enabled!==false && cfg.token && cfg.chat && fs.existsSync(imagePath)){
+    try{
+      const apiBase=String(process.env.TELEGRAM_API_BASE||'https://api.telegram.org').replace(/\/+$/,'');
+      const fd=new FormData();
+      fd.append('chat_id',String(cfg.chat));
+      fd.append('photo',new Blob([fs.readFileSync(imagePath)],{type:'image/png'}),'telegram-notification.png');
+      fd.append('caption',caption);
+      const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
+      try{
+        const rr=await fetch(`${apiBase}/bot${encodeURIComponent(cfg.token)}/sendPhoto`,{method:'POST',body:fd,signal:controller.signal});
+        const tx=await rr.text(); let dd={}; try{dd=tx?JSON.parse(tx):{};}catch(_){dd={description:tx};}
+        r={ok:!!(rr.ok&&dd.ok!==false),status:rr.status,description:String(dd.description||''),messageId:dd.result?.message_id||null,raw:rr.ok?undefined:redactSecretObject(dd)};
+      }finally{clearTimeout(timer);}
+      // إذا فشل رفع الصورة، لا نفقد الإشعار النصي.
+      if(!r.ok){
+        const fallback=await telegramRequest('sendMessage',{chat_id:cfg.chat,text:caption,disable_web_page_preview:true});
+        if(fallback.ok) r={...fallback,description:'تم إرسال النص بعد تعذر إرسال الصورة'};
+      }
+    }catch(e){
+      r={ok:false,error:e?.name==='AbortError'?'انتهت مهلة Telegram':String(e?.message||e)};
+    }
+  }else{
+    r=await telegramRequest('sendMessage',{chat_id:cfg.chat,text:caption,disable_web_page_preview:true});
+  }
+  telegramLog({kind:meta.kind||'message',ok:r.ok,status:r.status,description:r.description||r.error||'',messageId:r.messageId||null,orderId:meta.orderId||null,media:'photo'});
+  return r;
+}
 async function sendTelegram(text){return (await sendTelegramDetailed(text,{kind:'message'})).ok;}
 
 async function notifyOrderStatusChange(order, oldStatus, newStatus){
