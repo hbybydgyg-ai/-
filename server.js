@@ -10,8 +10,8 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.42';
-const BUILD_ID = 'SADA-1.5.42-PROVIDER-SECRET-PRESERVE-20261009';
+const APP_VERSION = '1.5.43';
+const BUILD_ID = 'SADA-1.5.43-API-CONNECTION-TEST-FIX-20261009';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
@@ -379,8 +379,7 @@ async function providerRequest(prov,params,timeoutMs=30000){
   if(['balance','services'].includes(action)){
     for(const endpoint of endpoints){
       const variants=[
-        {method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json,text/plain,*/*','User-Agent':`SadaIraq/${APP_VERSION}`},body:JSON.stringify(Object.fromEntries(payload.entries()))},
-        {method:'GET',headers:{'Accept':'application/json,text/plain,*/*','User-Agent':`SadaIraq/${APP_VERSION}`},body:null,url:endpoint+'?'+payload.toString()}
+        {method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json,text/plain,*/*','User-Agent':`SadaIraq/${APP_VERSION}`},body:JSON.stringify(Object.fromEntries(payload.entries()))}
       ];
       for(const v of variants){
         const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),timeoutMs);
@@ -395,6 +394,21 @@ async function providerRequest(prov,params,timeoutMs=30000){
   }
   if(lastError?.name==='AbortError') throw lastError;
   throw lastError||new Error('تعذر الاتصال بالمزود');
+}
+
+// Resolve saved provider credentials server-side for the provider-list test button.
+// The list endpoint intentionally returns hasKey rather than the secret itself.
+async function resolveProviderDiagnosticsInput(body={}){
+  const providerId=String(body.providerId||body.id||'').trim();
+  let prov={name:String(body.name||'مزود').trim(),url:String(body.url||'').trim(),key:String(body.key||'').trim()};
+  if(providerId && !prov.key){
+    await ensureProviderRuntime(providerId);
+    const saved=getProviderById(providerId,{allowSingleFallback:false}).prov;
+    if(saved?.url && saved?.key){
+      prov={...saved,name:String(body.name||saved.name||providerId).trim()};
+    }
+  }
+  return prov;
 }
 
 function userFromSession(req){ const s=session(req); return (s?.role==='user'||s?.role==='admin') ? String(s.username||'') : ''; }
@@ -879,8 +893,8 @@ async function routeAPI(req,res,urlObj){
   if(p==='/api/provider/diagnostics' && req.method==='POST'){
     const wait=rateLimit(req,'provider'); if(wait)return json(res,429,{ok:false,error:'طلبات فحص المزود كثيرة، أعد المحاولة لاحقاً'},{'Retry-After':String(wait)});
     if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
-    const b=await bodyJSON(req); const prov={name:String(b.name||'مزود'),url:String(b.url||'').trim(),key:String(b.key||'').trim()};
-    if(!/^https?:\/\//i.test(prov.url)||!prov.key)return json(res,422,{ok:false,error:'رابط API أو مفتاح API غير صالح'});
+    const b=await bodyJSON(req); const prov=await resolveProviderDiagnosticsInput(b);
+    if(!/^https?:\/\//i.test(prov.url)||!prov.key)return json(res,422,{ok:false,error:'رابط API أو مفتاح API غير صالح. إذا كان المزود محفوظاً، أعد تحميل قائمة المزودين ثم أعد الاختبار.'});
     const out={connection:{ok:false},balance:{ok:false},services:{ok:false}};
     try{
       const bd=await providerRequest(prov,{action:'balance'}); const balance=normalizeProviderBalance(bd);
@@ -922,8 +936,8 @@ async function routeAPI(req,res,urlObj){
   if(p==='/api/provider/test' && req.method==='POST'){
     const wait=rateLimit(req,'provider'); if(wait)return json(res,429,{ok:false,error:'طلبات اختبار المزود كثيرة، أعد المحاولة لاحقاً'},{'Retry-After':String(wait)});
     if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
-    const b=await bodyJSON(req); const prov={name:String(b.name||'مزود مؤقت'),url:String(b.url||'').trim(),key:String(b.key||'').trim()};
-    if(!/^https?:\/\//i.test(prov.url)||!prov.key) return json(res,422,{ok:false,error:'رابط API أو مفتاح API غير صالح'});
+    const b=await bodyJSON(req); const prov=await resolveProviderDiagnosticsInput(b);
+    if(!/^https?:\/\//i.test(prov.url)||!prov.key) return json(res,422,{ok:false,error:'رابط API أو مفتاح API غير صالح. إذا كان المزود محفوظاً، أعد تحميل قائمة المزودين ثم أعد الاختبار.'});
     const out={connection:{ok:false},balance:{ok:false},services:{ok:false}};
     try{ const d=await providerRequest(prov,{action:'balance'}); const balance=normalizeProviderBalance(d); if(balance===null) throw new Error('API لم يرجع رصيداً رقمياً'); out.connection={ok:true}; out.balance={ok:true,balance,currency:normalizeProviderCurrency(d)}; }
     catch(e){ out.balance={ok:false,error:e.name==='AbortError'?'انتهت مهلة جلب الرصيد':e.message}; }
