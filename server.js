@@ -10,13 +10,13 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.36';
-const BUILD_ID = 'SADA-1.5.36-SERVICE-VISIBILITY-20261008';
+const APP_VERSION = '1.5.37';
+const BUILD_ID = 'SADA-1.5.37-SERVICE-VISIBILITY-20261008';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
 const FIXED_RATE = 1250; // 1 USD = 1,250 IQD
-// v1.5.36: signed stateless sessions survive Railway restarts/instance changes.
+// v1.5.37: signed stateless sessions survive Railway restarts/instance changes.
 const sessions = new Map(); // legacy sessions kept only during rolling deployments
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || 'sadairaq-session-secret-change-me');
@@ -124,7 +124,7 @@ function session(req){
   if(stateless){
     if(!/^[a-zA-Z0-9_@.\-]+$/.test(String(stateless.username||''))) return null;
     if(stateless.role==='admin' && String(stateless.username)!==String(ADMIN_USER)) return null;
-    // v1.5.36: do NOT require users.json for an already signed user session.
+    // v1.5.37: do NOT require users.json for an already signed user session.
     // Firebase/custom-app users may outlive Railway's ephemeral local filesystem.
     return stateless;
   }
@@ -363,7 +363,7 @@ async function providerRequest(prov,params,timeoutMs=30000){
   throw lastError||new Error('تعذر الاتصال بالمزود');
 }
 
-function userFromSession(req){ const s=session(req); return s?.role==='user' ? String(s.username||'') : ''; }
+function userFromSession(req){ const s=session(req); return (s?.role==='user'||s?.role==='admin') ? String(s.username||'') : ''; }
 function appendJsonLedger(file,entry){ const arr=readJSON(file,[]); const next=Array.isArray(arr)?arr:[]; next.push(entry); writeJSON(file,next.slice(-5000)); }
 
 let SITE_ORDER_LOCK=Promise.resolve();
@@ -890,7 +890,9 @@ async function routeAPI(req,res,urlObj){
   }
   if(p==='/api/order/create' && req.method==='POST'){
     const wait=rateLimit(req,'order'); if(wait)return json(res,429,{ok:false,error:'طلبات كثيرة، أعد المحاولة بعد قليل'},{'Retry-After':String(wait)});
+    const orderSession=session(req);
     const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'});
+    const isAdminSession=orderSession?.role==='admin';
     const b=await bodyJSON(req); const providerId=String(b.providerId||'').trim(); const serviceId=String(b.serviceId||'').trim(); const firebaseServiceKey=String(b.firebaseServiceKey||'').trim(); const link=String(b.link||'').trim(); const quantity=Number(b.quantity); const localId=String(b.localId||'').trim();
     if(!providerId||!serviceId||!link||!Number.isInteger(quantity)||quantity<=0)return json(res,422,{ok:false,error:'بيانات الطلب غير مكتملة',stage:'validate'});
     if(!/^https?:\/\//i.test(link))return json(res,422,{ok:false,error:'الرابط غير صالح',stage:'validate'});
@@ -899,15 +901,14 @@ async function routeAPI(req,res,urlObj){
     const svc=await authoritativeWebsiteService(providerId,serviceId,firebaseServiceKey);
     if(!svc)return json(res,409,{ok:false,error:'لم أستطع التحقق من الخدمة وربطها بالمزود. أعد تحميل الخدمات من لوحة الإدارة. ',stage:'service_lookup'});
     const mn=Math.max(1,Number(svc.min||100)),mx=Math.max(mn,Number(svc.max||10000)); if(quantity<mn||quantity>mx)return json(res,422,{ok:false,error:'الكمية خارج حدود الخدمة',stage:'validate'});
-    const serviceRate=Number(svc.sellingUsd??svc.rateUsd??0); const localUser=readJSON('users.json',{users:{}}).users?.[username]||{}; const userDiscount=Math.max(0,Math.min(100,Number(localUser.discountPct??0)||0)); const chargeUsd=Number((Math.max(0,quantity/1000*serviceRate*(1-userDiscount/100))).toFixed(6)); const chargeIqd=Number((chargeUsd*FIXED_RATE).toFixed(4));
+    const serviceRate=Number(svc.sellingUsd??svc.rateUsd??0); const localUser=readJSON('users.json',{users:{}}).users?.[username]||{}; const userDiscount=Math.max(0,Math.min(100,Number(localUser.discountPct??orderSession?.discountPct??0)||0)); const chargeUsd=Number((Math.max(0,quantity/1000*serviceRate*(1-userDiscount/100))).toFixed(6)); const chargeIqd=Number((chargeUsd*FIXED_RATE).toFixed(4));
     const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود المرتبط بالخدمة غير موجود',stage:'provider_lookup'});
     const result=await withApiUserLock(username,async()=>{
       // The website wallet is Firebase; use a single transaction as the authoritative reservation.
       let reserved=false,before=0,after=0;
-      if(chargeIqd>0){
-        // The browser performs the authoritative Firebase transaction before calling this endpoint.
-        // The server uses its synchronized local wallet as a second safety check and does not depend on
-        // an outbound Firebase call (which would make Railway provider orders fail when Firebase is unreachable).
+      if(chargeIqd>0 && !isAdminSession){
+        // Regular users must have sufficient synchronized wallet balance.
+        // Admin sessions are allowed to use the user order flow for testing/operations.
         const localWallet=readJSON('users.json',{users:{}}).users?.[username];
         const startBal=Number(localWallet?.balance||0); before=startBal;
         if(localWallet && startBal<chargeIqd)return {insufficient:true,balanceUsd:Number((startBal/FIXED_RATE).toFixed(6))};
@@ -916,7 +917,7 @@ async function routeAPI(req,res,urlObj){
         const d=await providerRequest(prov,{action:'add',service:String(svc.providerServiceId||serviceId),link,quantity});
         const providerOrderId=normalizeProviderOrderId(d);
         if(!providerOrderId){appendJsonLedger('provider_failures.json',{stage:'provider_response',uncertain:true,user:username,providerId,serviceId,link,quantity,error:'المزود لم يرجع رقم طلب واضح',providerResponse:safeProviderResponse(d),createdAt:nowISO()});return {error:'المزود لم يرجع رقم طلب واضح بعد عملية الإرسال',uncertain:true};}
-        const createdAt=nowISO(); const ord={id:String(localId||('EXT_'+Date.now())),localId,user:username,providerId,providerName:prov.name||providerId,providerOrderId,serviceId,serviceName:String(svc.name||'خدمة'),link,quantity,unitSellingUsd:serviceRate,discountPct:userDiscount,chargeUsd,total:chargeIqd,status:'pending',providerRaw:safeProviderResponse(d),createdAt}; appendJsonLedger('orders.json',ord);
+        const createdAt=nowISO(); const ord={id:String(localId||('EXT_'+Date.now())),localId,user:username,providerId,providerName:prov.name||providerId,providerOrderId,serviceId,serviceName:String(svc.name||'خدمة'),link,quantity,unitSellingUsd:serviceRate,discountPct:userDiscount,chargeUsd,total:chargeIqd,status:'pending',billingMode:isAdminSession?'admin-test':'user',providerRaw:safeProviderResponse(d),createdAt}; appendJsonLedger('orders.json',ord);
         return {ok:true,order:ord};
       }catch(e){
         const rejected=!!e.providerRejected; const authFail=providerAuthErrorText(e.message); appendJsonLedger('provider_failures.json',{stage:'website_provider_add',uncertain:!rejected,authFailure:authFail,user:username,providerId,serviceId,link,quantity,error:String(e.message||e),createdAt:nowISO()}); return {error:authFail?'مفتاح API للمزود مرفوض أو منتهي':String(e.message||e),uncertain:!rejected,authFailure:authFail};

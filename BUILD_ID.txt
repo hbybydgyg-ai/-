@@ -1,1 +1,1 @@
-SadaIraq v1.5.36 - service visibility and uncategorized/all-platform fixes
+SadaIraq v1.5.37 - service visibility and uncategorized/all-platform fixes
