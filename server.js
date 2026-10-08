@@ -10,13 +10,13 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.39';
-const BUILD_ID = 'SADA-1.5.39-ADMIN-SESSION-FIX-20261008';
+const APP_VERSION = '1.5.40';
+const BUILD_ID = 'SADA-1.5.40-PROVIDER-IMPORT-PRICING-BINANCE-AUTH-20261009';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
 const FIXED_RATE = 1250; // 1 USD = 1,250 IQD
-// v1.5.39: signed stateless sessions survive Railway restarts/instance changes.
+// v1.5.40: signed stateless sessions survive Railway restarts/instance changes.
 const sessions = new Map(); // legacy sessions kept only during rolling deployments
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || 'sadairaq-session-secret-change-me');
@@ -123,8 +123,8 @@ function session(req){
   const stateless=decodeSession(token);
   if(stateless){
     if(!/^[a-zA-Z0-9_@.\-]+$/.test(String(stateless.username||''))) return null;
-    if(stateless.role==='admin' && String(stateless.username)!==String(ADMIN_USER)) return null;
-    // v1.5.39: do NOT require users.json for an already signed user session.
+    // A signed admin session remains valid during an admin-email setting change until TTL expiry.
+    // v1.5.40: do NOT require users.json for an already signed user session.
     // Firebase/custom-app users may outlive Railway's ephemeral local filesystem.
     return stateless;
   }
@@ -162,32 +162,60 @@ function envProvider(){
   if(!id||!url||!key) return null;
   return {id,name,url,key,source:'environment'};
 }
-function providerStore(){
-  // Never use the deployable providers.json as the authoritative store.
-  // providers.runtime.json is intentionally NOT shipped in release ZIPs, so code updates cannot erase it.
-  let local=readJSON('providers.runtime.json',null);
-  if(!local || !local.providers || typeof local.providers!=='object'){
-    const legacy=readJSON('providers.json',{activeProvider:'',providers:{},deletedProviderIds:[]});
-    local=legacy;
-    if(legacy && legacy.providers && Object.keys(legacy.providers).length){
-      try{writeJSON('providers.runtime.json',legacy);}catch(_){}
-    }
-  }
-  // Merge legacy provider state when runtime storage is empty/stale.
-  let providers={...(local&&local.providers&&typeof local.providers==='object'?local.providers:{})};
-  const legacy=readJSON('providers.json',{activeProvider:'',providers:{},deletedProviderIds:[]});
-  if(legacy?.providers && typeof legacy.providers==='object'){
-    for(const [id,v] of Object.entries(legacy.providers)) providers[id]=providers[id]?{...v,...providers[id]}:v;
-  }
-  const deleted=new Set([...(Array.isArray(legacy?.deletedProviderIds)?legacy.deletedProviderIds.map(String):[]),...(Array.isArray(local?.deletedProviderIds)?local.deletedProviderIds.map(String):[])]);
-  for(const id of deleted) delete providers[id];
-  const env=envProvider();
-  if(env && !deleted.has(env.id)) providers[env.id]={...(providers[env.id]||{}),...env};
-  let active=String(local?.activeProvider||'');
-  if(!active || !providers[active]) active=Object.keys(providers)[0]||'';
-  return {activeProvider:active,providers,deletedProviderIds:deleted,envProvider:env};
+function normalizeProviderId(value){
+  return String(value??'').trim().replace(/[^a-zA-Z0-9_-]/g,'');
 }
-function getProviderById(id){ const store=providerStore(); const pid=String(id||store.activeProvider||''); return {store,pid,prov:(store.providers||{})[pid]||null}; }
+function providerIdInStore(store,value){
+  const providers=store?.providers||{};
+  const wanted=String(value??'').trim();
+  if(wanted && Object.prototype.hasOwnProperty.call(providers,wanted)) return wanted;
+  const norm=normalizeProviderId(wanted);
+  if(norm && Object.prototype.hasOwnProperty.call(providers,norm)) return norm;
+  const keys=Object.keys(providers);
+  return keys.find(k=>normalizeProviderId(k)===norm && norm) || keys.find(k=>k.toLowerCase()===wanted.toLowerCase() && wanted) || '';
+}
+function providerStore(){
+  // Runtime state is authoritative; deploy archives never ship live provider state.
+  const legacy=readJSON('providers.json',{activeProvider:'',providers:{},deletedProviderIds:[]});
+  let runtime=readJSON('providers.runtime.json',null);
+  if(!runtime || !runtime.providers || typeof runtime.providers!=='object') runtime={activeProvider:'',providers:{},deletedProviderIds:[]};
+  const providers={};
+  const mergeOne=(id,source)=>{
+    if(!source || typeof source!=='object') return;
+    const prev=providers[id]||{};
+    const merged={...prev,...source};
+    for(const field of ['id','name','url','key']){
+      if(!String(merged[field]??'').trim() && String(prev[field]??'').trim()) merged[field]=prev[field];
+    }
+    providers[id]={...merged,id:String(merged.id||id)};
+  };
+  if(legacy?.providers&&typeof legacy.providers==='object') for(const [id,v] of Object.entries(legacy.providers)) mergeOne(String(id),v);
+  if(runtime?.providers&&typeof runtime.providers==='object') for(const [id,v] of Object.entries(runtime.providers)) mergeOne(String(id),v);
+  const deleted=new Set([
+    ...(Array.isArray(legacy?.deletedProviderIds)?legacy.deletedProviderIds.map(String):[]),
+    ...(Array.isArray(runtime?.deletedProviderIds)?runtime.deletedProviderIds.map(String):[])
+  ]);
+  for(const id of deleted){ for(const key of Object.keys(providers)) if(key===id || normalizeProviderId(key)===normalizeProviderId(id)) delete providers[key]; }
+  const env=envProvider();
+  if(env && !deleted.has(env.id)) mergeOne(env.id,env);
+  let active=String(runtime?.activeProvider||legacy?.activeProvider||'');
+  let activeKey=providerIdInStore({providers},active);
+  if(!activeKey || !providers[activeKey]?.url || !providers[activeKey]?.key){
+    activeKey=Object.keys(providers).find(k=>providers[k]?.url&&providers[k]?.key)||'';
+  }
+  return {activeProvider:activeKey,providers,deletedProviderIds:deleted,envProvider:env};
+}
+function getProviderById(id, options={}){
+  const store=providerStore();
+  const requested=String(id??'').trim();
+  let pid=providerIdInStore(store,requested || store.activeProvider);
+  let prov=pid?store.providers[pid]:null;
+  if((!prov?.url||!prov?.key) && options.allowSingleFallback===true){
+    const valid=Object.entries(store.providers||{}).filter(([,v])=>v?.url&&v?.key);
+    if(valid.length===1){pid=valid[0][0];prov=valid[0][1];}
+  }
+  return {store,pid,prov};
+}
 function normalizeProviderStatus(v){ const x=String(v||'').trim().toLowerCase(); const map={pending:'pending',queued:'pending',processing:'processing','in progress':'processing',completed:'completed',complete:'completed',partial:'partial',canceled:'cancelled',cancelled:'cancelled',failed:'failed',error:'failed',refunded:'refunded'}; return map[x]||'unknown'; }
 function normalizeProviderBalance(d){
   const vals=[];
@@ -475,39 +503,39 @@ async function apiAsiacell(req,res){
 }
 
 async function apiSmm(req,res,urlObj){
-  const wait=rateLimit(req,'provider'); if(wait) return json(res,429,{error:'طلبات المزود كثيرة، أعد المحاولة لاحقاً'},{'Retry-After':String(wait)});
-  if(!isAdmin(req)) return json(res,403,{error:'غير مصرح'});
-  const store=providerStore();
-  let providerId=String(urlObj.searchParams.get('provider')||store.activeProvider||'');
-  let prov=(store.providers||{})[providerId];
-  // Admin compatibility: if an old UI sends a stale provider id and there is only
-  // one saved provider, use the saved provider instead of returning a false 404.
-  if(!prov){ const ids=Object.keys(store.providers||{}); if(ids.length===1){ providerId=ids[0]; prov=store.providers[providerId]; } }
-  // أثناء إضافة/اختبار مزود قبل أول حفظ، اسمح للإدارة فقط بإرسال بيانات الاختبار مؤقتاً.
-  if(!prov){
-    const tempUrl=String(urlObj.searchParams.get('_url')||'').trim();
-    const tempKey=String(urlObj.searchParams.get('_key')||'').trim();
-    if(tempUrl&&tempKey&&providerId){
-      try{prov={id:providerId,name:providerId,url:normalizeProviderApiUrl(tempUrl),key:tempKey};}
-      catch(_){return json(res,422,{error:'رابط API للمزود غير صالح'});}
-    }
+  const wait=rateLimit(req,'provider');
+  if(wait) return json(res,429,{error:'طلبات المزود كثيرة، أعد المحاولة لاحقاً'},{'Retry-After':String(wait)});
+  if(!isAdmin(req)) return json(res,403,{error:'غير مصرح — جلسة الإدارة غير صالحة. حدّث الجلسة أو سجّل الدخول من جديد.'});
+  const requestedId=String(urlObj.searchParams.get('provider')||'').trim();
+  await ensureProviderRuntime(requestedId);
+  let resolved=getProviderById(requestedId || '',{allowSingleFallback:true});
+  let {store,pid:providerId,prov}=resolved;
+  // Older admin forms can send temporary credentials for a provider not saved yet.
+  const tempUrl=String(urlObj.searchParams.get('_url')||'').trim();
+  const tempKey=String(urlObj.searchParams.get('_key')||'').trim();
+  if((!prov?.url||!prov?.key) && tempUrl && tempKey){
+    try{prov={...(prov||{}),id:providerId||requestedId,name:prov?.name||providerId||requestedId,url:normalizeProviderApiUrl(tempUrl),key:tempKey};}
+    catch(_){return json(res,422,{error:'رابط API للمزود غير صالح'});}
   }
-  if(!prov)return json(res,404,{error:'لا يوجد مزود محفوظ أو بيانات مزود صالحة'});
+  if(!prov?.url||!prov?.key){
+    const available=Object.entries(store.providers||{}).filter(([,v])=>v?.url&&v?.key).map(([id,v])=>({id,name:String(v.name||id)}));
+    return json(res,404,{error:'لا يوجد مزود محفوظ ببيانات URL وAPI Key صالحة. افتح إعدادات المزود واحفظ المفتاح ثم اضغط تحديث.',providerId:requestedId||null,availableProviders:available});
+  }
   const action=String(urlObj.searchParams.get('action')||'balance');
-  if(!['balance','services','add','status','cancel'].includes(action))return json(res,422,{error:'عملية غير مدعومة'});
-  if(!isAdmin(req))return json(res,403,{error:'غير مصرح'});
-  const payload={action}; for(const k of ['service','link','quantity','order','orders']){if(urlObj.searchParams.has(k))payload[k]=urlObj.searchParams.get(k);} if(action==='cancel' && payload.orders===undefined && payload.order!==undefined){payload.orders=payload.order;delete payload.order;}
+  if(!['balance','services','add','status','cancel'].includes(action)) return json(res,422,{error:'عملية غير مدعومة'});
+  const payload={action};
+  for(const k of ['service','link','quantity','order','orders']) if(urlObj.searchParams.has(k)) payload[k]=urlObj.searchParams.get(k);
+  if(action==='cancel' && payload.orders===undefined && payload.order!==undefined){payload.orders=payload.order;delete payload.order;}
   try{
     const d=await providerRequest(prov,payload);
     if(action==='balance'){
       const balance=normalizeProviderBalance(d);
-      if(balance===null) return json(res,502,{error:'المزود لم يرجع رصيداً رقمياً صالحاً',providerResponse:d});
-      return json(res,200,{ok:true,balance,currency:normalizeProviderCurrency(d),providerId,providerName:prov.name||providerId,raw:d,checkedAt:new Date().toISOString()});
+      if(balance===null) return json(res,502,{error:'المزود لم يرجع رصيداً رقمياً صالحاً',providerId,providerName:prov.name||providerId});
+      return json(res,200,{ok:true,balance,currency:normalizeProviderCurrency(d),providerId,providerName:prov.name||providerId,checkedAt:new Date().toISOString()});
     }
     return json(res,200,d);
-  }catch(e){return json(res,502,{error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});}
+  }catch(e){return json(res,502,{error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':String(e.message||'تعذر الاتصال بالمزود'),providerId,providerName:prov.name||providerId});}
 }
-
 
 function readNotifications(){ return readJSON('notifications.json',[]); }
 function writeNotifications(v){ writeJSON('notifications.json',Array.isArray(v)?v:[]); }
@@ -741,7 +769,7 @@ async function routeAPI(req,res,urlObj){
     const idem=String(req.headers['idempotency-key']||'').trim(); const b=await bodyJSON(req); const serviceId=String(b.service||'').trim();const link=String(b.link||'').trim();const quantity=Number(b.quantity);if(!serviceId||!/^https?:\/\//i.test(link)||!Number.isInteger(quantity)||quantity<=0)return json(res,422,{error:'service, link and positive integer quantity are required'});
     const existing=readJSON('orders.json',[]).find(o=>String(o.user||'')===au.username&&idem&&String(o.idempotencyKey||'')===idem); if(existing)return json(res,200,apiOrderPublic(existing));
     const svc=findInternalApiService(serviceId); if(!svc)return json(res,404,{error:'Service not found'}); const s={...svc,sellingUsd:Number(svc.sellingUsd??svc.rateUsd??svc.rate??0)}; if(quantity<Number(s.min)||quantity>Number(s.max))return json(res,422,{error:'Quantity outside service limits'});
-    const {pct,total}=calcApiChargeUsd(s,quantity,au.user); const iqd=Number((total*FIXED_RATE).toFixed(4)); const {prov}=getProviderById(s.providerId); if(!prov)return json(res,502,{error:'Provider unavailable'});
+    const {pct,total}=calcApiChargeUsd(s,quantity,au.user); const iqd=Number((total*FIXED_RATE).toFixed(4)); await ensureProviderRuntime(s.providerId); const {prov}=getProviderById(s.providerId); if(!prov)return json(res,502,{error:'Provider unavailable'});
     const result=await withApiUserLock(au.username,async()=>{
       const keys=readJSON('api_keys.json',{}); const live=Object.values(keys).find(x=>x&&x.username===au.username&&!x.revokedAt); if(!live)return {authRevoked:true};
       const users=readJSON('users.json',{users:{}}); const u=users.users?.[au.username]; if(!u)return {notFound:true};
@@ -883,7 +911,14 @@ async function routeAPI(req,res,urlObj){
   if(p==='/api/notifications/seen' && req.method==='POST'){
     const s=session(req); if(!s||s.role!=='user')return json(res,401,{ok:false,error:'يجب تسجيل الدخول'}); const b=await bodyJSON(req); const id=String(b.id||''); if(!id)return json(res,422,{ok:false,error:'معرف الإشعار مطلوب'}); const seen=readNotificationSeen(); seen[s.username]=seen[s.username]||{}; seen[s.username][id]=new Date().toISOString(); writeNotificationSeen(seen); return json(res,200,{ok:true});
   }
-  if(p==='/api/provider/balance' && req.method==='GET'){ const wait=rateLimit(req,'provider'); if(wait)return json(res,429,{ok:false,error:'طلبات الرصيد كثيرة، أعد المحاولة لاحقاً'},{'Retry-After':String(wait)}); if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'}); const {prov,pid}=getProviderById(urlObj.searchParams.get('provider')); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'}); try{const d=await providerRequest(prov,{action:'balance'}); const balance=normalizeProviderBalance(d); if(balance===null)return json(res,502,{ok:false,error:'المزود لم يرجع قيمة رصيد صالحة',raw:d}); return json(res,200,{ok:true,providerId:pid,providerName:prov.name||pid,balance,currency:normalizeProviderCurrency(d),raw:d,checkedAt:new Date().toISOString()});}catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});} }
+  if(p==='/api/provider/balance' && req.method==='GET'){
+    const wait=rateLimit(req,'provider'); if(wait)return json(res,429,{ok:false,error:'طلبات الرصيد كثيرة، أعد المحاولة لاحقاً'},{'Retry-After':String(wait)});
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح — جلسة الإدارة غير صالحة'});
+    const requested=String(urlObj.searchParams.get('provider')||''); await ensureProviderRuntime(requested);
+    const {prov,pid}=getProviderById(requested,{allowSingleFallback:true}); if(!prov?.url||!prov?.key)return json(res,404,{ok:false,error:'المزود غير موجود أو بيانات URL/Key غير مكتملة'});
+    try{const d=await providerRequest(prov,{action:'balance'}); const balance=normalizeProviderBalance(d); if(balance===null)return json(res,502,{ok:false,error:'المزود لم يرجع قيمة رصيد صالحة'}); return json(res,200,{ok:true,providerId:pid,providerName:prov.name||pid,balance,currency:normalizeProviderCurrency(d),checkedAt:new Date().toISOString()});}
+    catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});}
+  }
   if(p==='/api/provider/test' && req.method==='POST'){
     const wait=rateLimit(req,'provider'); if(wait)return json(res,429,{ok:false,error:'طلبات اختبار المزود كثيرة، أعد المحاولة لاحقاً'},{'Retry-After':String(wait)});
     if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
@@ -911,7 +946,7 @@ async function routeAPI(req,res,urlObj){
     if(!svc)return json(res,409,{ok:false,error:'لم أستطع التحقق من الخدمة وربطها بالمزود. أعد تحميل الخدمات من لوحة الإدارة. ',stage:'service_lookup'});
     const mn=Math.max(1,Number(svc.min||100)),mx=Math.max(mn,Number(svc.max||10000)); if(quantity<mn||quantity>mx)return json(res,422,{ok:false,error:'الكمية خارج حدود الخدمة',stage:'validate'});
     const serviceRate=Number(svc.sellingUsd??svc.rateUsd??0); const localUser=readJSON('users.json',{users:{}}).users?.[username]||{}; const userDiscount=Math.max(0,Math.min(100,Number(localUser.discountPct??orderSession?.discountPct??0)||0)); const chargeUsd=Number((Math.max(0,quantity/1000*serviceRate*(1-userDiscount/100))).toFixed(6)); const chargeIqd=Number((chargeUsd*FIXED_RATE).toFixed(4));
-    const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود المرتبط بالخدمة غير موجود',stage:'provider_lookup'});
+    await ensureProviderRuntime(providerId); const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود المرتبط بالخدمة غير موجود',stage:'provider_lookup'});
     const result=await withApiUserLock(username,async()=>{
       // The website wallet is Firebase; use a single transaction as the authoritative reservation.
       let reserved=false,before=0,after=0;
@@ -944,7 +979,7 @@ async function routeAPI(req,res,urlObj){
     const b=await bodyJSON(req); const providerId=String(b.providerId||'').trim(); const providerOrderId=String(b.providerOrderId||'').trim();
     if(!providerId||!providerOrderId)return json(res,422,{ok:false,error:'بيانات التحقق ناقصة'});
     if(!ownedProviderOrder(username,providerId,providerOrderId))return json(res,403,{ok:false,error:'هذا الطلب لا يتبع حسابك'});
-    const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
+    await ensureProviderRuntime(providerId); const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
     try{
       const d=await providerRequest(prov,{action:'status',order:providerOrderId});
       const normalized=normalizeProviderStatus(d.status||''); const checkedAt=nowISO();
@@ -956,7 +991,7 @@ async function routeAPI(req,res,urlObj){
   }
   if(p==='/api/order/cancel' && req.method==='POST'){
     const wait=rateLimit(req,'order'); if(wait)return json(res,429,{ok:false,error:'طلبات كثيرة، أعد المحاولة بعد قليل'},{'Retry-After':String(wait)});
-    const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'}); const b=await bodyJSON(req); const providerId=String(b.providerId||''); const providerOrderId=String(b.providerOrderId||''); if(!providerId||!providerOrderId)return json(res,422,{ok:false,error:'بيانات الإلغاء ناقصة'}); if(!ownedProviderOrder(username,providerId,providerOrderId))return json(res,403,{ok:false,error:'هذا الطلب لا يتبع حسابك'}); const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
+    const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'}); const b=await bodyJSON(req); const providerId=String(b.providerId||''); const providerOrderId=String(b.providerOrderId||''); if(!providerId||!providerOrderId)return json(res,422,{ok:false,error:'بيانات الإلغاء ناقصة'}); if(!ownedProviderOrder(username,providerId,providerOrderId))return json(res,403,{ok:false,error:'هذا الطلب لا يتبع حسابك'}); await ensureProviderRuntime(providerId); const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
     try{const d=await providerRequest(prov,{action:'cancel',orders:providerOrderId}); if(!providerActionSucceeded('cancel',d,providerOrderId)) return json(res,502,{ok:false,error:'المزود لم يؤكد إلغاء الطلب',providerRaw:d}); appendJsonLedger('orders.json',{event:'cancel',user:username,providerId,providerOrderId,status:'cancelled',createdAt:new Date().toISOString(),providerRaw:d}); return json(res,200,{ok:true,providerOrderId,status:'cancelled',providerRaw:d,updatedAt:new Date().toISOString()});}
     catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});}
   }
@@ -982,7 +1017,7 @@ async function routeAPI(req,res,urlObj){
     const rows=readJSON('orders.json',[]); const idx=rows.findIndex(o=>String(o.id||'')===siteId);
     if(idx<0) return json(res,404,{ok:false,error:'طلب الموقع غير موجود'});
     const order=rows[idx]; if(!order.providerId||!order.providerOrderId) return json(res,409,{ok:false,error:'هذا الطلب لا يملك طلباً مرتبطاً بالمزود'});
-    const {prov}=getProviderById(order.providerId); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
+    await ensureProviderRuntime(order.providerId); const {prov}=getProviderById(order.providerId); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
     try{
       const d=await providerRequest(prov,{action:'status',order:String(order.providerOrderId)});
       const oldStatus=normalizeProviderStatus(order.status||'pending'); const newStatus=normalizeProviderStatus(d.status||order.status||'pending');
@@ -1022,9 +1057,12 @@ async function routeAPI(req,res,urlObj){
     return json(res,200,{ok:true,username,balance:user.balance,updatedAt:user.updatedAt});
   }
   if(p==='/api/provider/secret' && req.method==='GET') {
-    if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
-    const id=String(urlObj.searchParams.get('provider')||''); const {prov}=getProviderById(id); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
-    return json(res,200,{ok:true,providerId:id,key:String(prov.key||'')});
+    if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح — جلسة الإدارة غير صالحة'});
+    const id=String(urlObj.searchParams.get('provider')||'');
+    await ensureProviderRuntime(id);
+    const {pid,prov}=getProviderById(id,{allowSingleFallback:true});
+    if(!prov?.key) return json(res,404,{ok:false,error:'المزود غير موجود أو مفتاحه غير محفوظ'});
+    return json(res,200,{ok:true,providerId:pid,key:String(prov.key)});
   }
   if(p.startsWith('/api/providers/') && req.method==='DELETE'){
     if(!isAdmin(req)) return json(res,403,{error:'غير مصرح'});
@@ -1043,39 +1081,63 @@ async function routeAPI(req,res,urlObj){
     let firebaseSynced=true;
     try{
       await firebaseDeleteJson('config/smmProviders/'+firebaseSafeKey(pid));
+      await firebaseDeleteJson('config/smmProviderSecrets/'+firebaseSafeKey(pid));
       await firebaseWriteJson('config/smmDeletedProviders/'+firebaseSafeKey(pid),true);
+      const activeRemote=String(active||''); if(activeRemote) await firebaseWriteJson('config/smmActive',activeRemote);
     }catch(e){ firebaseSynced=false; console.warn('provider delete Firebase sync failed:',e?.message||e); }
     return json(res,200,{ok:true,deleted:pid,alreadyDeleted:!existed,activeProvider:active,count:Object.keys(out).length,firebaseSynced});
   }
   if(p==='/api/providers'){
-    const store=providerStore();
+    if(req.method!=='GET'&&req.method!=='POST') return json(res,405,{error:'Method not allowed'});
+    if(!isAdmin(req)) return json(res,403,{error:'غير مصرح — جلسة الإدارة غير صالحة'});
+    let store=providerStore();
     if(req.method==='GET'){
-      if(!isAdmin(req)) return json(res,403,{error:'غير مصرح'});
-      const safe={}; for(const [id,v] of Object.entries(store.providers||{})) safe[id]={id,name:v.name||id,url:v.url||'',hasKey:!!v.key};
+      // Hydrate remote metadata/secrets on each explicit list request, without clearing local data if Firebase is offline.
+      await hydrateProviderRuntimeFromFirebase().catch(()=>{});
+      store=providerStore();
+      const safe={};
+      for(const [id,v] of Object.entries(store.providers||{})) if(v?.url) safe[id]={id,name:v.name||id,url:v.url||'',hasKey:!!v.key};
       return json(res,200,{activeProvider:store.activeProvider||'',providers:safe});
     }
-    if(req.method==='POST'){
-      if(!isAdmin(req)) return json(res,403,{error:'غير مصرح'});
-      const b=await bodyJSON(req); const list=Array.isArray(b.providers)?b.providers:[];
-      const incoming={};
-      for(const item of list){
-        if(!item||typeof item!=='object') continue;
-        const id=String(item.id||'').replace(/[^a-zA-Z0-9_-]/g,''); const name=String(item.name||'').trim(); let apiUrl=String(item.url||'').trim(); const key=String(item.key||'').trim();
-        try{apiUrl=normalizeProviderApiUrl(apiUrl);}catch(_){}
-        const preserved=String((store.providers?.[id]?.key) || (store.envProvider?.id===id ? (envProvider()?.key || '') : ''));
-        const blockedDeleted=store.deletedProviderIds?.has?.(String(id)) && b.restoreDeleted!==true;
-        if(id&&name&&/^https?:\/\//i.test(apiUrl)&&(key||preserved)&&!blockedDeleted) incoming[id]={name,url:apiUrl,key:key||preserved};
+    const b=await bodyJSON(req); const list=Array.isArray(b.providers)?b.providers:[];
+    await ensureProviderRuntime(''); store=providerStore();
+    const incoming={};
+    for(const item of list){
+      if(!item||typeof item!=='object') continue;
+      const rawId=String(item.id||item.providerId||'').trim(); const id=normalizeProviderId(rawId);
+      if(!id) continue;
+      const oldId=providerIdInStore(store,rawId)||providerIdInStore(store,id); const prev=oldId?store.providers[oldId]:{};
+      const name=String(item.name||prev?.name||id).trim();
+      let apiUrl=String(item.url||item.apiUrl||prev?.url||'').trim();
+      let key=String(item.key||item.apiKey||prev?.key||(store.envProvider?.id===id?store.envProvider.key:'')||'').trim();
+      try{apiUrl=normalizeProviderApiUrl(apiUrl)}catch(_){ }
+      const blockedDeleted=[...(store.deletedProviderIds||[])].some(x=>normalizeProviderId(x)===id);
+      // A tombstoned provider may return only after an explicit Add/Save operation.
+      const explicitRestore=b.restoreDeleted===true;
+      if(blockedDeleted&&!explicitRestore) continue;
+      if(name && /^https?:\/\//i.test(apiUrl) && key){
+        incoming[id]={...(prev||{}),...item,id,name,url:apiUrl,key,source:'admin'};
       }
-      const out = b.mode==='replace' ? incoming : {...(store.providers||{}), ...incoming};
-      const deletedIds=new Set(store.deletedProviderIds||[]);
-      for(const id of Object.keys(incoming)) deletedIds.delete(id);
-      if(b.mode==='replace' && store.envProvider?.id && !incoming[store.envProvider.id]) deletedIds.add(store.envProvider.id);
-      const activeCandidate=String(b.activeProvider!==undefined ? b.activeProvider : (store.activeProvider||''));
-      const active=activeCandidate && out[activeCandidate] ? activeCandidate : (Object.keys(out)[0]||'');
-      writeJSON('providers.runtime.json',{activeProvider:active,providers:out,deletedProviderIds:[...deletedIds],updatedAt:new Date().toISOString()});
-      let firebaseSynced=true; try{ for(const id of Object.keys(incoming)){ await firebaseDeleteJson('config/smmDeletedProviders/'+firebaseSafeKey(id)); await firebaseWriteJson('config/smmProviders/'+firebaseSafeKey(id),incoming[id]); } }catch(e){ firebaseSynced=false; console.warn('provider save Firebase sync failed:',e?.message||e); }
-      return json(res,200,{ok:true,count:Object.keys(out).length,activeProvider:active,firebaseSynced});
     }
+    const confirmedReplace=b.mode==='replace'&&b.confirmReplace===true;
+    const out=confirmedReplace?incoming:{...(store.providers||{}),...incoming};
+    const deletedIds=new Set(store.deletedProviderIds||[]);
+    for(const id of Object.keys(incoming)) for(const oldId of [...deletedIds]) if(normalizeProviderId(oldId)===normalizeProviderId(id)) deletedIds.delete(oldId);
+    let activeCandidate=String(b.activeProvider!==undefined?b.activeProvider:(store.activeProvider||''));
+    let active=providerIdInStore({providers:out},activeCandidate);
+    if(!active) active=Object.keys(out).find(id=>out[id]?.url&&out[id]?.key)||'';
+    writeJSON('providers.runtime.json',{activeProvider:active,providers:out,deletedProviderIds:[...deletedIds],updatedAt:nowISO()});
+    let firebaseSynced=true;
+    try{
+      for(const [id,v] of Object.entries(incoming)){
+        const k=firebaseSafeKey(id);
+        await firebaseDeleteJson('config/smmDeletedProviders/'+k);
+        await firebaseWriteJson('config/smmProviders/'+k,{id,name:v.name,url:v.url,hasKey:true});
+        await firebaseWriteJson('config/smmProviderSecrets/'+k,{id,key:v.key,name:v.name,url:v.url});
+      }
+      await firebaseWriteJson('config/smmActive',active);
+    }catch(e){firebaseSynced=false;console.warn('provider save Firebase sync failed:',e?.message||e);}
+    return json(res,200,{ok:true,count:Object.keys(out).length,activeProvider:active,firebaseSynced,received:list.length,saved:Object.keys(incoming).length});
   }
   if(p==='/api/smm') return apiSmm(req,res,urlObj);
   if(p==='/api/asiacell' && req.method==='POST') return apiAsiacell(req,res);
@@ -1086,7 +1148,9 @@ async function routeAPI(req,res,urlObj){
 const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.svg':'image/svg+xml','.json':'application/json; charset=utf-8','.txt':'text/plain; charset=utf-8'};
 function serveStatic(req,res,urlObj){
   let p=decodeURIComponent(urlObj.pathname); if(p==='/'||p==='') p='/index.html';
-  if(/^\/data(?:\/|$)/i.test(p) || /(?:^|\/)\.(?:env|git|npmrc)/i.test(p)) return json(res,403,{error:'Forbidden'});
+  const baseName=path.posix.basename(p).toLowerCase();
+  const blockedFiles=new Set(['server.js','package.json','config.json','authproviders.json','login.json','noauth.json','cookies.txt']);
+  if(blockedFiles.has(baseName) || /^\/data(?:\/|$)/i.test(p) || /(?:^|\/)\.(?:env|git|npmrc)/i.test(p)) return json(res,403,{error:'Forbidden'});
   const file=path.normalize(path.join(ROOT,p));
   if(!file.startsWith(ROOT)) return json(res,403,{error:'Forbidden'});
   fs.stat(file,(err,st)=>{
@@ -1100,21 +1164,60 @@ function serveStatic(req,res,urlObj){
 }
 
 async function hydrateProviderRuntimeFromFirebase(){
-  try{
-    const remote=await firebaseGetJson('config/smmProviders',7000);
-    const deleted=await firebaseGetJson('config/smmDeletedProviders',7000);
-    const old=readJSON('providers.runtime.json',{activeProvider:'',providers:{},deletedProviderIds:[]});
-    const deletedSet=new Set([...(Array.isArray(old?.deletedProviderIds)?old.deletedProviderIds:[]).map(String),...((deleted&&typeof deleted==='object')?Object.entries(deleted).filter(([,v])=>v===true).map(([k])=>String(k)):[])]);
-    const providers={...(old?.providers&&typeof old.providers==='object'?old.providers:{})};
-    if(remote&&typeof remote==='object'&&!Array.isArray(remote)){
-      for(const [id,v] of Object.entries(remote)){ if(deletedSet.has(String(id))) continue; if(v&&typeof v==='object'&&v.url&&v.key) providers[id]={...v,id}; }
-    }
-    for(const id of deletedSet) delete providers[String(id)];
-    const env=envProvider(); if(env && !deletedSet.has(String(env.id))) providers[env.id]={...(providers[env.id]||{}),...env};
-    const active=providers[old?.activeProvider]?String(old.activeProvider):(Object.keys(providers)[0]||'');
-    writeJSON('providers.runtime.json',{activeProvider:active,providers,deletedProviderIds:[...deletedSet],updatedAt:nowISO()});
-    return true;
-  }catch(e){ console.warn('provider firebase hydrate failed:',e?.message||e); return false; }
+  // Provider metadata and credentials were split into two Firebase paths by newer UI builds.
+  // Merge both paths; never discard the local runtime store when Firebase is temporarily offline.
+  const settled=await Promise.allSettled([
+    firebaseGetJson('config/smmProviders',7000),
+    firebaseGetJson('config/smmProviderSecrets',7000),
+    firebaseGetJson('config/smmDeletedProviders',7000),
+    firebaseGetJson('config/smmActive',7000)
+  ]);
+  const take=i=>settled[i]?.status==='fulfilled'?settled[i].value:null;
+  const remote=take(0), secrets=take(1), deleted=take(2), remoteActive=take(3);
+  const old=readJSON('providers.runtime.json',{activeProvider:'',providers:{},deletedProviderIds:[]});
+  const legacy=readJSON('providers.json',{activeProvider:'',providers:{},deletedProviderIds:[]});
+  const deletedSet=new Set([
+    ...(Array.isArray(old?.deletedProviderIds)?old.deletedProviderIds:[]).map(String),
+    ...(Array.isArray(legacy?.deletedProviderIds)?legacy.deletedProviderIds:[]).map(String),
+    ...((deleted&&typeof deleted==='object')?Object.entries(deleted).filter(([,v])=>v===true).map(([k])=>String(k)):[])
+  ]);
+  const providers={...(old?.providers&&typeof old.providers==='object'?old.providers:{})};
+  if(legacy?.providers&&typeof legacy.providers==='object') for(const [id,v] of Object.entries(legacy.providers)) providers[id]=providers[id]?{...v,...providers[id]}:v;
+  const ids=new Set([
+    ...Object.keys(remote&&typeof remote==='object'&&!Array.isArray(remote)?remote:{}),
+    ...Object.keys(secrets&&typeof secrets==='object'&&!Array.isArray(secrets)?secrets:{})
+  ]);
+  for(const firebaseKey of ids){
+    const meta=(remote&&typeof remote[firebaseKey]==='object'&&remote[firebaseKey])||{};
+    const secret=(secrets&&typeof secrets[firebaseKey]==='object'&&secrets[firebaseKey])||{};
+    const id=String(secret.id||meta.id||firebaseKey).trim();
+    const normId=normalizeProviderId(id);
+    const blocked=[...deletedSet].some(x=>String(x)===id || normalizeProviderId(x)===normId);
+    if(!id||blocked)continue;
+    const prevKey=providerIdInStore({providers},id);
+    const prev=prevKey?providers[prevKey]:{};
+    const urlRaw=String(secret.url||meta.url||prev.url||'').trim();
+    const key=String(secret.key||meta.key||prev.key||'').trim();
+    if(!urlRaw||!key)continue;
+    let url=urlRaw; try{url=normalizeProviderApiUrl(urlRaw)}catch(_){}
+    providers[id]={...prev,...meta,...secret,id,name:String(meta.name||secret.name||prev.name||id),url,key};
+    if(prevKey && prevKey!==id) delete providers[prevKey];
+  }
+  for(const id of deletedSet){ for(const existing of Object.keys(providers)){if(String(existing)===String(id)||normalizeProviderId(existing)===normalizeProviderId(id))delete providers[existing];} }
+  const env=envProvider(); if(env&&!deletedSet.has(String(env.id)))providers[env.id]={...(providers[env.id]||{}),...env};
+  const activeFromRemote=typeof remoteActive==='string'?remoteActive:String(remoteActive?.id||remoteActive?.activeProvider||'');
+  const active=providers[activeFromRemote]?activeFromRemote:(providers[old?.activeProvider]?String(old.activeProvider):(Object.keys(providers)[0]||''));
+  writeJSON('providers.runtime.json',{activeProvider:active,providers,deletedProviderIds:[...deletedSet],updatedAt:nowISO()});
+  return true;
+}
+async function ensureProviderRuntime(id=''){
+  let store=providerStore();
+  const wanted=String(id||store.activeProvider||'');
+  const found=getProviderById(wanted).prov;
+  if(found?.url&&found?.key)return store;
+  await hydrateProviderRuntimeFromFirebase();
+  store=providerStore();
+  return store;
 }
 
 ensureData();
