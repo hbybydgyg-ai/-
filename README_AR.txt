@@ -1,5 +1,5 @@
-صدى العراق v1.5.31
-- Provider runtime storage is kept in data/providers.runtime.json and is not shipped in release ZIPs.
-- Telegram order notifications are backend-only.
-- API page shows API URL + user API key only.
-- User orders use invoice-style cards with Sada Iraq branding.
+صدى العراق v1.5.32
+- مزودو SMM محفوظون في Firebase مع علامة حذف دائمة حتى لا يعود المزود المحذوف بعد تحديث الكود.
+- شاشة رفع الخدمات والأقسام تربط الخدمات بصورة المنصة المختارة.
+- قسم رفع الخدمات والاقسام لإعادة ترتيب الأقسام والخدمات ونقل الخدمات بين الأقسام.
+- قوائم الخدمات تستخدم صورة القسم المختارة، وقائمة الفئات تستخدم أيقونة المنصة فقط.

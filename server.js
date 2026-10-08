@@ -10,13 +10,13 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.31';
-const BUILD_ID = 'SADA-1.5.31-CATEGORY-SERVICE-DEFINITIVE-FIX-20261008';
+const APP_VERSION = '1.5.32';
+const BUILD_ID = 'SADA-1.5.32-CATALOG-PROVIDER-DELETE-IMPORT-20261008';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
 const FIXED_RATE = 1250; // 1 USD = 1,250 IQD
-// v1.5.31: signed stateless sessions survive Railway restarts/instance changes.
+// v1.5.32: signed stateless sessions survive Railway restarts/instance changes.
 const sessions = new Map(); // legacy sessions kept only during rolling deployments
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || 'sadairaq-session-secret-change-me');
@@ -124,7 +124,7 @@ function session(req){
   if(stateless){
     if(!/^[a-zA-Z0-9_@.\-]+$/.test(String(stateless.username||''))) return null;
     if(stateless.role==='admin' && String(stateless.username)!==String(ADMIN_USER)) return null;
-    // v1.5.31: do NOT require users.json for an already signed user session.
+    // v1.5.32: do NOT require users.json for an already signed user session.
     // Firebase/custom-app users may outlive Railway's ephemeral local filesystem.
     return stateless;
   }
@@ -543,6 +543,12 @@ async function firebaseGetJson(pathname,timeoutMs=8000){
   try{ const u=FIREBASE_DATABASE_URL+'/'+String(pathname).replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/')+'.json'; const r=await fetch(u,{headers:{'Accept':'application/json'},signal:controller.signal}); if(!r.ok) throw new Error('Firebase HTTP '+r.status); return await r.json(); }
   finally{ clearTimeout(timer); }
 }
+async function firebaseWriteJson(pathname,value,timeoutMs=8000){
+  const controller=new AbortController(), timer=setTimeout(()=>controller.abort(),timeoutMs);
+  try{ const u=FIREBASE_DATABASE_URL+'/'+String(pathname).replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/')+'.json'; const r=await fetch(u,{method:'PUT',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(value),signal:controller.signal}); if(!r.ok) throw new Error('Firebase HTTP '+r.status); return await r.json().catch(()=>value); }
+  finally{ clearTimeout(timer); }
+}
+async function firebaseDeleteJson(pathname,timeoutMs=8000){ return firebaseWriteJson(pathname,null,timeoutMs); }
 async function firebaseServiceByKey(fbKey){ const k=firebaseSafeKey(fbKey); const v=await firebaseGetJson('services/'+k); return v&&typeof v==='object'?{...v,fbKey:String(fbKey)}:null; }
 async function firebaseUserByUsername(username){ const k=firebaseSafeKey(username); const v=await firebaseGetJson('users/'+k); return v&&typeof v==='object'?v:null; }
 function apiKeyFromRequest(req){
@@ -1015,15 +1021,21 @@ async function routeAPI(req,res,urlObj){
     const pid=decodeURIComponent(p.slice('/api/providers/'.length)).trim();
     if(!pid) return json(res,400,{error:'معرف المزود مفقود'});
     const store=providerStore();
-    if(!store.providers[pid]) return json(res,404,{error:'المزود غير موجود'});
+    const existed=!!store.providers[pid];
     const out={...(store.providers||{})};
     delete out[pid];
     const deletedIds=new Set(store.deletedProviderIds||[]);
-    if(store.envProvider?.id===pid) deletedIds.add(pid); else deletedIds.delete(pid);
+    deletedIds.add(pid); // permanent tombstone: an update/restart must not resurrect this provider
     let active=String(store.activeProvider||'');
     if(active===pid) active=Object.keys(out)[0]||'';
     writeJSON('providers.runtime.json',{activeProvider:active,providers:out,deletedProviderIds:[...deletedIds],updatedAt:new Date().toISOString()});
-    return json(res,200,{ok:true,deleted:pid,activeProvider:active,count:Object.keys(out).length});
+    // Persist deletion independently of the code release and remove any Firebase copy.
+    let firebaseSynced=true;
+    try{
+      await firebaseDeleteJson('config/smmProviders/'+firebaseSafeKey(pid));
+      await firebaseWriteJson('config/smmDeletedProviders/'+firebaseSafeKey(pid),true);
+    }catch(e){ firebaseSynced=false; console.warn('provider delete Firebase sync failed:',e?.message||e); }
+    return json(res,200,{ok:true,deleted:pid,alreadyDeleted:!existed,activeProvider:active,count:Object.keys(out).length,firebaseSynced});
   }
   if(p==='/api/providers'){
     const store=providerStore();
@@ -1041,7 +1053,8 @@ async function routeAPI(req,res,urlObj){
         const id=String(item.id||'').replace(/[^a-zA-Z0-9_-]/g,''); const name=String(item.name||'').trim(); let apiUrl=String(item.url||'').trim(); const key=String(item.key||'').trim();
         try{apiUrl=normalizeProviderApiUrl(apiUrl);}catch(_){}
         const preserved=String((store.providers?.[id]?.key) || (store.envProvider?.id===id ? (envProvider()?.key || '') : ''));
-        if(id&&name&&/^https?:\/\//i.test(apiUrl)&&(key||preserved)) incoming[id]={name,url:apiUrl,key:key||preserved};
+        const blockedDeleted=store.deletedProviderIds?.has?.(String(id)) && b.restoreDeleted!==true;
+        if(id&&name&&/^https?:\/\//i.test(apiUrl)&&(key||preserved)&&!blockedDeleted) incoming[id]={name,url:apiUrl,key:key||preserved};
       }
       const out = b.mode==='replace' ? incoming : {...(store.providers||{}), ...incoming};
       const deletedIds=new Set(store.deletedProviderIds||[]);
@@ -1050,7 +1063,8 @@ async function routeAPI(req,res,urlObj){
       const activeCandidate=String(b.activeProvider!==undefined ? b.activeProvider : (store.activeProvider||''));
       const active=activeCandidate && out[activeCandidate] ? activeCandidate : (Object.keys(out)[0]||'');
       writeJSON('providers.runtime.json',{activeProvider:active,providers:out,deletedProviderIds:[...deletedIds],updatedAt:new Date().toISOString()});
-      return json(res,200,{ok:true,count:Object.keys(out).length,activeProvider:active});
+      let firebaseSynced=true; try{ for(const id of Object.keys(incoming)){ await firebaseDeleteJson('config/smmDeletedProviders/'+firebaseSafeKey(id)); await firebaseWriteJson('config/smmProviders/'+firebaseSafeKey(id),incoming[id]); } }catch(e){ firebaseSynced=false; console.warn('provider save Firebase sync failed:',e?.message||e); }
+      return json(res,200,{ok:true,count:Object.keys(out).length,activeProvider:active,firebaseSynced});
     }
   }
   if(p==='/api/smm') return apiSmm(req,res,urlObj);
@@ -1075,6 +1089,24 @@ function serveStatic(req,res,urlObj){
   });
 }
 
+async function hydrateProviderRuntimeFromFirebase(){
+  try{
+    const remote=await firebaseGetJson('config/smmProviders',7000);
+    const deleted=await firebaseGetJson('config/smmDeletedProviders',7000);
+    const old=readJSON('providers.runtime.json',{activeProvider:'',providers:{},deletedProviderIds:[]});
+    const deletedSet=new Set([...(Array.isArray(old?.deletedProviderIds)?old.deletedProviderIds:[]).map(String),...((deleted&&typeof deleted==='object')?Object.entries(deleted).filter(([,v])=>v===true).map(([k])=>String(k)):[])]);
+    const providers={...(old?.providers&&typeof old.providers==='object'?old.providers:{})};
+    if(remote&&typeof remote==='object'&&!Array.isArray(remote)){
+      for(const [id,v] of Object.entries(remote)){ if(deletedSet.has(String(id))) continue; if(v&&typeof v==='object'&&v.url&&v.key) providers[id]={...v,id}; }
+    }
+    for(const id of deletedSet) delete providers[String(id)];
+    const env=envProvider(); if(env && !deletedSet.has(String(env.id))) providers[env.id]={...(providers[env.id]||{}),...env};
+    const active=providers[old?.activeProvider]?String(old.activeProvider):(Object.keys(providers)[0]||'');
+    writeJSON('providers.runtime.json',{activeProvider:active,providers,deletedProviderIds:[...deletedSet],updatedAt:nowISO()});
+    return true;
+  }catch(e){ console.warn('provider firebase hydrate failed:',e?.message||e); return false; }
+}
+
 ensureData();
 ensureTelegramDefaults();
 const server=http.createServer(async (req,res)=>{
@@ -1090,4 +1122,4 @@ const server=http.createServer(async (req,res)=>{
     return serveStatic(req,res,u);
   }catch(e){ const st=Number(e?.statusCode)||500; return json(res,st,{error:st===500?'Server error':e.message}); }
 });
-server.listen(PORT,'0.0.0.0',()=>console.log(`${APP_NAME} running on port ${PORT}`));
+hydrateProviderRuntimeFromFirebase().finally(()=>server.listen(PORT,'0.0.0.0',()=>console.log(`${APP_NAME} v${APP_VERSION} running on port ${PORT}`)));
