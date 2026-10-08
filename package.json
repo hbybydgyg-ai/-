@@ -1,6 +1,6 @@
 {
   "name": "sadairaq-railway",
-  "version": "1.5.25",
+  "version": "1.5.27",
   "private": true,
   "description": "صدى العراق - Railway deployment",
   "scripts": {

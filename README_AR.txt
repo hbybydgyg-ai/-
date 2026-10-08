@@ -1,29 +1,5 @@
-الإصدار الموحد: v1.5.25
-
-صدى العراق — النسخة النهائية الموحدة لـ Railway.
-
-المزايا الحالية:
-- إنشاء الطلبات من الباك إند إلى مزود SMM الحقيقي باستخدام API Key المخزن في الخادم فقط.
-- حماية جلسة المستخدم وتثبيتها عبر جلسة موقعة لا تعتمد على ذاكرة Railway المؤقتة.
-- منع إعادة إرسال طلب ADD تلقائياً لمنع التكرار.
-- التحقق من الخدمة والسعر والكمية والخصم قبل تنفيذ الطلب.
-- الخدمات المجانية بسعر 0 لا تخصم رصيداً.
-- الخدمات المدفوعة تحسب بالدولار مع سعر صرف 1 USD = 1,250 IQD.
-- قسم إدارة الأرصدة والخصومات وسجل مالي لكل عملية.
-- قسم API للمستخدم مع إنشاء/إلغاء/إعادة إنشاء/كشف/نسخ المفتاح، وتوثيق كامل.
-- API خارجي للمستخدم على /api/v1/services و /api/v1/order و /api/v1/order/{order_id} و /api/v1/orders و /api/v1/balance.
-- حماية API بالمصادقة، Rate Limiting، التحقق من المدخلات، وIdempotency.
-- إحصائيات الطلبات والمبيعات وتكلفة المزودين والأرباح مع تصفير الإحصائيات دون حذف البيانات.
-- إدارة الطلبات والبحث والفلترة.
-- إشعارات Telegram من الباك إند مع اختبار الاتصال.
-- صور الخدمات والفئات تعتمد على منصة الخدمة عند عدم وجود صورة مخصصة.
-- بيانات المزودين والـ API Keys لا تظهر للمستخدم النهائي.
-- لا يتم حذف أي ملف وظيفي قديم من المشروع.
-
-التشغيل:
-1) اربط نفس مستودع GitHub بخدمة Railway الحالية.
-2) لا تنشئ Railway جديداً عند كل تحديث.
-3) ضع بيانات ADMIN و SMM Provider و Firebase و Telegram في Railway Variables/Secrets.
-4) لا تضع مفاتيح المزودين داخل index.html أو GitHub.
-
-سعر الصرف الثابت: 1 USD = 1,250 IQD.
+صدى العراق v1.5.27
+- Provider runtime storage is kept in data/providers.runtime.json and is not shipped in release ZIPs.
+- Telegram order notifications are backend-only.
+- API page shows API URL + user API key only.
+- User orders use invoice-style cards with Sada Iraq branding.

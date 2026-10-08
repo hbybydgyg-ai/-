@@ -10,13 +10,13 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.25';
-const BUILD_ID = 'SADA-1.5.25-API-KEY-ORDERS-TELEGRAM-20261008';
+const APP_VERSION = '1.5.27';
+const BUILD_ID = 'SADA-1.5.27-TELEGRAM-ORDERS-PROGRESS-20261008';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
 const FIXED_RATE = 1250; // 1 USD = 1,250 IQD
-// v1.5.25: signed stateless sessions survive Railway restarts/instance changes.
+// v1.5.27: signed stateless sessions survive Railway restarts/instance changes.
 const sessions = new Map(); // legacy sessions kept only during rolling deployments
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || 'sadairaq-session-secret-change-me');
@@ -46,8 +46,11 @@ function ensureData() {
     'provider_failures.json':[],
     'payments.json':[],
     'notifications.json':[],
+    'telegram_notifications.json':[],
     'notification_seen.json':{},
     'providers.json':{activeProvider:'',providers:{},deletedProviderIds:[]},
+    // Provider state is stored separately so code updates do not overwrite it.
+    'providers.runtime.json':{activeProvider:'',providers:{},deletedProviderIds:[]},
     'settings.json':{},
     'api_services.json':[],
     'balance_ledger.json':[],
@@ -59,7 +62,7 @@ function ensureData() {
     let cur=null, ok=true;
     try{cur=JSON.parse(fs.readFileSync(full,'utf8'));}catch(_){ok=false;}
     if(file==='users.json') ok=!!(cur&&typeof cur==='object'&&cur.users&&typeof cur.users==='object'&&!Array.isArray(cur.users));
-    else if(file==='orders.json'||file==='provider_failures.json'||file==='payments.json'||file==='notifications.json') ok=Array.isArray(cur);
+    else if(file==='orders.json'||file==='provider_failures.json'||file==='payments.json'||file==='notifications.json'||file==='telegram_notifications.json') ok=Array.isArray(cur);
     else if(file==='notification_seen.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
     else if(file==='providers.json') ok=!!(cur&&typeof cur==='object'&&cur.providers&&typeof cur.providers==='object'&&!Array.isArray(cur.providers));
     else if(file==='settings.json'||file==='api_keys.json'||file==='stats_state.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
@@ -121,7 +124,7 @@ function session(req){
   if(stateless){
     if(!/^[a-zA-Z0-9_@.\-]+$/.test(String(stateless.username||''))) return null;
     if(stateless.role==='admin' && String(stateless.username)!==String(ADMIN_USER)) return null;
-    // v1.5.25: do NOT require users.json for an already signed user session.
+    // v1.5.27: do NOT require users.json for an already signed user session.
     // Firebase/custom-app users may outlive Railway's ephemeral local filesystem.
     return stateless;
   }
@@ -160,7 +163,16 @@ function envProvider(){
   return {id,name,url,key,source:'environment'};
 }
 function providerStore(){
-  const local=readJSON('providers.json',{activeProvider:'',providers:{},deletedProviderIds:[]});
+  // Never use the deployable providers.json as the authoritative store.
+  // providers.runtime.json is intentionally NOT shipped in release ZIPs, so code updates cannot erase it.
+  let local=readJSON('providers.runtime.json',null);
+  if(!local || !local.providers || typeof local.providers!=='object'){
+    const legacy=readJSON('providers.json',{activeProvider:'',providers:{},deletedProviderIds:[]});
+    local=legacy;
+    if(legacy && legacy.providers && Object.keys(legacy.providers).length){
+      try{writeJSON('providers.runtime.json',legacy);}catch(_){}
+    }
+  }
   const providers={...(local&&local.providers&&typeof local.providers==='object'?local.providers:{})};
   const deleted=new Set(Array.isArray(local?.deletedProviderIds)?local.deletedProviderIds.map(String):[]);
   const env=envProvider();
@@ -552,17 +564,31 @@ function redactSecretObject(value,depth=0){
 // Replace the old raw provider response sanitizer with a redacting version.
 safeProviderResponse = function(d){ return redactSecretObject(d); };
 function providerAuthErrorText(t){ return /invalid|incorrect|wrong|unauthori[sz]ed|authentication|api\s*key|access\s*denied|expired|login|sign\s*in/i.test(String(t||'')); }
-async function sendTelegram(text){
+function telegramConfig(){
   const cfg=readJSON('settings.json',{}).telegram||{};
-  if(cfg.enabled===false||!cfg.token||!cfg.chat)return false;
-  try{
-    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),7000);
-    const r=await fetch('https://api.telegram.org/bot'+encodeURIComponent(String(cfg.token))+'/sendMessage',{
-      method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},
-      body:JSON.stringify({chat_id:String(cfg.chat),text:String(text),disable_web_page_preview:true}),signal:controller.signal
-    }); clearTimeout(timer); return r.ok;
-  }catch(_){ return false; }
+  return {enabled:cfg.enabled!==false,token:String(cfg.token||process.env.TELEGRAM_BOT_TOKEN||'').trim(),chat:String(cfg.chat||process.env.TELEGRAM_CHAT_ID||'').trim()};
 }
+function telegramLog(entry){
+  const arr=readJSON('telegram_notifications.json',[]);
+  arr.push({...entry,createdAt:entry.createdAt||nowISO()});
+  writeJSON('telegram_notifications.json',arr.slice(-300));
+}
+async function telegramRequest(method,payload,timeoutMs=8000){
+  const cfg=telegramConfig();
+  if(!cfg.enabled) return {ok:false,skipped:true,error:'إشعارات القناة غير مفعلة'};
+  if(!cfg.token||!cfg.chat) return {ok:false,error:'Bot Token أو Chat ID غير محفوظ'};
+  const apiBase=String(process.env.TELEGRAM_API_BASE||'https://api.telegram.org').replace(/\/+$/,'');
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);
+  try{
+    const r=await fetch(`${apiBase}/bot${encodeURIComponent(cfg.token)}/${method}`,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload),signal:controller.signal});
+    const text=await r.text(); let d={}; try{d=text?JSON.parse(text):{};}catch(_){d={description:text};}
+    return {ok:!!(r.ok&&d.ok!==false),status:r.status,description:String(d.description||''),messageId:d.result?.message_id||null,raw:r.ok?undefined:redactSecretObject(d)};
+  }catch(e){return {ok:false,error:e?.name==='AbortError'?'انتهت مهلة Telegram':String(e?.message||e)};}
+  finally{clearTimeout(timer);}
+}
+async function telegramTestConnection(){const r=await telegramRequest('getMe',{});telegramLog({kind:'connection_test',ok:r.ok,status:r.status,description:r.description||r.error||'',messageId:r.messageId||null});return r;}
+async function sendTelegramDetailed(text,meta={}){const r=await telegramRequest('sendMessage',{chat_id:telegramConfig().chat,text:String(text),disable_web_page_preview:true});telegramLog({kind:meta.kind||'message',ok:r.ok,status:r.status,description:r.description||r.error||'',messageId:r.messageId||null,orderId:meta.orderId||null});return r;}
+async function sendTelegram(text){return (await sendTelegramDetailed(text,{kind:'message'})).ok;}
 
 async function notifyOrderStatusChange(order, oldStatus, newStatus){
   if(!order || String(oldStatus||'')===String(newStatus||'')) return false;
@@ -720,7 +746,10 @@ async function routeAPI(req,res,urlObj){
   if(p==='/api/admin/user-finance' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const username=String(urlObj.searchParams.get('username')||'').trim();if(!username)return json(res,422,{ok:false,error:'اسم المستخدم مطلوب'});const u=readJSON('users.json',{users:{}}).users?.[username];if(!u)return json(res,404,{ok:false,error:'المستخدم غير موجود'});const orders=readJSON('orders.json',[]).filter(o=>String(o.user||'')===username);const ledger=readJSON('balance_ledger.json',[]).filter(x=>String(x.user||'')===username);const deposits=ledger.filter(x=>['charge','deposit'].includes(String(x.type||''))).reduce((a,x)=>a+Number(x.amountUSD||Number(x.amountIQD||0)/FIXED_RATE||0),0);const spent=orders.reduce((a,o)=>a+Number(o.chargeUsd??Number(o.total||0)/FIXED_RATE),0);return json(res,200,{ok:true,user:{username,name:String(u.name||username),balanceUsd:Number((Number(u.balance||0)/FIXED_RATE).toFixed(6)),totalDepositsUsd:Number(deposits.toFixed(6)),totalSpentUsd:Number(spent.toFixed(6)),totalOrders:orders.length,discountPct:Number(u.discountPct||0)}});}
   if(p==='/api/admin/telegram' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const cfg=readJSON('settings.json',{}).telegram||{};return json(res,200,{ok:true,telegram:{enabled:cfg.enabled!==false,tokenSet:!!cfg.token,chat:cfg.chat||''}});}
   if(p==='/api/admin/telegram' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const cfg=readJSON('settings.json',{});const tg=cfg.telegram||{};if(b.enabled!==undefined)tg.enabled=!!b.enabled;if(b.token!==undefined&&String(b.token).trim())tg.token=String(b.token).trim();if(b.chat!==undefined)tg.chat=String(b.chat).trim();cfg.telegram=tg;writeJSON('settings.json',cfg);return json(res,200,{ok:true,telegram:{enabled:tg.enabled!==false,tokenSet:!!tg.token,chat:tg.chat||''}});}
-  if(p==='/api/admin/telegram/test' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const ok=await sendTelegram(String(b.text||'✅ اختبار إشعارات صدى العراق'));return json(res,ok?200:502,{ok,error:ok?'تم إرسال اختبار Telegram':'فشل إرسال اختبار Telegram'});}
+  if(p==='/api/admin/telegram/test' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const r=await sendTelegramDetailed(String(b.text||'✅ اختبار إشعارات صدى العراق'),{kind:'manual_test'});return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'تم إرسال اختبار Telegram':(r.description||r.error||'فشل إرسال اختبار Telegram'),status:r.status||null,messageId:r.messageId||null});}
+  if(p==='/api/admin/telegram/test-connection' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const r=await telegramTestConnection();return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'اتصال Telegram ناجح':(r.description||r.error||'فشل الاتصال بـ Telegram'),status:r.status||null});}
+  if(p==='/api/admin/telegram/test-order' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const sample='🧪 اختبار إشعار طلب\n🆔 رقم طلب صدى العراق: #TEST-001\n👤 المستخدم: اختبار\n📦 الخدمة: خدمة تجريبية\n🔗 الرابط: https://example.com\n🔢 الكمية: 1,000\n💰 السعر: $0.50\n📊 الحالة: Pending\n🕐 الوقت: '+new Date().toLocaleString('en-GB',{hour12:false});const r=await sendTelegramDetailed(sample,{kind:'test_order',orderId:'TEST-001'});return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'تم إرسال إشعار طلب تجريبي':(r.description||r.error||'فشل إرسال إشعار الطلب'),status:r.status||null,messageId:r.messageId||null});}
+  if(p==='/api/admin/telegram/logs' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});return json(res,200,{ok:true,logs:readJSON('telegram_notifications.json',[]).slice(-50).reverse()});}
 
   if(p==='/api/config'){ const cfg=readJSON('settings.json',{}); const waUrl=normalizeWhatsAppUrl(cfg.waUrl||cfg.waNum||'https://wa.me/9647762267959'); return json(res,200,{appName:APP_NAME,version:APP_VERSION,buildId:BUILD_ID,currency:'USD',exchangeRate:FIXED_RATE,fixedRecharge:'5000 IQD = 4 USD',rateTable:[1000,2000,3000,4000,5000,6000,7000,8000,9000,10000].map(i=>({iqd:i,usd:i/FIXED_RATE})),supportWhatsappUrl:waUrl,supportWhatsappNumber:normalizeWhatsAppNumber(waUrl),telegramChannelUrl:'https://t.me/jbhbhg58'}); }
   if(p==='/api/auth' && req.method==='POST'){
@@ -849,15 +878,25 @@ async function routeAPI(req,res,urlObj){
     });
     if(result?.insufficient)return json(res,402,{ok:false,error:'رصيد المستخدم غير كافٍ',balanceUsd:result.balanceUsd});
     if(result?.error)return json(res,502,{ok:false,error:result.error,uncertain:!!result.uncertain,authFailure:!!result.authFailure});
-    if(result?.ok){sendTelegram(`🆕 طلب جديد\n🆔 رقم المزود: #${result.order.providerOrderId}\n👤 المستخدم: ${username}\n📦 الخدمة: ${result.order.serviceName}\n🔗 الرابط: ${link}\n🔢 الكمية: ${quantity.toLocaleString('en-US')}\n💰 السعر: $${chargeUsd.toFixed(2)}\n📊 الحالة: Pending\n🕐 الوقت: ${new Date().toLocaleString('en-GB',{hour12:false})}`).catch(()=>{});return json(res,200,{ok:true,siteOrderId:String(result.order.id||localId||''),providerId,providerName:prov.name||providerId,providerOrderId:String(result.order.providerOrderId),providerRaw:result.order.providerRaw,providerBalanceBefore:null,chargeUsd,totalIQD:chargeIqd,discountPct:userDiscount,createdAt:result.order.createdAt});}
+    if(result?.ok){const siteId=String(result.order.id||localId||'');sendTelegramDetailed(`🆕 طلب جديد\n🆔 رقم طلب صدى العراق: #${siteId}\n👤 المستخدم: ${username}\n📦 الخدمة: ${result.order.serviceName}\n🔗 الرابط: ${link}\n🔢 الكمية: ${quantity.toLocaleString('en-US')}\n💰 السعر: $${chargeUsd.toFixed(2)}\n🔢 رقم المزود: ${result.order.providerOrderId}\n📊 الحالة: Pending\n🕐 الوقت: ${new Date().toLocaleString('en-GB',{hour12:false})}`,{kind:'order',orderId:siteId}).catch(()=>{});return json(res,200,{ok:true,siteOrderId:siteId,providerId,providerName:prov.name||providerId,providerOrderId:String(result.order.providerOrderId),providerRaw:result.order.providerRaw,providerBalanceBefore:null,chargeUsd,totalIQD:chargeIqd,discountPct:userDiscount,createdAt:result.order.createdAt});}
     return json(res,500,{ok:false,error:'تعذر إنشاء الطلب'});
   }
 
   if(p==='/api/order/status' && req.method==='POST'){
     const wait=rateLimit(req,'order'); if(wait)return json(res,429,{ok:false,error:'طلبات كثيرة، أعد المحاولة بعد قليل'},{'Retry-After':String(wait)});
-    const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'}); const b=await bodyJSON(req); const providerId=String(b.providerId||''); const providerOrderId=String(b.providerOrderId||''); if(!providerId||!providerOrderId)return json(res,422,{ok:false,error:'بيانات التحقق ناقصة'}); if(!ownedProviderOrder(username,providerId,providerOrderId))return json(res,403,{ok:false,error:'هذا الطلب لا يتبع حسابك'}); const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
-    try{const d=await providerRequest(prov,{action:'status',order:providerOrderId}); const status=String(d.status||''); return json(res,200,{ok:true,providerOrderId,status,normalizedStatus:normalizeProviderStatus(status),remains:d.remains,startCount:d.start_count??d.startCount,charge:d.charge,currency:d.currency||'USD',raw:d,checkedAt:new Date().toISOString()});}
-    catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});}
+    const username=userFromSession(req); if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول من جديد'});
+    const b=await bodyJSON(req); const providerId=String(b.providerId||'').trim(); const providerOrderId=String(b.providerOrderId||'').trim();
+    if(!providerId||!providerOrderId)return json(res,422,{ok:false,error:'بيانات التحقق ناقصة'});
+    if(!ownedProviderOrder(username,providerId,providerOrderId))return json(res,403,{ok:false,error:'هذا الطلب لا يتبع حسابك'});
+    const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود غير موجود'});
+    try{
+      const d=await providerRequest(prov,{action:'status',order:providerOrderId});
+      const normalized=normalizeProviderStatus(d.status||''); const checkedAt=nowISO();
+      const rows=readJSON('orders.json',[]); const idx=rows.findIndex(x=>String(x.user||'')===username&&String(x.providerId||'')===providerId&&String(x.providerOrderId||'')===providerOrderId);
+      let siteOrderId='';
+      if(idx>=0){const ord=rows[idx];const oldStatus=normalizeProviderStatus(ord.status||'pending');siteOrderId=String(ord.id||'');ord.providerStatus=String(d.status||'');if(normalized!=='unknown')ord.status=normalized;ord.remains=d.remains;ord.startCount=d.start_count??d.startCount;ord.providerCharge=d.charge;ord.providerCurrency=d.currency||'USD';ord.lastCheckedAt=checkedAt;ord.providerRaw=safeProviderResponse(d);rows[idx]=ord;writeJSON('orders.json',rows);if(oldStatus!==normalizeProviderStatus(ord.status||oldStatus))notifyOrderStatusChange(ord,oldStatus,normalizeProviderStatus(ord.status||oldStatus)).catch(()=>{});}
+      return json(res,200,{ok:true,siteOrderId,providerOrderId,status:String(d.status||''),normalizedStatus:normalized,remains:d.remains,startCount:d.start_count??d.startCount,charge:d.charge,currency:d.currency||'USD',raw:d,checkedAt});
+    }catch(e){return json(res,502,{ok:false,error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':e.message});}
   }
   if(p==='/api/order/cancel' && req.method==='POST'){
     const wait=rateLimit(req,'order'); if(wait)return json(res,429,{ok:false,error:'طلبات كثيرة، أعد المحاولة بعد قليل'},{'Retry-After':String(wait)});
@@ -943,7 +982,7 @@ async function routeAPI(req,res,urlObj){
     if(store.envProvider?.id===pid) deletedIds.add(pid); else deletedIds.delete(pid);
     let active=String(store.activeProvider||'');
     if(active===pid) active=Object.keys(out)[0]||'';
-    writeJSON('providers.json',{activeProvider:active,providers:out,deletedProviderIds:[...deletedIds],updatedAt:new Date().toISOString()});
+    writeJSON('providers.runtime.json',{activeProvider:active,providers:out,deletedProviderIds:[...deletedIds],updatedAt:new Date().toISOString()});
     return json(res,200,{ok:true,deleted:pid,activeProvider:active,count:Object.keys(out).length});
   }
   if(p==='/api/providers'){
@@ -970,7 +1009,7 @@ async function routeAPI(req,res,urlObj){
       if(b.mode==='replace' && store.envProvider?.id && !incoming[store.envProvider.id]) deletedIds.add(store.envProvider.id);
       const activeCandidate=String(b.activeProvider!==undefined ? b.activeProvider : (store.activeProvider||''));
       const active=activeCandidate && out[activeCandidate] ? activeCandidate : (Object.keys(out)[0]||'');
-      writeJSON('providers.json',{activeProvider:active,providers:out,deletedProviderIds:[...deletedIds],updatedAt:new Date().toISOString()});
+      writeJSON('providers.runtime.json',{activeProvider:active,providers:out,deletedProviderIds:[...deletedIds],updatedAt:new Date().toISOString()});
       return json(res,200,{ok:true,count:Object.keys(out).length,activeProvider:active});
     }
   }
