@@ -173,8 +173,14 @@ function providerStore(){
       try{writeJSON('providers.runtime.json',legacy);}catch(_){}
     }
   }
-  const providers={...(local&&local.providers&&typeof local.providers==='object'?local.providers:{})};
-  const deleted=new Set(Array.isArray(local?.deletedProviderIds)?local.deletedProviderIds.map(String):[]);
+  // Merge legacy provider state when runtime storage is empty/stale.
+  let providers={...(local&&local.providers&&typeof local.providers==='object'?local.providers:{})};
+  const legacy=readJSON('providers.json',{activeProvider:'',providers:{},deletedProviderIds:[]});
+  if(legacy?.providers && typeof legacy.providers==='object'){
+    for(const [id,v] of Object.entries(legacy.providers)) providers[id]=providers[id]?{...v,...providers[id]}:v;
+  }
+  const deleted=new Set([...(Array.isArray(legacy?.deletedProviderIds)?legacy.deletedProviderIds.map(String):[]),...(Array.isArray(local?.deletedProviderIds)?local.deletedProviderIds.map(String):[])]);
+  for(const id of deleted) delete providers[id];
   const env=envProvider();
   if(env && !deleted.has(env.id)) providers[env.id]={...(providers[env.id]||{}),...env};
   let active=String(local?.activeProvider||'');
@@ -472,8 +478,11 @@ async function apiSmm(req,res,urlObj){
   const wait=rateLimit(req,'provider'); if(wait) return json(res,429,{error:'طلبات المزود كثيرة، أعد المحاولة لاحقاً'},{'Retry-After':String(wait)});
   if(!isAdmin(req)) return json(res,403,{error:'غير مصرح'});
   const store=providerStore();
-  const providerId=String(urlObj.searchParams.get('provider')||store.activeProvider||'');
+  let providerId=String(urlObj.searchParams.get('provider')||store.activeProvider||'');
   let prov=(store.providers||{})[providerId];
+  // Admin compatibility: if an old UI sends a stale provider id and there is only
+  // one saved provider, use the saved provider instead of returning a false 404.
+  if(!prov){ const ids=Object.keys(store.providers||{}); if(ids.length===1){ providerId=ids[0]; prov=store.providers[providerId]; } }
   // أثناء إضافة/اختبار مزود قبل أول حفظ، اسمح للإدارة فقط بإرسال بيانات الاختبار مؤقتاً.
   if(!prov){
     const tempUrl=String(urlObj.searchParams.get('_url')||'').trim();
