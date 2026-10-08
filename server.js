@@ -10,13 +10,13 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.33';
-const BUILD_ID = 'SADA-1.5.33-CATALOG-SERVICE-BINANCE-20261008';
+const APP_VERSION = '1.5.35';
+const BUILD_ID = 'SADA-1.5.35-SERVICE-VISIBILITY-20261008';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
 const FIXED_RATE = 1250; // 1 USD = 1,250 IQD
-// v1.5.32: signed stateless sessions survive Railway restarts/instance changes.
+// v1.5.35: signed stateless sessions survive Railway restarts/instance changes.
 const sessions = new Map(); // legacy sessions kept only during rolling deployments
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || 'sadairaq-session-secret-change-me');
@@ -124,7 +124,7 @@ function session(req){
   if(stateless){
     if(!/^[a-zA-Z0-9_@.\-]+$/.test(String(stateless.username||''))) return null;
     if(stateless.role==='admin' && String(stateless.username)!==String(ADMIN_USER)) return null;
-    // v1.5.32: do NOT require users.json for an already signed user session.
+    // v1.5.35: do NOT require users.json for an already signed user session.
     // Firebase/custom-app users may outlive Railway's ephemeral local filesystem.
     return stateless;
   }
