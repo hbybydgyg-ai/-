@@ -1,1 +1,1 @@
-SADA-1.5.33-CATALOG-SERVICE-BINANCE-20261008
+SadaIraq v1.5.34 - provider import/catalog visibility fixes
