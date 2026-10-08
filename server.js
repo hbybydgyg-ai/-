@@ -10,8 +10,8 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.40';
-const BUILD_ID = 'SADA-1.5.40-PROVIDER-IMPORT-PRICING-BINANCE-AUTH-20261009';
+const APP_VERSION = '1.5.41';
+const BUILD_ID = 'SADA-1.5.41-PROVIDER-SECRET-PRESERVE-20261009';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
@@ -1106,9 +1106,24 @@ async function routeAPI(req,res,urlObj){
       if(!item||typeof item!=='object') continue;
       const rawId=String(item.id||item.providerId||'').trim(); const id=normalizeProviderId(rawId);
       if(!id) continue;
-      const oldId=providerIdInStore(store,rawId)||providerIdInStore(store,id); const prev=oldId?store.providers[oldId]:{};
+      let oldId=providerIdInStore(store,rawId)||providerIdInStore(store,id);
+      let prev=oldId?store.providers[oldId]:{};
       const name=String(item.name||prev?.name||id).trim();
       let apiUrl=String(item.url||item.apiUrl||prev?.url||'').trim();
+      // A list loaded from the admin UI intentionally contains hasKey, not the secret.
+      // If a legacy/provider ID was renamed, preserve its saved secret only when exactly
+      // one existing provider has the same normalized API URL.
+      if(!oldId && apiUrl){
+        let normalizedIncoming='';
+        try{normalizedIncoming=normalizeProviderApiUrl(apiUrl).replace(/\/$/,'').toLowerCase();}catch(_){}
+        if(normalizedIncoming){
+          const matches=Object.entries(store.providers||{}).filter(([,v])=>{
+            if(!v?.key||!v?.url)return false;
+            try{return normalizeProviderApiUrl(v.url).replace(/\/$/,'').toLowerCase()===normalizedIncoming;}catch(_){return false;}
+          });
+          if(matches.length===1){oldId=matches[0][0];prev=matches[0][1]||{};}
+        }
+      }
       let key=String(item.key||item.apiKey||prev?.key||(store.envProvider?.id===id?store.envProvider.key:'')||'').trim();
       try{apiUrl=normalizeProviderApiUrl(apiUrl)}catch(_){ }
       const blockedDeleted=[...(store.deletedProviderIds||[])].some(x=>normalizeProviderId(x)===id);
