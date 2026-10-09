@@ -1,7 +1,7 @@
 {
   "appName": "صدى العراق",
-  "version": "1.5.62",
-  "buildId": "SADA-1.5.62-ORDER-AUDIT-DASHBOARD-20261009",
+  "version": "1.5.64",
+  "buildId": "SADA-1.5.64-TELEGRAM-GOOGLE-WHATSAPP-20261009",
   "currency": "USD",
   "exchangeRate": 1250,
   "fixedRecharge": "5000 IQD = 4 USD",
@@ -49,5 +49,5 @@
   ],
   "supportWhatsappUrl": "https://wa.me/9647762267959",
   "supportWhatsappNumber": "9647762267959",
-  "telegramChannelUrl": "https://t.me/jbhbhg58"
+  "telegramChannelUrl": "https://t.me/hddjh55"
 }

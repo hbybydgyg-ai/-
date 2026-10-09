@@ -13,8 +13,8 @@ const LEGACY_DATA = path.join(ROOT, 'data');
 const DATA = path.resolve(process.env.SADA_DATA_DIR || process.env.DATA_DIR || (process.env.RAILWAY_VOLUME_MOUNT_PATH ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sada-data') : LEGACY_DATA));
 const DATA_IS_EXTERNAL = path.resolve(DATA) !== path.resolve(LEGACY_DATA);
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.62';
-const BUILD_ID = 'SADA-1.5.62-ORDER-AUDIT-DASHBOARD-20261009';
+const APP_VERSION = '1.5.64';
+const BUILD_ID = 'SADA-1.5.64-TELEGRAM-GOOGLE-WHATSAPP-20261009';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
@@ -26,7 +26,7 @@ const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PA
 const SESSION_COOKIE = 'sadairaq_sid';
 const SESSION_TOKEN_HEADER = 'x-sada-session';
 const RATE_BUCKETS = new Map();
-const RATE_RULES = { auth:{window:60_000,max:12}, provider:{window:60_000,max:20}, order:{window:60_000,max:20}, api:{window:60_000,max:60}, general:{window:60_000,max:60} };
+const RATE_RULES = { auth:{window:60_000,max:12}, captcha:{window:60_000,max:30}, provider:{window:60_000,max:20}, order:{window:60_000,max:20}, api:{window:60_000,max:60}, general:{window:60_000,max:60} };
 function clientIp(req){ return String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim(); }
 function rateLimit(req,bucket='general'){ const r=RATE_RULES[bucket]||RATE_RULES.general; const key=clientIp(req)+'|'+bucket; const now=Date.now(); let x=RATE_BUCKETS.get(key); if(!x||now-x.started>r.window)x={started:now,count:0}; x.count++; RATE_BUCKETS.set(key,x); if(x.count>r.max){ return Math.ceil((x.started+r.window-now)/1000); } return 0; }
 setInterval(()=>{ const now=Date.now(); for(const [k,v] of RATE_BUCKETS) if(now-v.started>120_000) RATE_BUCKETS.delete(k); for(const [k,v] of sessions) if(now-(v.createdAt||0)>SESSION_TTL_MS) sessions.delete(k); }, 120_000).unref();
@@ -36,9 +36,9 @@ function ensureTelegramDefaults(){
   const cfg=readJSON('settings.json',{});
   const tg=cfg.telegram&&typeof cfg.telegram==='object'?{...cfg.telegram}:{};
   if(tg.enabled===undefined) tg.enabled=true;
-  if(!tg.token) tg.token=String(process.env.TELEGRAM_BOT_TOKEN||'');
-  if(!tg.chat) tg.chat=String(process.env.TELEGRAM_CHAT_ID||'');
-  if(tg.token||tg.chat||cfg.telegram) { cfg.telegram=tg; writeJSON('settings.json',cfg); }
+  // Keep the public destination in settings, but never persist TELEGRAM_BOT_TOKEN from env.
+  if(!tg.chat || String(tg.chat).trim()==='@jbhbhg58') tg.chat=String(process.env.TELEGRAM_CHAT_ID||'@hddjh55');
+  if(tg.chat||cfg.telegram) { cfg.telegram=tg; writeJSON('settings.json',cfg); }
 }
 
 function ensureData() {
@@ -49,6 +49,8 @@ function ensureData() {
   }
   const defaults={
     'users.json':{users:{}},
+    'google_accounts.json':{},
+    'telegram_order_state.json':{initialized:false,seen:{}},
     'orders.json':[],
     'provider_failures.json':[],
     'payments.json':[],
@@ -73,7 +75,7 @@ function ensureData() {
     else if(file==='orders.json'||file==='provider_failures.json'||file==='payments.json'||file==='notifications.json'||file==='telegram_notifications.json') ok=Array.isArray(cur);
     else if(file==='notification_seen.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
     else if(file==='providers.json') ok=!!(cur&&typeof cur==='object'&&cur.providers&&typeof cur.providers==='object'&&!Array.isArray(cur.providers));
-    else if(file==='settings.json'||file==='api_keys.json'||file==='stats_state.json'||file==='order_audit_state.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
+    else if(file==='settings.json'||file==='api_keys.json'||file==='stats_state.json'||file==='order_audit_state.json'||file==='google_accounts.json'||file==='telegram_order_state.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
     else if(file==='api_services.json'||file==='balance_ledger.json') ok=Array.isArray(cur);
     if(!ok){ fs.writeFileSync(full,JSON.stringify(def,null,2),'utf8'); }
   }
@@ -670,12 +672,14 @@ async function firebaseDeleteJson(pathname,timeoutMs=8000){ return firebaseWrite
 
 // Order audit: the Firebase `orders` node is the customer-facing source of truth;
 // the server ledger is merged in for orders created through the backend API.
-const DEFAULT_ORDER_AUDIT_SETTINGS={delayHours:3,notifyAdmin:false,updatedAt:null};
+const DEFAULT_ORDER_AUDIT_SETTINGS={delayHours:3,notifyAdmin:true,updatedAt:null};
 let ORDER_AUDIT_SNAPSHOT_CACHE={at:0,rows:[],firebaseAvailable:false,firebaseError:'',loaded:false};
 let ORDER_AUDIT_MONITOR_RUNNING=false;
 function cleanOrderAuditSettings(value={}){
   const delay=Number(value.delayHours??3);
-  return {...DEFAULT_ORDER_AUDIT_SETTINGS,...value,delayHours:Number.isFinite(delay)?Math.max(1,Math.min(72,Math.round(delay))):3,notifyAdmin:value.notifyAdmin===true};
+  // Legacy false values had been the old default; enable them once unless the admin explicitly saved the toggle in this schema.
+  const notifyAdmin=value.notifyAdminExplicit===true?value.notifyAdmin===true:true;
+  return {...DEFAULT_ORDER_AUDIT_SETTINGS,...value,delayHours:Number.isFinite(delay)?Math.max(1,Math.min(72,Math.round(delay))):3,notifyAdmin,notifyAdminExplicit:value.notifyAdminExplicit===true};
 }
 async function getOrderAuditSettings(){
   const local=readJSON('settings.json',{}).orderAudit||{};
@@ -842,20 +846,35 @@ async function runOrderAuditMonitor(){
     const cfg=await getOrderAuditSettings();if(!cfg.notifyAdmin)return;
     const tg=telegramConfig();if(!tg.enabled||!tg.token||!tg.chat)return;
     const snap=await loadOrderAuditSnapshot(true);if(!snap.firebaseAvailable)return;
-    const now=Date.now(),threshold=cfg.delayHours*3600000;
-    const state=await getOrderAuditState();const alerts={...(state.alerts||{})};let changed=false;
-    const rows=snap.rows.map(r=>auditPublicRecord(r,now,cfg.delayHours)).filter(r=>r.overdue&&r.ageMs>=threshold).sort((a,b)=>b.ageMs-a.ageMs).slice(0,100);
-    const fresh=rows.filter(o=>{const key=String(o.id||o.providerOrderId||'');return key&&!alerts[key]}).slice(0,5);
-    if(fresh.length){
-      const text='⚠️ تنبيه طلبات متأخرة — صدى العراق\n'+fresh.map(o=>`#${o.siteOrderId||o.id||'—'} · ${o.serviceName} · ${o.userName||o.user||'—'} · تأخير ${Math.floor((o.ageMs||0)/3600000)} ساعة · الحالة ${o.status}`).join('\n');
-      const sent=await sendTelegramDetailed(text,{kind:'order_audit_overdue',orderId:fresh.map(x=>x.siteOrderId||x.id).join(',').slice(0,80)});
-      if(sent.ok){for(const o of fresh){const key=String(o.id||o.providerOrderId||'');alerts[key]={sentAt:nowISO(),status:o.status};changed=true;}}
+    const now=Date.now(),state=await getOrderAuditState(),alerts={...(state.alerts||{})};let changed=false;
+    // Escalation levels are fixed at 3/6/12 hours; the dashboard's configurable filter remains separate.
+    const rows=snap.rows.map(r=>auditPublicRecord(r,now,cfg.delayHours)).filter(r=>Number(r.ageMs||0)>=3*3600000&&!auditTerminalStatus(r.status)).sort((a,b)=>b.ageMs-a.ageMs).slice(0,150);
+    const levels=[{h:3,label:'🟠 إنذار أول — تأخير 3 ساعات',kind:'warning'},{h:6,label:'🔴 إنذار مرتفع — تأخير 6 ساعات',kind:'danger'},{h:12,label:'🚨 خطر حرج — تأخير 12 ساعة',kind:'critical'}];
+    const work=[];
+    for(const o of rows){const key=String(o.siteOrderId||o.id||o.providerOrderId||'');if(!key)continue;const old=alerts[key];const known={...(old&&typeof old==='object'?old:{}),levels:{...(old?.levels||{})}};if(old?.sentAt&&!known.levels['3'])known.levels['3']={sentAt:old.sentAt,status:old.status||''};for(const level of levels){if(Number(o.ageMs||0)>=level.h*3600000&&!known.levels[String(level.h)])work.push({o,key,level});}}
+    for(const task of work.slice(0,12)){
+      const {o,key,level}=task;
+      // Re-read the latest entry per task so alerts for 3, 6 and 12 hours accumulate together.
+      const old=alerts[key];const item={...(old&&typeof old==='object'?old:{}),levels:{...(old?.levels||{})}};if(old?.sentAt&&!item.levels['3'])item.levels['3']={sentAt:old.sentAt,status:old.status||''};if(item.levels[String(level.h)])continue;
+      const hours=(Number(o.ageMs||0)/3600000).toFixed(1);
+      const text=`${level.label} — صدى العراق
+🆔 رقم الطلب: #${o.siteOrderId||o.id}
+👤 المستخدم: ${o.userName||o.user||'—'}
+📦 الخدمة: ${o.serviceName||'—'}
+🌐 المنصة: ${o.platform||'—'}
+🔗 الرابط: ${o.link||'—'}
+🔢 الكمية: ${Number(o.quantity||0).toLocaleString('en-US')}
+🏷️ المزوّد: ${o.providerName||'—'}
+🔢 رقم المزود: ${o.providerOrderId||'غير متوفر'}
+📊 الحالة: ${o.rawStatus||o.status}
+⏱️ مدة الانتظار: ${hours} ساعة
+يرجى فحص الطلب واتخاذ الإجراء المناسب.`;
+      const sent=await notifyTelegramRecipients(text,{kind:'order_audit_'+level.kind,orderId:key});
+      if(sent.ok){item.levels[String(level.h)]={sentAt:nowISO(),status:o.status};item.status=o.status;item.updatedAt=nowISO();alerts[key]=item;changed=true;await saveOrderAuditState({alerts:{...alerts},updatedAt:nowISO()});}
     }
-    // Keep a bounded deduplication history.
-    const entries=Object.entries(alerts).sort((a,b)=>Date.parse(b[1]?.sentAt||0)-Date.parse(a[1]?.sentAt||0)).slice(0,3000);
-    if(changed){await saveOrderAuditState({alerts:Object.fromEntries(entries),updatedAt:nowISO()});}
-  }catch(e){console.warn('order audit monitor error:',String(e.message||e).slice(0,180));}
-  finally{ORDER_AUDIT_MONITOR_RUNNING=false;}
+    const entries=Object.entries(alerts).sort((a,b)=>Date.parse(b[1]?.updatedAt||b[1]?.sentAt||0)-Date.parse(a[1]?.updatedAt||a[1]?.sentAt||0)).slice(0,3000);
+    if(changed)await saveOrderAuditState({alerts:Object.fromEntries(entries),updatedAt:nowISO()});
+  }catch(e){console.warn('order audit monitor error:',String(e.message||e).slice(0,180));}finally{ORDER_AUDIT_MONITOR_RUNNING=false;}
 }
 
 async function firebasePatchJson(pathname,value,timeoutMs=12000){
@@ -973,7 +992,11 @@ safeProviderResponse = function(d){ return redactSecretObject(d); };
 function providerAuthErrorText(t){ return /invalid|incorrect|wrong|unauthori[sz]ed|authentication|api\s*key|access\s*denied|expired|login|sign\s*in/i.test(String(t||'')); }
 function telegramConfig(){
   const cfg=readJSON('settings.json',{}).telegram||{};
-  return {enabled:cfg.enabled!==false,token:String(cfg.token||process.env.TELEGRAM_BOT_TOKEN||'').trim(),chat:String(cfg.chat||process.env.TELEGRAM_CHAT_ID||'').trim()};
+  const envToken=String(process.env.TELEGRAM_BOT_TOKEN||'').trim();
+  const envChat=String(process.env.TELEGRAM_CHAT_ID||'').trim();
+  const enabled=envToken ? String(process.env.TELEGRAM_NOTIFICATIONS_ENABLED||'true').toLowerCase()!=='false' : cfg.enabled!==false;
+  const extra=(String(process.env.TELEGRAM_EXTRA_CHAT_IDS||'').trim()||'').split(',').map(x=>x.trim()).filter(Boolean);
+  return {enabled,token:String(envToken||cfg.token||'').trim(),chat:String(envChat||cfg.chat||'@hddjh55').trim(),extraChats:[...new Set(extra)].filter(x=>x!==String(envChat||cfg.chat||'@hddjh55').trim())};
 }
 function telegramLog(entry){
   const arr=readJSON('telegram_notifications.json',[]);
@@ -998,12 +1021,14 @@ async function sendTelegramDetailed(text,meta={}){
   const cfg=telegramConfig();
   const caption=String(text||'').slice(0,1024);
   let r;
+  const targetChat=String(meta.chatId||cfg.chat||'').trim();
+  if(!targetChat)return {ok:false,error:'معرّف قناة Telegram غير مضبوط'};
   const imagePath=path.join(ROOT,'telegram-notification.png');
   if(cfg.enabled!==false && cfg.token && cfg.chat && fs.existsSync(imagePath)){
     try{
       const apiBase=String(process.env.TELEGRAM_API_BASE||'https://api.telegram.org').replace(/\/+$/,'');
       const fd=new FormData();
-      fd.append('chat_id',String(cfg.chat));
+      fd.append('chat_id',targetChat);
       fd.append('photo',new Blob([fs.readFileSync(imagePath)],{type:'image/png'}),'telegram-notification.png');
       fd.append('caption',caption);
       const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
@@ -1014,19 +1039,64 @@ async function sendTelegramDetailed(text,meta={}){
       }finally{clearTimeout(timer);}
       // إذا فشل رفع الصورة، لا نفقد الإشعار النصي.
       if(!r.ok){
-        const fallback=await telegramRequest('sendMessage',{chat_id:cfg.chat,text:caption,disable_web_page_preview:true});
+        const fallback=await telegramRequest('sendMessage',{chat_id:targetChat,text:caption,disable_web_page_preview:true});
         if(fallback.ok) r={...fallback,description:'تم إرسال النص بعد تعذر إرسال الصورة'};
       }
     }catch(e){
       r={ok:false,error:e?.name==='AbortError'?'انتهت مهلة Telegram':String(e?.message||e)};
     }
   }else{
-    r=await telegramRequest('sendMessage',{chat_id:cfg.chat,text:caption,disable_web_page_preview:true});
+    r=await telegramRequest('sendMessage',{chat_id:targetChat,text:caption,disable_web_page_preview:true});
   }
   telegramLog({kind:meta.kind||'message',ok:r.ok,status:r.status,description:r.description||r.error||'',messageId:r.messageId||null,orderId:meta.orderId||null,media:'photo'});
   return r;
 }
-async function sendTelegram(text){return (await sendTelegramDetailed(text,{kind:'message'})).ok;}
+async function notifyTelegramRecipients(text,meta={}){
+  const cfg=telegramConfig();if(!cfg.enabled||!cfg.token||!cfg.chat)return {ok:false,error:'إعدادات Telegram غير مكتملة'};
+  const targets=[...new Set([cfg.chat,...(cfg.extraChats||[])])];const results=[];
+  for(const chatId of targets){const r=await sendTelegramDetailed(text,{...meta,chatId});results.push({chatId,ok:!!r.ok,error:r.error||r.description||''});}
+  const primary=results.find(x=>x.chatId===cfg.chat);const ok=!!primary?.ok;return {ok,results,description:ok?'تم إرسال الإشعار إلى القناة الأساسية':results.map(x=>`${x.chatId}: ${x.error}`).join(' | ')};
+}
+async function sendTelegram(text){return (await notifyTelegramRecipients(text,{kind:'message'})).ok;}
+
+function telegramOrderIdentity(o={}){const id=String(o.id||o.siteOrderId||o.orderId||o.publicOrderNo||'').trim();const user=String(o.user||o.username||o.userName||'').trim();if(id)return 'id:'+id+'|u:'+user;const po=String(o.providerOrderId||o.provider_order_id||o.smmpartyOrderId||'').trim();if(po)return 'provider:'+String(o.providerId||o.provider_id||'')+'|'+po+'|u:'+user;return String(o.source||'')+':'+String(o._firebaseKey||o.firebaseKey||o.createdMs||'')+'|u:'+user;}
+function telegramOrderMessage(o={}){return `🆕 طلب جديد — صدى العراق\n🆔 رقم الطلب الداخلي: #${o.id||o.siteOrderId||o.orderId||'غير متوفر'}\n👤 المستخدم: ${o.userName||o.user||o.username||'—'}\n📦 الخدمة: ${o.serviceName||o.name||'خدمة'}\n🌐 المنصة: ${o.serviceApp||o.platform||o.app||'—'}\n🔗 الرابط: ${o.link||o.url||'—'}\n🔢 الكمية: ${Number(o.quantity||o.qty||0).toLocaleString('en-US')}\n💰 السعر: $${Number(o.chargeUsd??o.unitSellingUsd??o.priceUsd??0).toFixed(4)}\n🏷️ المزوّد: ${o.providerName||o.provider||o.providerId||'—'}\n🔢 رقم طلب المزوّد: ${o.providerOrderId||o.smmpartyOrderId||o.provider_order_id||'غير متوفر'}\n📊 الحالة: ${o.status||'pending'}\n🕐 الإنشاء: ${o.createdAt||nowISO()}`;}
+async function readTelegramOrderState(){
+  const local=readJSON('telegram_order_state.json',{initialized:false,seen:{}});let remote={};
+  try{const d=await firebaseGetJson('config/telegramOrderState',4000);if(d&&typeof d==='object'&&!Array.isArray(d))remote=d}catch(_){}
+  return {...remote,...local,initialized:!!(remote.initialized||local.initialized),seen:{...(remote.seen||{}),...(local.seen||{})}};
+}
+async function persistTelegramOrderState(state){
+  const safe={initialized:!!state.initialized,seen:state.seen&&typeof state.seen==='object'?state.seen:{},updatedAt:nowISO()};
+  const compact=Object.fromEntries(Object.entries(safe.seen).sort((a,b)=>Date.parse(b[1]?.sentAt||b[1]?.baselineAt||0)-Date.parse(a[1]?.sentAt||a[1]?.baselineAt||0)).slice(0,5000));safe.seen=compact;writeJSON('telegram_order_state.json',safe);try{await firebaseWriteJson('config/telegramOrderState',safe,5000);return true}catch(_){return DATA_IS_EXTERNAL;}
+}
+async function notifyTelegramNewOrder(o,meta={}){
+  const key=telegramOrderIdentity(o);if(!key)return {ok:false,error:'رقم الطلب غير متوفر'};
+  const result=await notifyTelegramRecipients(telegramOrderMessage(o),{kind:'new_order',orderId:String(o.id||o.siteOrderId||''),...meta});
+  if(result.ok){const st=await readTelegramOrderState();st.seen=st.seen||{};st.seen[key]={sentAt:nowISO(),source:meta.source||'backend'};await persistTelegramOrderState(st);}return result;
+}
+async function runTelegramNewOrdersMonitor(){
+  if(TELEGRAM_ORDER_MONITOR_RUNNING)return;TELEGRAM_ORDER_MONITOR_RUNNING=true;
+  try{
+    const tg=telegramConfig();if(!tg.enabled||!tg.token||!tg.chat)return;
+    const snap=await loadOrderAuditSnapshot(true);if(!snap.firebaseAvailable&&(!snap.rows||!snap.rows.length))return;
+    const st=await readTelegramOrderState(),seen={...(st.seen||{})};
+    const now=Date.now();
+    if(!st.initialized){
+      // Prevent an old-order flood on the first deploy, but don't silently skip orders created just now.
+      const recent=[];
+      for(const row of (snap.rows||[])){const key=auditIdentity(row);if(!key)continue;const age=Number(row.createdMs||0)>0?now-Number(row.createdMs):Infinity;if(age<=10*60*1000&&!seen[key])recent.push(row);else seen[key]=seen[key]||{baselineAt:nowISO()};}
+      await persistTelegramOrderState({initialized:true,seen});
+      for(const row of recent.slice(0,25)){const key=auditIdentity(row);const r=await notifyTelegramNewOrder({...row,id:row.siteOrderId||row.id||'',_firebaseKey:row._firebaseKey||row.firebaseKey||'',source:row.source||''},{source:'monitor-first-scan'});if(r.ok)seen[key]={sentAt:nowISO(),source:'monitor-first-scan'};}
+      if(recent.length)await persistTelegramOrderState({initialized:true,seen});
+      return;
+    }
+    const fresh=(snap.rows||[]).filter(row=>{const key=auditIdentity(row);return key&&!seen[key]}).sort((a,b)=>Number(a.createdMs||0)-Number(b.createdMs||0)).slice(0,25);
+    for(const row of fresh){const key=auditIdentity(row);const r=await notifyTelegramNewOrder({...row,id:row.siteOrderId||row.id||'',_firebaseKey:row._firebaseKey||row.firebaseKey||'',source:row.source||''},{source:'monitor'});if(r.ok)seen[key]={sentAt:nowISO(),source:'monitor'};}
+    if(fresh.length&&Object.keys(seen).length)await persistTelegramOrderState({initialized:true,seen});
+  }catch(e){console.warn('Telegram new-order monitor:',String(e.message||e).slice(0,180))}finally{TELEGRAM_ORDER_MONITOR_RUNNING=false;}
+}
+let TELEGRAM_ORDER_MONITOR_RUNNING=false;
 
 async function notifyOrderStatusChange(order, oldStatus, newStatus){
   if(!order || String(oldStatus||'')===String(newStatus||'')) return false;
@@ -1083,6 +1153,40 @@ function statsSnapshot(range='all'){
   const vals=list.map(o=>Number(o.chargeUsd!==undefined?o.chargeUsd:Number(o.total||0)/FIXED_RATE)).filter(Number.isFinite);
   const serviceMost=Object.entries(services).sort((a,b)=>b[1]-a[1])[0]||null, userMost=Object.entries(users).sort((a,b)=>b[1]-a[1])[0]||null, profitMost=Object.entries(profits).sort((a,b)=>b[1]-a[1])[0]||null;
   return {counts,salesUsd:Number(sales.toFixed(6)),providerCostUsd:Number(cost.toFixed(6)),profitUsd:Number((sales-cost).toFixed(6)),highestOrderUsd:vals.length?Math.max(...vals):0,lowestOrderUsd:vals.length?Math.min(...vals):0,mostOrderedService:serviceMost?.[0]||null,mostOrderingUser:userMost?.[0]||null,highestProfitService:profitMost?{name:profitMost[0],profitUsd:Number(Number(profitMost[1]).toFixed(6))}:null,resetAt:reset||null};
+}
+
+const MATH_CAPTCHA_CHALLENGES=new Map();
+function issueMathCaptcha(req){
+  const now=Date.now();for(const [k,v] of MATH_CAPTCHA_CHALLENGES)if(v.expiresAt<now)MATH_CAPTCHA_CHALLENGES.delete(k);while(MATH_CAPTCHA_CHALLENGES.size>5000)MATH_CAPTCHA_CHALLENGES.delete(MATH_CAPTCHA_CHALLENGES.keys().next().value);
+  const a=crypto.randomInt(1,8),b=crypto.randomInt(1,8),captchaId=crypto.randomBytes(18).toString('hex');MATH_CAPTCHA_CHALLENGES.set(captchaId,{answer:String(a+b),ip:clientIp(req),expiresAt:now+5*60*1000});return {captchaId,question:`${a} + ${b} = ؟`};
+}
+function consumeMathCaptcha(req,b){
+  const id=String(b?.captchaId||''),answer=String(b?.captchaAnswer??'').trim(),challenge=MATH_CAPTCHA_CHALLENGES.get(id);if(id)MATH_CAPTCHA_CHALLENGES.delete(id);
+  if(!challenge||challenge.expiresAt<Date.now())return 'انتهى سؤال التحقق؛ حدّث السؤال وحاول مجدداً.';if(challenge.ip!==clientIp(req))return 'تغير اتصالك أثناء التحقق؛ حدّث السؤال وحاول مجدداً.';if(!/^\d{1,2}$/.test(answer)||!safeEqual(answer,challenge.answer))return 'ناتج الجمع غير صحيح؛ حاول مرة أخرى.';return '';
+}
+let googleOAuthClientCached=null,googleOAuthClientAudience='';
+function requestHasSameOrigin(req){
+  const origin=String(req.headers.origin||'').trim();const host=String(req.headers['x-forwarded-host']||req.headers.host||'').split(',')[0].trim().toLowerCase();
+  if(!origin||!host)return false;try{const u=new URL(origin);return ['https:','http:'].includes(u.protocol)&&u.host.toLowerCase()===host;}catch(_){return false;}
+}
+function getGoogleOAuthClient(){const clientId=String(process.env.GOOGLE_CLIENT_ID||'').trim();if(!clientId)return null;if(!googleOAuthClientCached||googleOAuthClientAudience!==clientId){const {OAuth2Client}=require('google-auth-library');googleOAuthClientCached=new OAuth2Client(clientId);googleOAuthClientAudience=clientId;}return {client:googleOAuthClientCached,clientId};}
+function cleanGoogleUser(user={}){const out={...user};delete out.password;delete out.passwordHash;delete out.googleSub;return out;}
+async function googleAuthLogin(credential){
+  const config=getGoogleOAuthClient();if(!config)throw Object.assign(new Error('تسجيل Google غير مفعّل بعد؛ أضف GOOGLE_CLIENT_ID من Google Cloud إلى متغيرات Railway.'),{statusCode:503});
+  const ticket=await config.client.verifyIdToken({idToken:String(credential||''),audience:config.clientId});const payload=ticket.getPayload()||{};
+  if(!payload.sub||!payload.email||payload.email_verified!==true)throw Object.assign(new Error('تعذر تأكيد هوية Google أو البريد الإلكتروني غير موثق.'),{statusCode:401});
+  const sub=String(payload.sub),email=String(payload.email).trim().toLowerCase(),mapKey=sha256(sub);let accounts=readJSON('google_accounts.json',{}),usersStore=readJSON('users.json',{users:{}}),users=usersStore.users||{},username=String(accounts[mapKey]?.username||'');
+  if(!username){try{const remoteMap=await firebaseGetJson('config/googleAccounts/'+mapKey,3500);if(remoteMap?.username)username=String(remoteMap.username)}catch(_){}}
+  let user=username?users[username]:null;if(!user&&username){try{const remoteUser=await firebaseGetJson('users/'+firebaseSafeKey(username),3500);if(remoteUser&&typeof remoteUser==='object'){user=remoteUser;users[username]=user;}}catch(_){}}
+  if(!user){const found=Object.entries(users).find(([n,u])=>u&&u.role!=='admin'&&(String(u.googleSub||'')===sub||(String(u.email||'').toLowerCase()===email&&u.emailVerified===true)));if(found){username=found[0];user=found[1];}}
+  let created=false;if(!user){const local=email.split('@')[0].replace(/[^a-zA-Z0-9_]/g,'_').replace(/^_+|_+$/g,'').slice(0,16)||'googleuser';let base=local;let suffix=sub.slice(-5).replace(/[^a-zA-Z0-9]/g,'')||crypto.randomBytes(3).toString('hex');username=base;if(username===ADMIN_USER||users[username])username=(base.slice(0,10)+'_'+suffix).slice(0,20);let n=2;while(users[username]||username===ADMIN_USER){username=(base.slice(0,15)+'_'+suffix+n).slice(0,24);n++;if(n>100)throw new Error('تعذر إنشاء اسم مستخدم فريد');}
+    user={name:String(payload.name||local).slice(0,100),email,emailVerified:true,googleSub:sub,authProvider:'google',picture:String(payload.picture||''),passwordHash:'',balance:0,level:'مبتدئ',telegram:'',phone:'',joined:nowISO(),totalSpent:0,totalOrders:0,role:'user'};created=true;
+  }else{if(user.role==='admin'&&!user.googleSub)throw Object.assign(new Error('هذا الحساب الإداري لا يمكن ربطه تلقائياً بتسجيل Google.'),{statusCode:403});user={...user,email, emailVerified:true,googleSub:sub,authProvider:'google',name:String(user.name||payload.name||username).slice(0,100),picture:String(payload.picture||user.picture||''),updatedAt:nowISO()};}
+  usersStore.users=users;users[username]=user;usersStore.users[username]=user;accounts[mapKey]={username,email,provider:'google',updatedAt:nowISO()};
+  writeJSON('users.json',usersStore);writeJSON('google_accounts.json',accounts);let firebaseSaved=false,firebaseError='';
+  try{const profile={username,name:user.name,email,emailVerified:true,authProvider:'google',picture:user.picture||'',balance:Number(user.balance||0),level:user.level||'مبتدئ',telegram:String(user.telegram||''),phone:String(user.phone||''),joined:user.joined||nowISO(),totalSpent:Number(user.totalSpent||0),totalOrders:Number(user.totalOrders||0),role:'user'};await firebaseWriteJson('users/'+firebaseSafeKey(username),profile,7000);await firebaseWriteJson('config/googleAccounts/'+mapKey,{username,email,updatedAt:nowISO()},7000);firebaseSaved=true;}catch(e){firebaseError=String(e.message||e);}
+  if(created&&!firebaseSaved&&!DATA_IS_EXTERNAL){delete usersStore.users[username];delete accounts[mapKey];writeJSON('users.json',usersStore);writeJSON('google_accounts.json',accounts);throw Object.assign(new Error('تعذر حفظ الحساب في قاعدة بيانات دائمة؛ تحقق من اتصال Firebase أو اربط Railway Volume ثم أعد المحاولة.'),{statusCode:503});}
+  const sessionToken='';return {username,user,sessionToken,firebaseSaved,firebaseError};
 }
 
 async function routeAPI(req,res,urlObj){
@@ -1165,14 +1269,14 @@ async function routeAPI(req,res,urlObj){
   if(p==='/api/admin/order-audit/settings' && req.method==='GET'){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
     const settings=await getOrderAuditSettings();
-    return json(res,200,{ok:true,settings,defaultDelayHours:3,monitorIntervalMinutes:5,storageMode:DATA_IS_EXTERNAL?'persistent-directory':'release-local'});
+    return json(res,200,{ok:true,settings,defaultDelayHours:3,monitorIntervalMinutes:1,storageMode:DATA_IS_EXTERNAL?'persistent-directory':'release-local'});
   }
   if(p==='/api/admin/order-audit/settings' && req.method==='POST'){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
     const b=await bodyJSON(req);const previous=await getOrderAuditSettings();
     const delayHours=Number(b.delayHours??previous.delayHours);
     if(!Number.isInteger(delayHours)||delayHours<1||delayHours>72)return json(res,422,{ok:false,error:'مدة التأخير يجب أن تكون بين ساعة و72 ساعة'});
-    const saved=await saveOrderAuditSettings({...previous,delayHours,notifyAdmin:b.notifyAdmin===undefined?previous.notifyAdmin:b.notifyAdmin===true});
+    const saved=await saveOrderAuditSettings({...previous,delayHours,notifyAdmin:b.notifyAdmin===undefined?previous.notifyAdmin:b.notifyAdmin===true,notifyAdminExplicit:b.notifyAdmin!==undefined?true:previous.notifyAdminExplicit===true});
     return json(res,200,{ok:true,...saved,warning:saved.persistent?'':'تم حفظ الإعداد محلياً فقط؛ اربط تخزيناً دائماً أو تحقق من صلاحيات Firebase حتى يبقى بعد إعادة النشر.'});
   }
   if(p==='/api/admin/order-audit' && req.method==='GET'){
@@ -1273,20 +1377,30 @@ async function routeAPI(req,res,urlObj){
   }
   if(p==='/api/admin/balance-ledger' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const user=String(urlObj.searchParams.get('user')||'');const rows=readJSON('balance_ledger.json',[]).filter(x=>!user||String(x.user||'')===user).slice(-500).reverse();return json(res,200,{ok:true,ledger:rows});}
   if(p==='/api/admin/user-finance' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const username=String(urlObj.searchParams.get('username')||'').trim();if(!username)return json(res,422,{ok:false,error:'اسم المستخدم مطلوب'});const u=readJSON('users.json',{users:{}}).users?.[username];if(!u)return json(res,404,{ok:false,error:'المستخدم غير موجود'});const orders=readJSON('orders.json',[]).filter(o=>String(o.user||'')===username);const ledger=readJSON('balance_ledger.json',[]).filter(x=>String(x.user||'')===username);const deposits=ledger.filter(x=>['charge','deposit'].includes(String(x.type||''))).reduce((a,x)=>a+Number(x.amountUSD||Number(x.amountIQD||0)/FIXED_RATE||0),0);const spent=orders.reduce((a,o)=>a+Number(o.chargeUsd??Number(o.total||0)/FIXED_RATE),0);return json(res,200,{ok:true,user:{username,name:String(u.name||username),balanceUsd:Number((Number(u.balance||0)/FIXED_RATE).toFixed(6)),totalDepositsUsd:Number(deposits.toFixed(6)),totalSpentUsd:Number(spent.toFixed(6)),totalOrders:orders.length,discountPct:Number(u.discountPct||0)}});}
-  if(p==='/api/admin/telegram' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const cfg=readJSON('settings.json',{}).telegram||{};return json(res,200,{ok:true,telegram:{enabled:cfg.enabled!==false,tokenSet:!!cfg.token,chat:cfg.chat||''}});}
+  if(p==='/api/admin/telegram' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const cfg=telegramConfig();return json(res,200,{ok:true,telegram:{enabled:cfg.enabled,tokenSet:!!cfg.token,chat:cfg.chat||'',extraChatsCount:(cfg.extraChats||[]).length}});}
   if(p==='/api/admin/telegram' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const cfg=readJSON('settings.json',{});const tg=cfg.telegram||{};if(b.enabled!==undefined)tg.enabled=!!b.enabled;if(b.token!==undefined&&String(b.token).trim())tg.token=String(b.token).trim();if(b.chat!==undefined)tg.chat=String(b.chat).trim();cfg.telegram=tg;writeJSON('settings.json',cfg);return json(res,200,{ok:true,telegram:{enabled:tg.enabled!==false,tokenSet:!!tg.token,chat:tg.chat||''}});}
   if(p==='/api/admin/telegram/test' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const r=await sendTelegramDetailed(String(b.text||'✅ اختبار إشعارات صدى العراق'),{kind:'manual_test'});return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'تم إرسال اختبار Telegram':(r.description||r.error||'فشل إرسال اختبار Telegram'),status:r.status||null,messageId:r.messageId||null});}
   if(p==='/api/admin/telegram/test-connection' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const r=await telegramTestConnection();return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'اتصال Telegram ناجح':(r.description||r.error||'فشل الاتصال بـ Telegram'),status:r.status||null});}
   if(p==='/api/admin/telegram/test-order' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const sample='🧪 اختبار إشعار طلب\n🆔 رقم طلب صدى العراق: #TEST-001\n👤 المستخدم: اختبار\n📦 الخدمة: خدمة تجريبية\n🔗 الرابط: https://example.com\n🔢 الكمية: 1,000\n💰 السعر: $0.50\n📊 الحالة: Pending\n🕐 الوقت: '+new Date().toLocaleString('en-GB',{hour12:false});const r=await sendTelegramDetailed(sample,{kind:'test_order',orderId:'TEST-001'});return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'تم إرسال إشعار طلب تجريبي':(r.description||r.error||'فشل إرسال إشعار الطلب'),status:r.status||null,messageId:r.messageId||null});}
   if(p==='/api/admin/telegram/logs' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});return json(res,200,{ok:true,logs:readJSON('telegram_notifications.json',[]).slice(-50).reverse()});}
 
-  if(p==='/api/config'){ const cfg=readJSON('settings.json',{}); const waUrl=normalizeWhatsAppUrl(cfg.waUrl||cfg.waNum||'https://wa.me/9647762267959'); return json(res,200,{appName:APP_NAME,version:APP_VERSION,buildId:BUILD_ID,currency:'USD',exchangeRate:FIXED_RATE,fixedRecharge:'5000 IQD = 4 USD',rateTable:[1000,2000,3000,4000,5000,6000,7000,8000,9000,10000].map(i=>({iqd:i,usd:i/FIXED_RATE})),supportWhatsappUrl:waUrl,supportWhatsappNumber:normalizeWhatsAppNumber(waUrl),telegramChannelUrl:'https://t.me/jbhbhg58'}); }
+  if(p==='/api/config'){ const cfg=readJSON('settings.json',{}); const waUrl=normalizeWhatsAppUrl(cfg.waUrl||cfg.waNum||'https://wa.me/9647762267959'); return json(res,200,{appName:APP_NAME,version:APP_VERSION,buildId:BUILD_ID,currency:'USD',exchangeRate:FIXED_RATE,fixedRecharge:'5000 IQD = 4 USD',rateTable:[1000,2000,3000,4000,5000,6000,7000,8000,9000,10000].map(i=>({iqd:i,usd:i/FIXED_RATE})),supportWhatsappUrl:waUrl,supportWhatsappNumber:normalizeWhatsAppNumber(waUrl),telegramChannelUrl:'https://t.me/hddjh55'}); }
+  if(p==='/api/auth/google-config'&&req.method==='GET'){return json(res,200,{ok:true,enabled:!!String(process.env.GOOGLE_CLIENT_ID||'').trim(),clientId:String(process.env.GOOGLE_CLIENT_ID||'').trim()});}
+  if(p==='/api/auth/captcha'&&req.method==='GET'){const wait=rateLimit(req,'captcha');if(wait)return json(res,429,{ok:false,error:'طلبات تحقق كثيرة؛ أعد المحاولة بعد قليل.'},{'Retry-After':String(wait)});return json(res,200,{ok:true,...issueMathCaptcha(req)});}
+  if(p==='/api/auth/google'&&req.method==='POST'){
+    if(!requestHasSameOrigin(req))return json(res,403,{ok:false,error:'رفض تسجيل الدخول بسبب اختلاف مصدر الطلب؛ أعد فتح الموقع الرسمي.'});
+    const wait=rateLimit(req,'auth');if(wait)return json(res,429,{ok:false,error:'محاولات كثيرة، أعد المحاولة بعد '+wait+' ثانية'},{'Retry-After':String(wait)});
+    const b=await bodyJSON(req);const cap=consumeMathCaptcha(req,b);if(cap)return json(res,422,{ok:false,error:cap,captchaFailed:true});
+    if(!String(b.credential||''))return json(res,422,{ok:false,error:'رمز Google مفقود.'});
+    try{const out=await googleAuthLogin(String(b.credential));const role='user';const sessionToken=setSession(res,{role,username:out.username});const safe=cleanGoogleUser(out.user);return json(res,200,{ok:true,role,username:out.username,user:safe,sessionToken,authProvider:'google',firebaseSaved:out.firebaseSaved});}
+    catch(e){const code=Number(e.statusCode)||(/invalid|token|audience|expired|signature/i.test(String(e.message||''))?401:502);return json(res,code,{ok:false,error:code===502?'تعذر الاتصال بخدمة التحقق من Google؛ حاول مرة أخرى.':String(e.message||'فشل التحقق من Google')});}
+  }
   if(p==='/api/auth' && req.method==='POST'){
     const wait=rateLimit(req,'auth'); if(wait) return json(res,429,{ok:false,error:'محاولات كثيرة، أعد المحاولة بعد '+wait+' ثانية'},{'Retry-After':String(wait)});
-    const b=await bodyJSON(req); const u=String(b.username||'').trim(); const pw=String(b.password||'');
+    const b=await bodyJSON(req);const captchaError=consumeMathCaptcha(req,b);if(captchaError)return json(res,422,{ok:false,error:captchaError,captchaFailed:true});const u=String(b.username||'').trim(); const pw=String(b.password||'');
     if(String(b.action||'')==='register'){
       if(!/^[a-zA-Z0-9_]+$/.test(u)) return json(res,422,{ok:false,error:'اسم المستخدم يجب أن يكون بالإنجليزية والأرقام فقط'});
-      if(pw.length<4) return json(res,422,{ok:false,error:'كلمة المرور يجب أن تكون 4 أحرف على الأقل'});
+      if(pw.length<8) return json(res,422,{ok:false,error:'كلمة المرور يجب أن تكون 8 أحرف على الأقل'});
       if(u===ADMIN_USER) return json(res,409,{ok:false,error:'اسم المستخدم محجوز'});
       const store=readJSON('users.json',{users:{}}); if(store.users[u]) return json(res,409,{ok:false,error:'اسم المستخدم موجود مسبقاً'});
       const user={name:u,passwordHash:hashPassword(pw),balance:0,level:'مبتدئ',telegram:String(b.telegram||''),phone:String(b.phone||''),joined:new Date().toISOString(),totalSpent:0,totalOrders:0,role:'user'};
@@ -1417,7 +1531,7 @@ async function routeAPI(req,res,urlObj){
     });
     if(result?.insufficient)return json(res,402,{ok:false,error:'رصيد المستخدم غير كافٍ',balanceUsd:result.balanceUsd});
     if(result?.error)return json(res,502,{ok:false,error:result.error,uncertain:!!result.uncertain,authFailure:!!result.authFailure});
-    if(result?.ok){const siteId=String(result.order.id||localId||'');sendTelegramDetailed(`🆕 طلب جديد\n🆔 رقم طلب صدى العراق: #${siteId}\n👤 المستخدم: ${username}\n📦 الخدمة: ${result.order.serviceName}\n🔗 الرابط: ${link}\n🔢 الكمية: ${quantity.toLocaleString('en-US')}\n💰 السعر: $${chargeUsd.toFixed(2)}\n🔢 رقم المزود: ${result.order.providerOrderId}\n📊 الحالة: Pending\n🕐 الوقت: ${new Date().toLocaleString('en-GB',{hour12:false})}`,{kind:'order',orderId:siteId}).catch(()=>{});return json(res,200,{ok:true,siteOrderId:siteId,providerId,providerName:prov.name||providerId,providerOrderId:String(result.order.providerOrderId),providerTrackingToken:String(result.providerTrackingToken||''),providerRaw:result.order.providerRaw,providerBalanceBefore:null,chargeUsd,totalIQD:chargeIqd,discountPct:userDiscount,createdAt:result.order.createdAt});}
+    if(result?.ok){const siteId=String(result.order.id||localId||'');notifyTelegramNewOrder(result.order,{source:'backend'}).catch(()=>{});return json(res,200,{ok:true,siteOrderId:siteId,providerId,providerName:prov.name||providerId,providerOrderId:String(result.order.providerOrderId),providerTrackingToken:String(result.providerTrackingToken||''),providerRaw:result.order.providerRaw,providerBalanceBefore:null,chargeUsd,totalIQD:chargeIqd,discountPct:userDiscount,createdAt:result.order.createdAt});}
     return json(res,500,{ok:false,error:'تعذر إنشاء الطلب'});
   }
 
@@ -1726,4 +1840,4 @@ const server=http.createServer(async (req,res)=>{
     return serveStatic(req,res,u);
   }catch(e){ const st=Number(e?.statusCode)||500; return json(res,st,{error:st===500?'Server error':e.message}); }
 });
-hydrateProviderRuntimeFromFirebase().finally(()=>server.listen(PORT,'0.0.0.0',()=>{console.log(`${APP_NAME} v${APP_VERSION} running on port ${PORT}`);setTimeout(()=>runOrderAuditMonitor().catch(()=>{}),15000).unref();setInterval(()=>runOrderAuditMonitor().catch(()=>{}),5*60*1000).unref();}));
+hydrateProviderRuntimeFromFirebase().finally(()=>server.listen(PORT,'0.0.0.0',()=>{console.log(`${APP_NAME} v${APP_VERSION} running on port ${PORT}`);setTimeout(()=>{runOrderAuditMonitor().catch(()=>{});runTelegramNewOrdersMonitor().catch(()=>{});},15000).unref();setInterval(()=>{runOrderAuditMonitor().catch(()=>{});runTelegramNewOrdersMonitor().catch(()=>{});},60*1000).unref();}));
