@@ -1,7 +1,7 @@
 {
   "appName": "صدى العراق",
-  "version": "1.5.57",
-  "buildId": "SADA-1.5.57-PROVIDER-KEY-PERSISTENCE-IMPORT-STABILITY-20261009",
+  "version": "1.5.62",
+  "buildId": "SADA-1.5.62-ORDER-AUDIT-DASHBOARD-20261009",
   "currency": "USD",
   "exchangeRate": 1250,
   "fixedRecharge": "5000 IQD = 4 USD",

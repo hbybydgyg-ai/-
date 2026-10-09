@@ -13,8 +13,8 @@ const LEGACY_DATA = path.join(ROOT, 'data');
 const DATA = path.resolve(process.env.SADA_DATA_DIR || process.env.DATA_DIR || (process.env.RAILWAY_VOLUME_MOUNT_PATH ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sada-data') : LEGACY_DATA));
 const DATA_IS_EXTERNAL = path.resolve(DATA) !== path.resolve(LEGACY_DATA);
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.59';
-const BUILD_ID = 'SADA-1.5.59-WA-FLOAT-FULL-CATALOG-SECTION-IMAGE-20261009';
+const APP_VERSION = '1.5.62';
+const BUILD_ID = 'SADA-1.5.62-ORDER-AUDIT-DASHBOARD-20261009';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
@@ -62,7 +62,8 @@ function ensureData() {
     'api_services.json':[],
     'balance_ledger.json':[],
     'api_keys.json':{},
-    'stats_state.json':{resetAt:null}
+    'stats_state.json':{resetAt:null},
+    'order_audit_state.json':{alerts:{}}
   };
   for(const [file,def] of Object.entries(defaults)){
     const full=path.join(DATA,file);
@@ -72,7 +73,7 @@ function ensureData() {
     else if(file==='orders.json'||file==='provider_failures.json'||file==='payments.json'||file==='notifications.json'||file==='telegram_notifications.json') ok=Array.isArray(cur);
     else if(file==='notification_seen.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
     else if(file==='providers.json') ok=!!(cur&&typeof cur==='object'&&cur.providers&&typeof cur.providers==='object'&&!Array.isArray(cur.providers));
-    else if(file==='settings.json'||file==='api_keys.json'||file==='stats_state.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
+    else if(file==='settings.json'||file==='api_keys.json'||file==='stats_state.json'||file==='order_audit_state.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
     else if(file==='api_services.json'||file==='balance_ledger.json') ok=Array.isArray(cur);
     if(!ok){ fs.writeFileSync(full,JSON.stringify(def,null,2),'utf8'); }
   }
@@ -667,6 +668,196 @@ async function firebaseWriteJson(pathname,value,timeoutMs=8000){
 }
 async function firebaseDeleteJson(pathname,timeoutMs=8000){ return firebaseWriteJson(pathname,null,timeoutMs); }
 
+// Order audit: the Firebase `orders` node is the customer-facing source of truth;
+// the server ledger is merged in for orders created through the backend API.
+const DEFAULT_ORDER_AUDIT_SETTINGS={delayHours:3,notifyAdmin:false,updatedAt:null};
+let ORDER_AUDIT_SNAPSHOT_CACHE={at:0,rows:[],firebaseAvailable:false,firebaseError:'',loaded:false};
+let ORDER_AUDIT_MONITOR_RUNNING=false;
+function cleanOrderAuditSettings(value={}){
+  const delay=Number(value.delayHours??3);
+  return {...DEFAULT_ORDER_AUDIT_SETTINGS,...value,delayHours:Number.isFinite(delay)?Math.max(1,Math.min(72,Math.round(delay))):3,notifyAdmin:value.notifyAdmin===true};
+}
+async function getOrderAuditSettings(){
+  const local=readJSON('settings.json',{}).orderAudit||{};
+  try{const remote=await firebaseGetJson('config/orderAuditSettings',4500);if(remote&&typeof remote==='object'&&!Array.isArray(remote))return cleanOrderAuditSettings({...local,...remote});}catch(_){}
+  return cleanOrderAuditSettings(local);
+}
+async function saveOrderAuditSettings(value){
+  const cfg=cleanOrderAuditSettings(value);cfg.updatedAt=nowISO();
+  const local=readJSON('settings.json',{});local.orderAudit=cfg;writeJSON('settings.json',local);
+  let firebaseSaved=false,error='';
+  try{await firebaseWriteJson('config/orderAuditSettings',cfg,8000);firebaseSaved=true;}catch(e){error=String(e.message||e).slice(0,180)}
+  return {settings:cfg,firebaseSaved,localSaved:true,persistent:firebaseSaved||DATA_IS_EXTERNAL,error};
+}
+function auditTimestamp(value){
+  if(value===undefined||value===null||value==='')return null;
+  if(typeof value==='number'||/^\d{9,16}$/.test(String(value).trim())){const n=Number(value);if(!Number.isFinite(n))return null;const ms=n<100000000000? n*1000:n;return Number.isFinite(ms)&&ms>0&&ms<8640000000000000?ms:null;}
+  const parsed=Date.parse(String(value));return Number.isFinite(parsed)&&parsed>0?parsed:null;
+}
+function auditOrderTime(order={}){
+  for(const key of ['createdAt','created_at','created','timestamp','time','date','orderDate','createdOn']){const ms=auditTimestamp(order[key]);if(ms)return ms;}
+  return null;
+}
+function auditStatus(value){
+  const raw=String(value??'').trim();if(!raw)return 'unknown';
+  const basic=normalizeProviderStatus(raw);if(basic!=='unknown')return basic;
+  const x=raw.toLowerCase().replace(/[\s_-]+/g,' ');
+  if(['معلق','قيد الانتظار','بانتظار','انتظار','قيد المعالجة'].includes(x))return 'pending';
+  if(['قيد التنفيذ','جاري التنفيذ','قيد التقدم','جاري','تحت التنفيذ','قيد العمل'].includes(x))return 'processing';
+  if(['مكتمل','مكتملة','منجز','منجزة','تم التنفيذ','مكتمل جزئياً لا'].includes(x))return 'completed';
+  if(['جزئي','مكتمل جزئيا','مكتمل جزئياً','جزئي مكتمل'].includes(x))return 'partial';
+  if(['ملغي','ملغى','ملغاة','تم الإلغاء','تم الالغاء'].includes(x))return 'cancelled';
+  if(['فشل','فاشل','فاشلة','فشل نهائي','مرفوض'].includes(x))return 'failed';
+  if(['مسترد','مسترجع','تم الاسترداد'].includes(x))return 'refunded';
+  return 'unknown';
+}
+function auditTerminalStatus(status){return ['completed','cancelled','failed','refunded','partial'].includes(status);}
+function auditPlatform(order={}){
+  const source={app:order.serviceApp||order.app||order.platform||'',serviceApp:order.serviceApp||order.app||'',platform:order.platform||'',name:order.serviceName||order.service||order.name||'',serviceName:order.serviceName||order.service||'',category:order.category||'',groups:Array.isArray(order.groups)?order.groups:[]};
+  const p=canonicalServicePlatform(source).serviceApp;
+  return p==='other'?(String(source.app||source.platform||'أخرى')):p;
+}
+function auditNormalizeRecord(order={},source='firebase',sourceKey=''){
+  const o=order&&typeof order==='object'?order:{};
+  const id=String(o.siteOrderId||o.id||o.orderId||o.order_id||o.publicOrderNo||'').trim();
+  const providerOrderId=String(o.providerOrderId||o.smmpartyOrderId||o.provider_order_id||o.providerOrderID||o.smmOrderId||'').trim();
+  const user=String(o.user||o.username||o.userName||o.customer||'').trim();
+  const createdMs=auditOrderTime(o);
+  const rawStatus=String(o.status||o.providerStatus||o.smmStatus||'').trim();
+  return {
+    id,siteOrderId:id,publicOrderNo:String(o.publicOrderNo||id||''),user,
+    userName:String(o.userName||o.fullName||o.name||o.customerName||user||'').trim(),
+    email:String(o.email||o.userEmail||o.customerEmail||'').trim(),
+    serviceName:String(o.serviceName||o.serviceTitle||o.service||o.name||'خدمة').trim(),
+    serviceId:String(o.serviceId||o.service_id||o.serviceKey||'').trim(),
+    platform:auditPlatform(o),serviceApp:String(o.serviceApp||o.app||o.platform||'').trim(),
+    link:String(o.link||o.url||o.target||o.targetUrl||''),quantity:Number(o.quantity??o.qty??0)||0,
+    status:auditStatus(rawStatus),rawStatus:rawStatus||'غير مسجلة',createdAt:o.createdAt||o.created_at||o.timestamp||o.date||null,createdMs,
+    providerName:String(o.providerName||o.provider||o.smmProviderName||'').trim(),providerId:String(o.providerId||o.provider_id||o.smmProviderId||'').trim(),providerOrderId,
+    lastCheckedAt:o.lastCheckedAt||o.lastChecked||o.providerCheckedAt||null,
+    updatedAt:o.updatedAt||o.updated_at||o.lastUpdatedAt||null,
+    completedAt:o.completedAt||o.completed_at||o.finishedAt||null,
+    cancelledAt:o.cancelledAt||o.cancelled_at||o.cancelAt||null,
+    cancelReason:String(o.cancelReason||o.cancellationReason||o.failureReason||o.reason||''),
+    remains:o.remains??null,startCount:o.startCount??o.start_count??null,
+    source, firebaseKey:source==='firebase'?String(sourceKey||''):'',
+    siteLocalId:source==='server'?String(id||''):'',
+    amountUsd:Number(o.chargeUsd??o.totalUsd??o.priceUsd??NaN),
+    sourceTimestamp:createdMs||0
+  };
+}
+function auditIdentity(row){
+  const id=String(row.id||row.publicOrderNo||'').trim(),u=String(row.user||'').trim();
+  if(id)return 'id:'+id+'|u:'+u;
+  if(row.providerOrderId)return 'provider:'+String(row.providerId||'')+'|'+row.providerOrderId+'|u:'+u;
+  return String(row.source||'')+':'+String(row.firebaseKey||row.createdMs||'')+'|u:'+u;
+}
+async function loadOrderAuditSnapshot(force=false){
+  const now=Date.now();if(!force&&ORDER_AUDIT_SNAPSHOT_CACHE.loaded&&now-ORDER_AUDIT_SNAPSHOT_CACHE.at<8000)return ORDER_AUDIT_SNAPSHOT_CACHE;
+  const remote=await Promise.allSettled([firebaseGetJson('orders',14000)]);
+  const fbOk=remote[0].status==='fulfilled';const fbRoot=fbOk?remote[0].value:null;
+  const fbError=fbOk?'':String(remote[0].reason?.message||'تعذر قراءة Firebase').slice(0,180);
+  const rawFirebase=[];
+  if(fbOk&&fbRoot&&typeof fbRoot==='object'){
+    const entries=Array.isArray(fbRoot)?fbRoot.map((v,i)=>[String(i),v]):Object.entries(fbRoot);
+    for(const [key,o] of entries){if(!o||typeof o!=='object'||Array.isArray(o)||o.event)continue;const row=auditNormalizeRecord(o,'firebase',key);if(row.id||row.providerOrderId||row.createdMs)rawFirebase.push(row);}
+  }
+  const local=readJSON('orders.json',[]);const rawLocal=[];
+  if(Array.isArray(local))for(const o of local){if(!o||typeof o!=='object'||o.event)continue;const row=auditNormalizeRecord(o,'server',String(o.id||''));if(row.id||row.providerOrderId||row.createdMs)rawLocal.push(row);}
+  const merged=new Map();
+  // Firebase order records are preferred for current status. Add local-ledger-only fields only if missing.
+  for(const row of [...rawFirebase,...rawLocal]){
+    const key=auditIdentity(row);const prior=merged.get(key);
+    if(!prior){merged.set(key,{...row,_auditSources:[row.source],_firebaseKey:row.firebaseKey||'',_serverOrderId:row.siteLocalId||''});continue;}
+    const incomingIsFirebase=row.source==='firebase';const winner=incomingIsFirebase?{...prior,...row}:{...row,...prior};
+    for(const [field,value] of Object.entries(row))if((winner[field]===undefined||winner[field]===null||winner[field]===''||winner[field]==='unknown')&&value!==undefined&&value!==null&&value!=='')winner[field]=value;
+    winner._auditSources=[...new Set([...(prior._auditSources||[]),row.source])];
+    winner._firebaseKey=prior._firebaseKey||row.firebaseKey||'';winner._serverOrderId=prior._serverOrderId||row.siteLocalId||'';
+    merged.set(key,winner);
+  }
+  const providers=providerStore().providers||{};
+  const rows=[...merged.values()].map(row=>({...row,providerName:row.providerName||(providers[row.providerId]?.name||''),status:auditStatus(row.status||row.rawStatus)}));
+  ORDER_AUDIT_SNAPSHOT_CACHE={at:now,rows,firebaseAvailable:fbOk,firebaseError:fbError,loaded:true};
+  return ORDER_AUDIT_SNAPSHOT_CACHE;
+}
+function auditPublicRecord(row,now=Date.now(),delayHours=3){
+  const createdMs=Number(row.createdMs||auditOrderTime(row)||0)||null;const ageMs=createdMs?Math.max(0,now-createdMs):null;const status=auditStatus(row.status||row.rawStatus);
+  return {id:String(row.id||''),siteOrderId:String(row.siteOrderId||row.id||''),publicOrderNo:String(row.publicOrderNo||row.id||''),user:String(row.user||''),userName:String(row.userName||row.user||'—'),email:String(row.email||''),serviceName:String(row.serviceName||'خدمة'),serviceId:String(row.serviceId||''),platform:String(row.platform||auditPlatform(row)),serviceApp:String(row.serviceApp||''),link:String(row.link||''),quantity:Number(row.quantity||0),status,rawStatus:String(row.rawStatus||status),createdAt:row.createdAt||null,createdMs,ageMs,overdue:!!(ageMs!==null&&ageMs>delayHours*3600000&&!auditTerminalStatus(status)),providerName:String(row.providerName||'—'),providerId:String(row.providerId||''),providerOrderId:String(row.providerOrderId||''),lastCheckedAt:row.lastCheckedAt||null,updatedAt:row.updatedAt||null,completedAt:row.completedAt||null,cancelledAt:row.cancelledAt||null,cancelReason:String(row.cancelReason||''),remains:row.remains??null,startCount:row.startCount??null,amountUsd:Number.isFinite(row.amountUsd)?row.amountUsd:null,source:String(row.source||''),sourceKey:String(row._firebaseKey||row.firebaseKey||''),sources:Array.isArray(row._auditSources)?row._auditSources:[row.source].filter(Boolean)};
+}
+function auditPageFilter(rows,params,settings){
+  const now=Date.now(),delayMs=settings.delayHours*3600000;
+  const view=String(params.view||'overdue');const q=String(params.q||'').trim().toLowerCase();const numberType=String(params.numberType||'site');
+  const provider=String(params.provider||'');const platform=String(params.platform||'');const service=String(params.service||'');const status=String(params.status||'');const delay=String(params.delay||'');const range=String(params.range||'7d');const sort=String(params.sort||'newest');
+  const rangeMs=range==='today'?86400000:range==='7d'?7*86400000:range==='30d'?30*86400000:Infinity;const cutoff=rangeMs===Infinity?0:now-rangeMs;
+  const records=rows.map(r=>auditPublicRecord(r,now,settings.delayHours));
+  const inSelectedRange=r=>rangeMs===Infinity?true:(r.createdMs!==null&&r.createdMs>=cutoff);
+  const overdue=records.filter(r=>r.overdue), completed=records.filter(r=>r.status==='completed'&&inSelectedRange(r)),cancelled=records.filter(r=>r.status==='cancelled'&&inSelectedRange(r));
+  const openWithAge=records.filter(r=>r.ageMs!==null&&!auditTerminalStatus(r.status));const stats={overdue:overdue.length,over6:openWithAge.filter(r=>r.ageMs>=6*3600000).length,over12:openWithAge.filter(r=>r.ageMs>=12*3600000).length,completed:completed.length,cancelled:cancelled.length};
+  let list=records.filter(r=>{
+    if(view==='lookup'&&!q)return false;
+    if(view==='overdue'&&!r.overdue)return false;
+    if(view==='completed'&&r.status!=='completed')return false;
+    if(view==='cancelled'&&r.status!=='cancelled')return false;
+    if(view==='lookup'){
+      if(numberType==='provider'&&String(r.providerOrderId||'').toLowerCase()!==q)return false;
+      if(numberType!=='provider'&&String(r.siteOrderId||r.id||'').toLowerCase()!==q)return false;
+    } else if(q){const hay=[r.siteOrderId,r.id,r.user,r.userName,r.email,r.serviceName,r.serviceId,r.link,r.providerName,r.providerOrderId,r.platform].join(' ').toLowerCase();if(!hay.includes(q))return false;}
+    // A number lookup is authoritative; stale filters from a previous view must not hide an exact match.
+    if(view!=='lookup'&&provider&&r.providerId!==provider&&r.providerName!==provider)return false;
+    if(view!=='lookup'&&platform&&r.platform.toLowerCase()!==platform.toLowerCase()&&r.serviceApp.toLowerCase()!==platform.toLowerCase())return false;
+    if(view!=='lookup'&&service&&r.serviceName!==service&&r.serviceId!==service)return false;
+    if(view!=='lookup'&&status&&status!=='all'&&r.status!==status)return false;
+    if(view!=='lookup'&&delay){if(!r.overdue)return false;const h=(r.ageMs||0)/3600000;if(delay==='3-6'&&(h<settings.delayHours||h>=6))return false;if(delay==='6-12'&&(h<6||h>=12))return false;if(delay==='12+'&&h<12)return false;}
+    if(['completed','cancelled'].includes(view)&&!inSelectedRange(r))return false;
+    return true;
+  });
+  list.sort((a,b)=>sort==='oldest'?Number(a.createdMs||0)-Number(b.createdMs||0):sort==='delay-high'?Number(b.ageMs||0)-Number(a.ageMs||0):Number(b.createdMs||0)-Number(a.createdMs||0));
+  const pageSize=Math.min(50,Math.max(5,Number(params.limit)||20));const total=list.length;const totalPages=Math.max(1,Math.ceil(total/pageSize));const page=Math.min(totalPages,Math.max(1,Number(params.page)||1));const start=(page-1)*pageSize;
+  const providers=[...new Map(records.filter(x=>x.providerId||x.providerName).map(x=>[x.providerId||x.providerName,{id:x.providerId||x.providerName,name:x.providerName||x.providerId}])).values()].sort((a,b)=>a.name.localeCompare(b.name));
+  const platforms=[...new Set(records.map(x=>x.platform).filter(x=>x&&x!=='أخرى'))].sort();
+  const services=[...new Set(records.map(x=>x.serviceName).filter(x=>x&&x!=='خدمة'))].sort((a,b)=>a.localeCompare(b)).map(name=>({id:name,name}));
+  return {view,page,pageSize,total,totalPages,items:list.slice(start,start+pageSize),stats,settings,providers,platforms,services,source:{firebaseAvailable:ORDER_AUDIT_SNAPSHOT_CACHE.firebaseAvailable,partial:!ORDER_AUDIT_SNAPSHOT_CACHE.firebaseAvailable,firebaseError:ORDER_AUDIT_SNAPSHOT_CACHE.firebaseError},range};
+}
+async function orderAuditEnrichUsers(items){
+  const local=readJSON('users.json',{users:{}}).users||{};
+  return await Promise.all(items.map(async item=>{
+    if(!item.user)return item;
+    let user=local[item.user]||{};
+    // A local username/name may exist while the email is only stored in Firebase; fetch when either is missing.
+    if((!user.email&&!user.mail)||(!user.fullName&&!user.name)){try{const remote=await firebaseUserByUsername(item.user);if(remote&&typeof remote==='object')user={...remote,...user,email:user.email||user.mail||remote.email||remote.mail||'',fullName:user.fullName||remote.fullName||'',name:user.name||remote.name||''}}catch(_){}}
+    return {...item,userName:item.userName&&item.userName!==item.user?item.userName:String(user.fullName||user.name||item.userName||item.user),email:String(item.email||user.email||user.mail||'')};
+  }));
+}
+async function getOrderAuditState(){
+  const local=readJSON('order_audit_state.json',{alerts:{}});
+  try{const remote=await firebaseGetJson('config/orderAuditState',4500);if(remote&&typeof remote==='object'&&!Array.isArray(remote))return {...local,...remote,alerts:{...(local.alerts||{}),...(remote.alerts||{})}};}catch(_){}
+  return local;
+}
+async function saveOrderAuditState(state){
+  writeJSON('order_audit_state.json',state);try{await firebaseWriteJson('config/orderAuditState',state,6000);return true}catch(_){return DATA_IS_EXTERNAL;}
+}
+async function runOrderAuditMonitor(){
+  if(ORDER_AUDIT_MONITOR_RUNNING)return;ORDER_AUDIT_MONITOR_RUNNING=true;
+  try{
+    const cfg=await getOrderAuditSettings();if(!cfg.notifyAdmin)return;
+    const tg=telegramConfig();if(!tg.enabled||!tg.token||!tg.chat)return;
+    const snap=await loadOrderAuditSnapshot(true);if(!snap.firebaseAvailable)return;
+    const now=Date.now(),threshold=cfg.delayHours*3600000;
+    const state=await getOrderAuditState();const alerts={...(state.alerts||{})};let changed=false;
+    const rows=snap.rows.map(r=>auditPublicRecord(r,now,cfg.delayHours)).filter(r=>r.overdue&&r.ageMs>=threshold).sort((a,b)=>b.ageMs-a.ageMs).slice(0,100);
+    const fresh=rows.filter(o=>{const key=String(o.id||o.providerOrderId||'');return key&&!alerts[key]}).slice(0,5);
+    if(fresh.length){
+      const text='⚠️ تنبيه طلبات متأخرة — صدى العراق\n'+fresh.map(o=>`#${o.siteOrderId||o.id||'—'} · ${o.serviceName} · ${o.userName||o.user||'—'} · تأخير ${Math.floor((o.ageMs||0)/3600000)} ساعة · الحالة ${o.status}`).join('\n');
+      const sent=await sendTelegramDetailed(text,{kind:'order_audit_overdue',orderId:fresh.map(x=>x.siteOrderId||x.id).join(',').slice(0,80)});
+      if(sent.ok){for(const o of fresh){const key=String(o.id||o.providerOrderId||'');alerts[key]={sentAt:nowISO(),status:o.status};changed=true;}}
+    }
+    // Keep a bounded deduplication history.
+    const entries=Object.entries(alerts).sort((a,b)=>Date.parse(b[1]?.sentAt||0)-Date.parse(a[1]?.sentAt||0)).slice(0,3000);
+    if(changed){await saveOrderAuditState({alerts:Object.fromEntries(entries),updatedAt:nowISO()});}
+  }catch(e){console.warn('order audit monitor error:',String(e.message||e).slice(0,180));}
+  finally{ORDER_AUDIT_MONITOR_RUNNING=false;}
+}
+
 async function firebasePatchJson(pathname,value,timeoutMs=12000){
   const controller=new AbortController(), timer=setTimeout(()=>controller.abort(),timeoutMs);
   try{const u=FIREBASE_DATABASE_URL+'/'+String(pathname).replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/')+'.json';const r=await fetch(u,{method:'PATCH',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(value),signal:controller.signal});if(!r.ok)throw new Error('Firebase HTTP '+r.status);return await r.json().catch(()=>value)}finally{clearTimeout(timer)}
@@ -968,6 +1159,74 @@ async function routeAPI(req,res,urlObj){
     if(result?.authRevoked)return json(res,401,{error:'Invalid API key'}); if(result?.notFound)return json(res,404,{error:'User not found'}); if(result?.insufficient)return json(res,402,{error:'Insufficient balance',balance:result.balanceUsd}); if(result?.duplicate)return json(res,409,{error:'Duplicate order'}); if(result?.error)return json(res,502,{error:result.authFailure?'Provider API key rejected':result.error,uncertain:!!result.uncertain});
     if(result?.ok){ sendTelegram(`🆕 طلب جديد\n🆔 رقم الطلب: #${result.order.id}\n👤 المستخدم: ${au.username}\n📦 الخدمة: ${result.order.serviceName}\n🔗 الرابط: ${link}\n🔢 الكمية: ${quantity.toLocaleString('en-US')}\n💰 السعر: $${total.toFixed(2)}\n📊 الحالة: Pending\n🕐 الوقت: ${new Date().toLocaleString('en-GB',{hour12:false})}`).catch(()=>{}); return json(res,200,apiOrderPublic(result.order)); }
     return json(res,500,{error:'تعذر إنشاء الطلب'});
+  }
+
+  // -------------------- Admin order audit / diagnostics --------------------
+  if(p==='/api/admin/order-audit/settings' && req.method==='GET'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
+    const settings=await getOrderAuditSettings();
+    return json(res,200,{ok:true,settings,defaultDelayHours:3,monitorIntervalMinutes:5,storageMode:DATA_IS_EXTERNAL?'persistent-directory':'release-local'});
+  }
+  if(p==='/api/admin/order-audit/settings' && req.method==='POST'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
+    const b=await bodyJSON(req);const previous=await getOrderAuditSettings();
+    const delayHours=Number(b.delayHours??previous.delayHours);
+    if(!Number.isInteger(delayHours)||delayHours<1||delayHours>72)return json(res,422,{ok:false,error:'مدة التأخير يجب أن تكون بين ساعة و72 ساعة'});
+    const saved=await saveOrderAuditSettings({...previous,delayHours,notifyAdmin:b.notifyAdmin===undefined?previous.notifyAdmin:b.notifyAdmin===true});
+    return json(res,200,{ok:true,...saved,warning:saved.persistent?'':'تم حفظ الإعداد محلياً فقط؛ اربط تخزيناً دائماً أو تحقق من صلاحيات Firebase حتى يبقى بعد إعادة النشر.'});
+  }
+  if(p==='/api/admin/order-audit' && req.method==='GET'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
+    const snapshot=await loadOrderAuditSnapshot(String(urlObj.searchParams.get('refresh')||'')==='1');
+    if(!snapshot.firebaseAvailable&&!snapshot.rows.length)return json(res,502,{ok:false,error:'تعذر قراءة قاعدة الطلبات من Firebase، ولم يتوفر سجل خادم بديل. لم يتم عرض نتائج فارغة على أنها مؤكدة.',details:snapshot.firebaseError||'Firebase unavailable'});
+    const settings=await getOrderAuditSettings();
+    const result=auditPageFilter(snapshot.rows,{view:urlObj.searchParams.get('view'),q:urlObj.searchParams.get('q'),numberType:urlObj.searchParams.get('numberType'),provider:urlObj.searchParams.get('provider'),platform:urlObj.searchParams.get('platform'),service:urlObj.searchParams.get('service'),status:urlObj.searchParams.get('status'),delay:urlObj.searchParams.get('delay'),range:urlObj.searchParams.get('range'),sort:urlObj.searchParams.get('sort'),page:urlObj.searchParams.get('page'),limit:urlObj.searchParams.get('limit')},settings);
+    result.items=await orderAuditEnrichUsers(result.items);
+    result.source={...result.source,orderCount:snapshot.rows.length,readAt:new Date(snapshot.at).toISOString(),warning:!snapshot.firebaseAvailable?'عرض جزئي من سجل الخادم؛ تعذر تأكيد بيانات Firebase.':''};
+    return json(res,200,{ok:true,...result});
+  }
+  if(p==='/api/admin/order-audit/check' && req.method==='POST'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
+    const b=await bodyJSON(req);const number=String(b.number||b.orderId||'').trim();const numberType=String(b.numberType||'site');
+    if(!number)return json(res,422,{ok:false,error:'أدخل رقم الطلب أولاً'});
+    const snapshot=await loadOrderAuditSnapshot(true);
+    if(!snapshot.firebaseAvailable&&!snapshot.rows.length)return json(res,502,{ok:false,error:'تعذر قراءة سجل الطلبات الأساسي: '+(snapshot.firebaseError||'Firebase unavailable')});
+    let candidates=snapshot.rows;
+    if(String(b.sourceKey||'').trim())candidates=candidates.filter(r=>String(r._firebaseKey||r.firebaseKey||'')===String(b.sourceKey).trim());
+    else if(numberType==='provider')candidates=candidates.filter(r=>String(r.providerOrderId||'')===number);
+    else candidates=candidates.filter(r=>String(r.siteOrderId||r.id||'')===number||String(r.publicOrderNo||'')===number);
+    candidates.sort((a,b)=>Number(b.createdMs||0)-Number(a.createdMs||0));
+    const raw=candidates[0];if(!raw)return json(res,404,{ok:false,error:numberType==='provider'?'لم يُعثر على رقم طلب المزوّد في سجلات الموقع. لا يمكن فحص رقم غير مرتبط بطلب محفوظ.':'رقم الطلب غير موجود في قاعدة بيانات الموقع.'});
+    const cfg=await getOrderAuditSettings();let order=await orderAuditEnrichUsers([auditPublicRecord(raw,Date.now(),cfg.delayHours)]).then(x=>x[0]);
+    if(!raw.providerId||!raw.providerOrderId){return json(res,200,{ok:true,externalVerified:false,saved:false,order,warning:'تم العثور على الطلب وحالته المخزنة، لكن لا توجد بيانات ربط مكتملة بالمزوّد؛ لم يتم إجراء فحص خارجي.'});}
+    try{
+      await ensureProviderRuntime(raw.providerId);const resolved=getProviderById(raw.providerId,{allowSingleFallback:false});const prov=resolved.prov;
+      if(!prov?.url||!prov?.key)return json(res,200,{ok:true,externalVerified:false,saved:false,order,warning:'تم عرض آخر حالة مخزنة، لكن تعذر العثور على إعدادات المزود المحفوظة لهذا الطلب؛ لم يتم تغيير حالته.'});
+      const d=await providerRequest(prov,{action:'status',order:String(raw.providerOrderId)});
+      const providerRawStatus=String(d?.status??d?.data?.status??d?.result?.status??'').trim();const normalized=auditStatus(providerRawStatus);const checkedAt=nowISO();let saved=true;let saveError='';
+      const update={providerStatus:providerRawStatus,lastCheckedAt:checkedAt,updatedAt:checkedAt};
+      if(normalized!=='unknown')update.status=normalized;
+      if(d?.remains!==undefined)update.remains=d.remains;
+      if(d?.start_count!==undefined||d?.startCount!==undefined)update.startCount=d.start_count??d.startCount;
+      if(raw._firebaseKey||raw.firebaseKey){try{await firebasePatchJson('orders/'+String(raw._firebaseKey||raw.firebaseKey),update,10000)}catch(e){saved=false;saveError=String(e.message||e).slice(0,160)}}
+      const localRows=readJSON('orders.json',[]);let localChanged=false;
+      if(Array.isArray(localRows)){
+        for(let i=0;i<localRows.length;i++){
+          const x=localRows[i];if(!x||x.event)continue;
+          const same=(raw.id&&String(x.id||x.publicOrderNo||'')===String(raw.id))&&(!raw.user||String(x.user||'')===String(raw.user));
+          const sameProvider=String(x.providerId||'')===String(raw.providerId)&&String(x.providerOrderId||x.smmpartyOrderId||'')===String(raw.providerOrderId);
+          if(same||sameProvider){localRows[i]={...x,...update};localChanged=true;}
+        }
+      }
+      if(localChanged){try{writeJSON('orders.json',localRows)}catch(e){saved=false;saveError=saveError||String(e.message||e).slice(0,160)}}
+      const oldStatus=auditStatus(raw.status||raw.rawStatus);const newStatus=normalized==='unknown'?oldStatus:normalized;
+      if(saved&&oldStatus!==newStatus&&newStatus!=='unknown')notifyOrderStatusChange({...raw,...update,user:raw.user},oldStatus,newStatus).catch(()=>{});
+      const mergedOrder={...order,status:newStatus,rawStatus:providerRawStatus||order.rawStatus,lastCheckedAt:checkedAt,remains:update.remains??order.remains,startCount:update.startCount??order.startCount};
+      return json(res,200,{ok:true,externalVerified:true,saved,order:mergedOrder,providerStatus:providerRawStatus,providerNormalizedStatus:normalized,checkedAt,warning:normalized==='unknown'?'اتصل النظام بالمزوّد، لكن رد الحالة غير معروف؛ حافظنا على الحالة المخزنة ولم نعتبر الطلب مكتملاً.':(!saved?'تم فحص المزود لكن تعذر حفظ الحالة الجديدة في قاعدة الموقع: '+saveError:'')});
+    }catch(e){
+      appendJsonLedger('provider_failures.json',{stage:'admin_order_audit_status',siteOrderId:raw.id,providerId:raw.providerId,providerOrderId:raw.providerOrderId,error:String(e.message||e).slice(0,180),createdAt:nowISO()});
+      return json(res,200,{ok:true,externalVerified:false,saved:false,order,warning:'تعذر التحقق من المزود الآن. الحالة المعروضة هي آخر حالة محفوظة ولم نغيّرها. السبب: '+String(e.message||'فشل الاتصال').slice(0,180)});
+    }
   }
 
   // -------------------- Admin API / audit / stats --------------------
@@ -1467,4 +1726,4 @@ const server=http.createServer(async (req,res)=>{
     return serveStatic(req,res,u);
   }catch(e){ const st=Number(e?.statusCode)||500; return json(res,st,{error:st===500?'Server error':e.message}); }
 });
-hydrateProviderRuntimeFromFirebase().finally(()=>server.listen(PORT,'0.0.0.0',()=>console.log(`${APP_NAME} v${APP_VERSION} running on port ${PORT}`)));
+hydrateProviderRuntimeFromFirebase().finally(()=>server.listen(PORT,'0.0.0.0',()=>{console.log(`${APP_NAME} v${APP_VERSION} running on port ${PORT}`);setTimeout(()=>runOrderAuditMonitor().catch(()=>{}),15000).unref();setInterval(()=>runOrderAuditMonitor().catch(()=>{}),5*60*1000).unref();}));
