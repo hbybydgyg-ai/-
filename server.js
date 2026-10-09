@@ -10,8 +10,8 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.43';
-const BUILD_ID = 'SADA-1.5.43-API-CONNECTION-TEST-FIX-20261009';
+const APP_VERSION = '1.5.44';
+const BUILD_ID = 'SADA-1.5.44-PROVIDER-SYNC-IMPORT-REPAIR-20261009';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
@@ -399,7 +399,7 @@ async function providerRequest(prov,params,timeoutMs=30000){
 // Resolve saved provider credentials server-side for the provider-list test button.
 // The list endpoint intentionally returns hasKey rather than the secret itself.
 async function resolveProviderDiagnosticsInput(body={}){
-  const providerId=String(body.providerId||body.id||'').trim();
+  const providerId=String(body.providerId||body.provider||body.id||'').trim();
   let prov={name:String(body.name||'مزود').trim(),url:String(body.url||'').trim(),key:String(body.key||'').trim()};
   if(providerId && !prov.key){
     await ensureProviderRuntime(providerId);
@@ -520,25 +520,56 @@ async function apiSmm(req,res,urlObj){
   const wait=rateLimit(req,'provider');
   if(wait) return json(res,429,{error:'طلبات المزود كثيرة، أعد المحاولة لاحقاً'},{'Retry-After':String(wait)});
   if(!isAdmin(req)) return json(res,403,{error:'غير مصرح — جلسة الإدارة غير صالحة. حدّث الجلسة أو سجّل الدخول من جديد.'});
-  const requestedId=String(urlObj.searchParams.get('provider')||'').trim();
-  await ensureProviderRuntime(requestedId);
-  let resolved=getProviderById(requestedId || '',{allowSingleFallback:true});
-  let {store,pid:providerId,prov}=resolved;
-  // Older admin forms can send temporary credentials for a provider not saved yet.
-  const tempUrl=String(urlObj.searchParams.get('_url')||'').trim();
-  const tempKey=String(urlObj.searchParams.get('_key')||'').trim();
-  if((!prov?.url||!prov?.key) && tempUrl && tempKey){
-    try{prov={...(prov||{}),id:providerId||requestedId,name:prov?.name||providerId||requestedId,url:normalizeProviderApiUrl(tempUrl),key:tempKey};}
+  if(req.method!=='GET' && req.method!=='POST') return json(res,405,{error:'طريقة الطلب غير مدعومة'});
+  let body={};
+  if(req.method==='POST') { try { body=await bodyJSON(req); } catch(_) { return json(res,400,{error:'بيانات طلب المزود غير صالحة'}); } }
+  const requestedId=String(body.provider||body.providerId||urlObj.searchParams.get('provider')||'').trim();
+  const action=String(body.action||urlObj.searchParams.get('action')||'balance');
+  if(!['balance','services','add','status','cancel'].includes(action)) return json(res,422,{error:'عملية غير مدعومة'});
+  let store=await ensureProviderRuntime(requestedId);
+  let resolved=getProviderById(requestedId,{allowSingleFallback:!requestedId});
+  let {pid:providerId,prov}=resolved;
+  const suppliedUrl=String(body.url||body.apiUrl||urlObj.searchParams.get('_url')||'').trim();
+  const suppliedKey=String(body.key||body.apiKey||urlObj.searchParams.get('_key')||'').trim();
+  if(body.syncProvider===true && requestedId && suppliedUrl && suppliedKey){
+    try{
+      const id=providerIdInStore(store,requestedId)||normalizeProviderId(requestedId);
+      if(!id) throw new Error('معرّف المزود غير صالح');
+      const url=normalizeProviderApiUrl(suppliedUrl);
+      const name=String(body.name||prov?.name||store.providers?.[id]?.name||id).trim();
+      const saved={...(store.providers?.[id]||{}),id,name,url,key:suppliedKey,source:'admin'};
+      const providers={...(store.providers||{}),[id]:saved};
+      const deleted=[...(store.deletedProviderIds||[])].filter(x=>normalizeProviderId(x)!==normalizeProviderId(id));
+      const legacy=readJSON('providers.json',{activeProvider:'',providers:{},deletedProviderIds:[]});
+      const legacyDeleted=(Array.isArray(legacy.deletedProviderIds)?legacy.deletedProviderIds:[]).filter(x=>normalizeProviderId(x)!==normalizeProviderId(id));
+      writeJSON('providers.json',{...legacy,deletedProviderIds:legacyDeleted});
+      const nextActive=body.activateProvider===true?id:(providerIdInStore(store,store.activeProvider)||id);
+      writeJSON('providers.runtime.json',{activeProvider:nextActive,providers,deletedProviderIds:deleted,updatedAt:nowISO()});
+      const k=firebaseSafeKey(id);
+      await Promise.allSettled([
+        firebaseWriteJson('config/smmProviders/'+k,{id,name,url,hasKey:true}),
+        firebaseWriteJson('config/smmProviderSecrets/'+k,{id,name,url,key:suppliedKey}),
+        firebaseWriteJson('config/smmActive',nextActive)
+      ]);
+      store=providerStore(); resolved=getProviderById(id,{allowSingleFallback:false});
+      providerId=resolved.pid||id; prov=resolved.prov||saved;
+    }catch(e){return json(res,422,{error:'تعذر تثبيت بيانات المزود: '+String(e.message||e)});}
+  } else if((!prov?.url||!prov?.key) && suppliedUrl && suppliedKey){
+    try{prov={...(prov||{}),id:providerId||requestedId,name:String(body.name||prov?.name||providerId||requestedId),url:normalizeProviderApiUrl(suppliedUrl),key:suppliedKey};}
     catch(_){return json(res,422,{error:'رابط API للمزود غير صالح'});}
   }
   if(!prov?.url||!prov?.key){
-    const available=Object.entries(store.providers||{}).filter(([,v])=>v?.url&&v?.key).map(([id,v])=>({id,name:String(v.name||id)}));
-    return json(res,404,{error:'لا يوجد مزود محفوظ ببيانات URL وAPI Key صالحة. افتح إعدادات المزود واحفظ المفتاح ثم اضغط تحديث.',providerId:requestedId||null,availableProviders:available});
+    await ensureProviderRuntime(requestedId).catch(()=>{});
+    resolved=getProviderById(requestedId,{allowSingleFallback:!requestedId}); providerId=resolved.pid||requestedId; prov=resolved.prov;
   }
-  const action=String(urlObj.searchParams.get('action')||'balance');
-  if(!['balance','services','add','status','cancel'].includes(action)) return json(res,422,{error:'عملية غير مدعومة'});
-  const payload={action};
-  for(const k of ['service','link','quantity','order','orders']) if(urlObj.searchParams.has(k)) payload[k]=urlObj.searchParams.get(k);
+  if(!prov?.url||!prov?.key){
+    const current=providerStore();
+    const available=Object.entries(current.providers||{}).filter(([,v])=>v?.url&&v?.key).map(([id,v])=>({id,name:String(v.name||id)}));
+    return json(res,404,{error:'تعذر العثور على مفتاح API المحفوظ لهذا المزود. أعد تحميل إعدادات المزود أو افتح التعديل وأعد حفظ المفتاح.',providerId:requestedId||null,availableProviders:available});
+  }
+  const payload={...body,action};
+  for(const k of ['provider','providerId','url','apiUrl','key','apiKey','syncProvider','activateProvider','name']) delete payload[k];
+  for(const k of ['service','link','quantity','order','orders']) if(payload[k]===undefined && urlObj.searchParams.has(k)) payload[k]=urlObj.searchParams.get(k);
   if(action==='cancel' && payload.orders===undefined && payload.order!==undefined){payload.orders=payload.order;delete payload.order;}
   try{
     const d=await providerRequest(prov,payload);
