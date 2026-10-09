@@ -1,7 +1,7 @@
 {
   "appName": "صدى العراق",
-  "version": "1.5.57",
-  "buildId": "SADA-1.5.57-PROVIDER-KEY-PERSISTENCE-IMPORT-STABILITY-20261009",
+  "version": "1.5.60",
+  "buildId": "SADA-1.5.60-COMPACT-BINANCE-WA-FLOAT-CATEGORY-REFRESH-20261009",
   "currency": "USD",
   "exchangeRate": 1250,
   "fixedRecharge": "5000 IQD = 4 USD",
