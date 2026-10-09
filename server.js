@@ -10,8 +10,8 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.51';
-const BUILD_ID = 'SADA-1.5.51-WHATSAPP-API-ORDER-IMAGE-20261009';
+const APP_VERSION = '1.5.52';
+const BUILD_ID = 'SADA-1.5.52-PRICING-QTY-BINANCE-20261009';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
@@ -649,6 +649,89 @@ async function firebaseWriteJson(pathname,value,timeoutMs=8000){
   finally{ clearTimeout(timer); }
 }
 async function firebaseDeleteJson(pathname,timeoutMs=8000){ return firebaseWriteJson(pathname,null,timeoutMs); }
+
+async function firebasePatchJson(pathname,value,timeoutMs=12000){
+  const controller=new AbortController(), timer=setTimeout(()=>controller.abort(),timeoutMs);
+  try{const u=FIREBASE_DATABASE_URL+'/'+String(pathname).replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/')+'.json';const r=await fetch(u,{method:'PATCH',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(value),signal:controller.signal});if(!r.ok)throw new Error('Firebase HTTP '+r.status);return await r.json().catch(()=>value)}finally{clearTimeout(timer)}
+}
+const DEFAULT_GLOBAL_PRICING={markupPct:50,autoSync:true,intervalHours:6,lastAttemptAt:null,lastSuccessAt:null,lastUpdatedAt:null,lastResult:null,lastError:''};
+function cleanGlobalPricing(v={}){
+  const pct=Number(v.markupPct??v.markup??DEFAULT_GLOBAL_PRICING.markupPct);
+  const interval=Number(v.intervalHours??DEFAULT_GLOBAL_PRICING.intervalHours);
+  return {...DEFAULT_GLOBAL_PRICING,...v,markupPct:Number.isFinite(pct)?Math.max(0,Math.min(1000,pct)):50,autoSync:v.autoSync!==false,intervalHours:[1,3,6,12,24].includes(interval)?interval:6};
+}
+function localGlobalPricing(){const settings=readJSON('settings.json',{});return cleanGlobalPricing(settings.pricing||{});}
+async function getGlobalPricing(){
+  const local=localGlobalPricing();
+  try{const remote=await firebaseGetJson('config/pricing',4500);if(remote&&typeof remote==='object'&&!Array.isArray(remote)){const r=cleanGlobalPricing(remote);const lt=Date.parse(local.lastUpdatedAt||'')||0,rt=Date.parse(r.lastUpdatedAt||'')||0;return rt>=lt?r:local;}}catch(_){}
+  return local;
+}
+async function saveGlobalPricing(v){
+  const p=cleanGlobalPricing(v);p.lastUpdatedAt=nowISO();p.lastError='';
+  const settings=readJSON('settings.json',{});settings.pricing=p;writeJSON('settings.json',settings);
+  let persistedRemotely=false,remoteError='';
+  try{await firebaseWriteJson('config/pricing',p,9000);persistedRemotely=true}catch(e){remoteError=String(e.message||e).slice(0,180)}
+  return {pricing:p,persistedRemotely,remoteError};
+}
+function validRateField(s,keys){
+  for(const k of keys){const v=s?.[k];if(v===undefined||v===null||String(v).trim()==='')continue;const n=Number(String(v).replace(/,/g,''));if(Number.isFinite(n)&&n>=0)return n;}return null;
+}
+function providerServiceKey(s){for(const k of ['providerServiceId','smmpartyId','sourceServiceId','provider_service_id','serviceId','service_id']){const v=s?.[k];if(v!==undefined&&v!==null&&String(v).trim()!=='')return String(v).trim()}return ''}
+function providerServiceRate(s){return validRateField(s,['rate','rate_usd','rateUsd','usd_rate','usdRate','rate_per_1000','ratePer1000','price_per_1000','pricePer1000'])}
+function catalogRate(s){return validRateField(s,['providerRateUsd','smmRateUsd','baseProviderRateUsd','smmRate','provider_rate_usd'])}
+function pricedPatch(s,base,pct){const sell=Number((base*(1+pct/100)).toFixed(8));return {sellingUsd:sell,price:Number((sell*FIXED_RATE).toFixed(6)),basePrice:Number((base*FIXED_RATE).toFixed(6)),providerRateUsd:base,smmRateUsd:base,smmRate:base,markupPct:pct,priceSyncedAt:nowISO()}}
+function appendServicePricePatch(out,key,values){for(const [field,value] of Object.entries(values))out[String(key)+'/'+field]=value;}
+async function applyCachedGlobalMarkup(pct){
+  const root=await firebaseGetJson('services',18000);if(!root||typeof root!=='object'||Array.isArray(root))return {updated:0,skipped:0};
+  const patch={};let updated=0,skipped=0;const localServices=readJSON('api_services.json',[]);let localUpdated=0;
+  for(const [key,s] of Object.entries(root)){
+    if(!s||typeof s!=='object')continue;const pid=String(s.providerId||'').trim(),sid=providerServiceKey(s);if(!pid||!sid){skipped++;continue}const base=catalogRate(s);if(base===null){skipped++;continue}
+    const priced=pricedPatch(s,base,pct);appendServicePricePatch(patch,key,priced);updated++;
+    for(const a of localServices){if(pid&&String(a.providerId||'')!==pid)continue;if(sid&&String(a.providerServiceId||a.id||'')!==sid)continue;if(!sid&&!pid)continue;Object.assign(a,priced,{rateUsd:priced.sellingUsd,rate:priced.sellingUsd});localUpdated++}
+  }
+  if(updated)await firebasePatchJson('services',patch,20000);
+  if(localUpdated)writeJSON('api_services.json',localServices);
+  return {updated,skipped,localUpdated};
+}
+let GLOBAL_PRICE_SYNC_RUNNING=false;
+async function runProviderPriceSync(options={}){
+  if(GLOBAL_PRICE_SYNC_RUNNING)return {ok:false,busy:true,updated:0,errors:['مزامنة أخرى قيد التنفيذ']};
+  GLOBAL_PRICE_SYNC_RUNNING=true;
+  let cfg=await getGlobalPricing();cfg.lastAttemptAt=nowISO();const settings=readJSON('settings.json',{});settings.pricing=cfg;writeJSON('settings.json',settings);
+  const result={ok:true,updated:0,skipped:0,providers:0,providerErrors:[],localUpdated:0};
+  try{
+    const root=await firebaseGetJson('services',22000);if(!root||typeof root!=='object'||Array.isArray(root))throw new Error('تعذر قراءة كتالوج الخدمات من قاعدة البيانات');
+    const rows=Object.entries(root).filter(([k,v])=>v&&typeof v==='object');
+    const providerIds=[...new Set(rows.map(([,v])=>String(v.providerId||'').trim()).filter(Boolean))];
+    if(!providerIds.length){result.ok=false;result.providerErrors.push('لا توجد خدمات مرتبطة بمزود وسعر تكلفة محفوظ');}
+    const pct=cleanGlobalPricing(cfg).markupPct;
+    const allPatches={};const localServices=readJSON('api_services.json',[]);let localUpdated=0;
+    for(const pid of providerIds.slice(0,20)){
+      try{
+        await ensureProviderRuntime(pid);const found=getProviderById(pid,{allowSingleFallback:false});if(!found.prov?.url||!found.prov?.key)throw new Error('بيانات المزود غير متوفرة');
+        const raw=normalizeProviderServices(await providerRequest(found.prov,{action:'services'},22000));
+        if(!raw.length)throw new Error('المزود لم يرجع قائمة خدمات');
+        const byId=new Map();for(const r of raw){const id=String(r?.service??r?.service_id??r?.serviceId??r?.id??r?.serviceID??'').trim();if(id)byId.set(id,r)}
+        let pUpdated=0;
+        for(const [key,svc] of rows){if(String(svc.providerId||'')!==pid)continue;const sid=providerServiceKey(svc);if(!sid){result.skipped++;continue}const latest=byId.get(sid);if(!latest){result.skipped++;continue}const base=providerServiceRate(latest);if(base===null){result.skipped++;continue}const priced=pricedPatch(svc,base,pct);appendServicePricePatch(allPatches,key,priced);pUpdated++;result.updated++;
+          for(const a of localServices){if(String(a.providerId||'')===pid&&String(a.providerServiceId||a.id||'')===sid){Object.assign(a,priced,{rateUsd:priced.sellingUsd,rate:priced.sellingUsd});localUpdated++}}
+        }
+        result.providers++;if(!pUpdated)result.providerErrors.push(pid+': لم تتم مطابقة معرّفات الخدمات');
+      }catch(e){result.ok=false;result.providerErrors.push(pid+': '+String(e.message||e).slice(0,160))}
+    }
+    if(Object.keys(allPatches).length)await firebasePatchJson('services',allPatches,24000);
+    if(localUpdated)writeJSON('api_services.json',localServices);result.localUpdated=localUpdated;
+    cfg=localGlobalPricing();cfg.lastAttemptAt=nowISO();cfg.lastResult={updated:result.updated,skipped:result.skipped,providers:result.providers,localUpdated:result.localUpdated};cfg.lastError=result.providerErrors.join(' | ').slice(0,700);if(result.updated>0){cfg.lastSuccessAt=nowISO();}else if(!result.providerErrors.length){cfg.lastError='لم يتم العثور على خدمات مطابقة للتحديث'};
+    const st=readJSON('settings.json',{});st.pricing=cfg;writeJSON('settings.json',st);try{await firebaseWriteJson('config/pricing',cfg,7000)}catch(_){}
+    result.pricing=cfg;return result;
+  }catch(e){result.ok=false;result.providerErrors.push(String(e.message||e).slice(0,180));const st=readJSON('settings.json',{});const p=cleanGlobalPricing(st.pricing||{});p.lastAttemptAt=nowISO();p.lastError=result.providerErrors.join(' | ').slice(0,700);st.pricing=p;writeJSON('settings.json',st);try{await firebaseWriteJson('config/pricing',p,5000)}catch(_){}return result;
+  }finally{GLOBAL_PRICE_SYNC_RUNNING=false}
+}
+function startGlobalPriceSyncScheduler(){
+  const runIfDue=async()=>{try{const p=await getGlobalPricing();if(!p.autoSync)return;const last=Date.parse(p.lastAttemptAt||p.lastSuccessAt||'')||0;const gap=Math.max(1,p.intervalHours)*3600000;if(Date.now()-last<gap)return;await runProviderPriceSync({automatic:true})}catch(e){console.error('Sada pricing scheduler:',String(e.message||e))}};
+  const t=setInterval(runIfDue,10*60*1000);t.unref();const first=setTimeout(runIfDue,120000);first.unref();
+}
+
 async function firebaseServiceByKey(fbKey){ const k=firebaseSafeKey(fbKey); const v=await firebaseGetJson('services/'+k); return v&&typeof v==='object'?{...v,fbKey:String(fbKey)}:null; }
 async function firebaseUserByUsername(username){ const k=firebaseSafeKey(username); const v=await firebaseGetJson('users/'+k); return v&&typeof v==='object'?v:null; }
 function apiKeyFromRequest(req){
@@ -863,6 +946,22 @@ async function routeAPI(req,res,urlObj){
   }
 
   // -------------------- Admin API / audit / stats --------------------
+  if(p==='/api/admin/pricing' && req.method==='GET'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
+    const pricing=await getGlobalPricing();return json(res,200,{ok:true,pricing});
+  }
+  if(p==='/api/admin/pricing' && req.method==='POST'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
+    const b=await bodyJSON(req);const pct=Number(b.markupPct);if(!Number.isFinite(pct)||pct<0||pct>1000)return json(res,422,{ok:false,error:'نسبة الربح يجب أن تكون بين 0 و1000%'});
+    const hours=Number(b.intervalHours??6);if(![1,3,6,12,24].includes(hours))return json(res,422,{ok:false,error:'اختر فترة تحديث من 1 أو 3 أو 6 أو 12 أو 24 ساعة'});
+    const previous=await getGlobalPricing();const saved=await saveGlobalPricing({...previous,markupPct:pct,autoSync:b.autoSync!==false,intervalHours:hours,lastAttemptAt:previous.lastAttemptAt,lastSuccessAt:previous.lastSuccessAt});
+    let cached={updated:0,skipped:0,localUpdated:0},cachedError='';try{cached=await applyCachedGlobalMarkup(pct)}catch(e){cachedError=String(e.message||e).slice(0,180)}
+    let live={ok:false,updated:0,providerErrors:[]};if(b.syncNow===true){live=await runProviderPriceSync({manual:true})}
+    return json(res,200,{ok:true,pricing:await getGlobalPricing(),persistedRemotely:saved.persistedRemotely,remoteError:saved.remoteError,cached,cachedError,live});
+  }
+  if(p==='/api/admin/pricing/sync' && req.method==='POST'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const result=await runProviderPriceSync({manual:true});return json(res,200,result);
+  }
   if(p==='/api/admin/service-sync' && req.method==='POST'){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const list=Array.isArray(b.services)?b.services:[];if(list.length>25000)return json(res,413,{ok:false,error:'عدد الخدمات كبير جداً'});
     const safe=list.map(s=>{const providerServiceId=String(s?.smmpartyId||s?.providerServiceId||s?.serviceId||'').trim();const fbId=String(s?.fbKey||s?.id||'').trim();return {id:providerServiceId,fbId,name:String(s?.name||'خدمة'),category:String(s?.category||((Array.isArray(s?.groups)&&s.groups[0])||'عام')),sellingUsd:Number(s?.sellingUsd||0),rateUsd:Number(s?.sellingUsd||s?.smmRateUsd||s?.rateUsd||0),min:Number(s?.min||100),max:Number(s?.max||10000),refill:!!s?.refill,cancel:!!s?.cancel,providerId:String(s?.providerId||''),providerServiceId,smmRateUsd:Number(s?.smmRateUsd||s?.rate||0),updatedAt:nowISO()};}).filter(x=>x.id&&x.providerId);
@@ -1317,6 +1416,7 @@ async function ensureProviderRuntime(id=''){
 
 ensureData();
 ensureTelegramDefaults();
+startGlobalPriceSyncScheduler();
 const server=http.createServer(async (req,res)=>{
   try{
     res._forwardedProto=String(req.headers['x-forwarded-proto']||'').split(',')[0].trim();
