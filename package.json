@@ -1,6 +1,6 @@
 {
   "name": "sadairaq-railway",
-  "version": "1.5.64",
+  "version": "1.5.65",
   "private": true,
   "description": "صدى العراق - Railway deployment",
   "scripts": {
@@ -9,7 +9,7 @@
   "engines": {
     "node": ">=20"
   },
-  "buildId": "SADA-1.5.64-TELEGRAM-GOOGLE-WHATSAPP-20261009",
+  "buildId": "SADA-1.5.65-WHATSAPP-RECHARGE-METHODS-20261009",
   "dependencies": {
     "google-auth-library": "^11.2.0"
   }
