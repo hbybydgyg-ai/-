@@ -8,10 +8,13 @@ const {URL} = require('url');
 
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
-const DATA = path.join(ROOT, 'data');
+const LEGACY_DATA = path.join(ROOT, 'data');
+// Prefer a Railway Volume or explicit persistent directory; only fall back to release-local data.
+const DATA = path.resolve(process.env.SADA_DATA_DIR || process.env.DATA_DIR || (process.env.RAILWAY_VOLUME_MOUNT_PATH ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sada-data') : LEGACY_DATA));
+const DATA_IS_EXTERNAL = path.resolve(DATA) !== path.resolve(LEGACY_DATA);
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.55';
-const BUILD_ID = 'SADA-1.5.55-EMBEDDED-IMAGE-LIBRARY-IMPORT-PRESET-20261009';
+const APP_VERSION = '1.5.57';
+const BUILD_ID = 'SADA-1.5.57-PROVIDER-KEY-PERSISTENCE-IMPORT-STABILITY-20261009';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
@@ -40,6 +43,10 @@ function ensureTelegramDefaults(){
 
 function ensureData() {
   if (!fs.existsSync(DATA)) fs.mkdirSync(DATA, {recursive:true});
+  // On the first boot with a persistent directory, safely migrate any existing JSON data.
+  if(DATA_IS_EXTERNAL && fs.existsSync(LEGACY_DATA)){
+    try{for(const file of fs.readdirSync(LEGACY_DATA)){if(!file.endsWith('.json'))continue;const from=path.join(LEGACY_DATA,file),to=path.join(DATA,file);if(!fs.existsSync(to)&&fs.statSync(from).isFile())fs.copyFileSync(from,to);}}catch(e){console.warn('Data migration to persistent directory failed:',e.message)}
+  }
   const defaults={
     'users.json':{users:{}},
     'orders.json':[],
@@ -183,6 +190,13 @@ function envProvider(){
 function normalizeProviderId(value){
   return String(value??'').trim().replace(/[^a-zA-Z0-9_-]/g,'');
 }
+function usableProviderKey(value){
+  const key=String(value??'').trim();
+  if(!key) return '';
+  // The admin UI may submit a masked placeholder instead of the actual secret.
+  if(/^\[(?:hidden|masked|مخفي)\]$/i.test(key) || /^(?:hidden|masked)$/i.test(key) || /^[*•●·＿_\s-]{4,}$/.test(key)) return '';
+  return key;
+}
 function providerIdInStore(store,value){
   const providers=store?.providers||{};
   const wanted=String(value??'').trim();
@@ -202,9 +216,12 @@ function providerStore(){
     if(!source || typeof source!=='object') return;
     const prev=providers[id]||{};
     const merged={...prev,...source};
-    for(const field of ['id','name','url','key']){
+    for(const field of ['id','name','url']){
       if(!String(merged[field]??'').trim() && String(prev[field]??'').trim()) merged[field]=prev[field];
     }
+    const incomingKey=usableProviderKey(source.key);
+    const previousKey=usableProviderKey(prev.key);
+    merged.key=incomingKey||previousKey||'';
     providers[id]={...merged,id:String(merged.id||id)};
   };
   if(legacy?.providers&&typeof legacy.providers==='object') for(const [id,v] of Object.entries(legacy.providers)) mergeOne(String(id),v);
@@ -418,7 +435,7 @@ async function providerRequest(prov,params,timeoutMs=30000){
 // The list endpoint intentionally returns hasKey rather than the secret itself.
 async function resolveProviderDiagnosticsInput(body={}){
   const providerId=String(body.providerId||body.provider||body.id||'').trim();
-  let prov={name:String(body.name||'مزود').trim(),url:String(body.url||'').trim(),key:String(body.key||'').trim()};
+  let prov={name:String(body.name||'مزود').trim(),url:String(body.url||'').trim(),key:usableProviderKey(body.key)};
   if(providerId && !prov.key){
     await ensureProviderRuntime(providerId);
     const saved=getProviderById(providerId,{allowSingleFallback:false}).prov;
@@ -1277,7 +1294,7 @@ async function routeAPI(req,res,urlObj){
       store=providerStore();
       const safe={};
       for(const [id,v] of Object.entries(store.providers||{})) if(v?.url) safe[id]={id,name:v.name||id,url:v.url||'',hasKey:!!v.key};
-      return json(res,200,{activeProvider:store.activeProvider||'',providers:safe});
+      return json(res,200,{activeProvider:store.activeProvider||'',providers:safe,storageMode:DATA_IS_EXTERNAL?'external-directory':'release-local'});
     }
     const b=await bodyJSON(req); const list=Array.isArray(b.providers)?b.providers:[];
     await ensureProviderRuntime(''); store=providerStore();
@@ -1304,7 +1321,7 @@ async function routeAPI(req,res,urlObj){
           if(matches.length===1){oldId=matches[0][0];prev=matches[0][1]||{};}
         }
       }
-      let key=String(item.key||item.apiKey||prev?.key||(store.envProvider?.id===id?store.envProvider.key:'')||'').trim();
+      let key=usableProviderKey(item.key)||usableProviderKey(item.apiKey)||usableProviderKey(prev?.key)||usableProviderKey(store.envProvider?.id===id?store.envProvider.key:'');
       try{apiUrl=normalizeProviderApiUrl(apiUrl)}catch(_){ }
       const blockedDeleted=[...(store.deletedProviderIds||[])].some(x=>normalizeProviderId(x)===id);
       // A tombstoned provider may return only after an explicit Add/Save operation.
@@ -1316,6 +1333,15 @@ async function routeAPI(req,res,urlObj){
     }
     const confirmedReplace=b.mode==='replace'&&b.confirmReplace===true;
     const out=confirmedReplace?incoming:{...(store.providers||{}),...incoming};
+    const unsavedRequested=list.filter(item=>{
+      if(!item||typeof item!=='object')return false;
+      const rawId=String(item.id||item.providerId||'').trim();const nid=normalizeProviderId(rawId);if(!nid)return false;
+      const storedId=providerIdInStore({providers:out},rawId)||providerIdInStore({providers:out},nid);const prov=storedId?out[storedId]:out[nid];
+      // If a provider is present in the admin form but neither its saved copy nor the request carries a usable key/URL,
+      // don't silently return success: the next release would correctly have nothing to restore.
+      return !(String(prov?.url||item.url||item.apiUrl||'').trim() && (usableProviderKey(prov?.key)||usableProviderKey(item.key)||usableProviderKey(item.apiKey)));
+    });
+    if(unsavedRequested.length){return json(res,409,{ok:false,error:'تعذر تثبيت بيانات بعض المزودين لأن مفتاح API أو الرابط غير محفوظ. أعد فتح المزود، أدخل المفتاح الصحيح، واحفظه حتى يتأكد التخزين الدائم.',unsaved:unsavedRequested.map(x=>String(x.name||x.id||x.providerId||'مزود'))});}
     const deletedIds=new Set(store.deletedProviderIds||[]);
     for(const id of Object.keys(incoming)) for(const oldId of [...deletedIds]) if(normalizeProviderId(oldId)===normalizeProviderId(id)) deletedIds.delete(oldId);
     let activeCandidate=String(b.activeProvider!==undefined?b.activeProvider:(store.activeProvider||''));
@@ -1332,7 +1358,10 @@ async function routeAPI(req,res,urlObj){
       }
       await firebaseWriteJson('config/smmActive',active);
     }catch(e){firebaseSynced=false;console.warn('provider save Firebase sync failed:',e?.message||e);}
-    return json(res,200,{ok:true,count:Object.keys(out).length,activeProvider:active,firebaseSynced,received:list.length,saved:Object.keys(incoming).length});
+    const persistent=firebaseSynced||DATA_IS_EXTERNAL;
+    // Let the browser attempt its authenticated Firebase write if direct server-side Firebase
+    // access is unavailable; the UI must not show success unless that second durable path works.
+    return json(res,200,{ok:true,count:Object.keys(out).length,activeProvider:active,firebaseSynced,persistent,storageMode:firebaseSynced?'firebase':(DATA_IS_EXTERNAL?'external-directory':'release-local'),needsClientPersistence:!persistent,warning:persistent?'':'الحفظ على الخادم مؤقت حتى يتأكد حفظ Firebase من الواجهة أو يُربط Railway Volume.',received:list.length,saved:Object.keys(incoming).length});
   }
   if(p==='/api/smm') return apiSmm(req,res,urlObj);
   if(p==='/api/asiacell' && req.method==='POST') return apiAsiacell(req,res);
@@ -1342,7 +1371,7 @@ async function routeAPI(req,res,urlObj){
     try { versionFile=fs.readFileSync(path.join(ROOT,'version.txt'),'utf8').trim(); } catch(_) {}
     try { buildFile=fs.readFileSync(path.join(ROOT,'BUILD_ID.txt'),'utf8').trim(); } catch(_) {}
     const deploymentConsistent=uiVersion===APP_VERSION && uiBuildId===BUILD_ID && versionFile===APP_VERSION && buildFile===BUILD_ID;
-    return json(res,200,{ok:true,app:APP_NAME,version:APP_VERSION,buildId:BUILD_ID,uiVersion,uiBuildId,versionFile,buildFile,deploymentConsistent,time:new Date().toISOString(),node:process.version});
+    return json(res,200,{ok:true,app:APP_NAME,version:APP_VERSION,buildId:BUILD_ID,uiVersion,uiBuildId,versionFile,buildFile,deploymentConsistent,dataStorageMode:DATA_IS_EXTERNAL?'external-directory':'release-local',providerCount:Object.keys(providerStore().providers||{}).length,time:new Date().toISOString(),node:process.version});
   }
   return json(res,404,{error:'API endpoint not found'});
 }
@@ -1399,7 +1428,7 @@ async function hydrateProviderRuntimeFromFirebase(){
     const prevKey=providerIdInStore({providers},id);
     const prev=prevKey?providers[prevKey]:{};
     const urlRaw=String(secret.url||meta.url||prev.url||'').trim();
-    const key=String(secret.key||meta.key||prev.key||'').trim();
+    const key=usableProviderKey(secret.key)||usableProviderKey(meta.key)||usableProviderKey(prev.key);
     if(!urlRaw||!key)continue;
     let url=urlRaw; try{url=normalizeProviderApiUrl(urlRaw)}catch(_){}
     providers[id]={...prev,...meta,...secret,id,name:String(meta.name||secret.name||prev.name||id),url,key};
