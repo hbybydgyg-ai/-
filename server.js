@@ -10,8 +10,8 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.44';
-const BUILD_ID = 'SADA-1.5.44-PROVIDER-SYNC-IMPORT-REPAIR-20261009';
+const APP_VERSION = '1.5.46';
+const BUILD_ID = 'SADA-1.5.46-PUBLIC-STATE-BRIDGE-20261009';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
@@ -1201,7 +1201,14 @@ async function routeAPI(req,res,urlObj){
   }
   if(p==='/api/smm') return apiSmm(req,res,urlObj);
   if(p==='/api/asiacell' && req.method==='POST') return apiAsiacell(req,res);
-  if(p==='/api/health') return json(res,200,{ok:true,app:APP_NAME,version:APP_VERSION,buildId:BUILD_ID,time:new Date().toISOString(),node:process.version});
+  if(p==='/api/health') {
+    let uiVersion='', uiBuildId='', versionFile='', buildFile='';
+    try { const html=fs.readFileSync(path.join(ROOT,'index.html'),'utf8'); uiVersion=String(html.match(/<meta\s+name=["']sada-version["']\s+content=["']([^"']+)["']/i)?.[1]||''); uiBuildId=String(html.match(/<meta\s+name=["']sada-build-id["']\s+content=["']([^"']+)["']/i)?.[1]||''); } catch(_) {}
+    try { versionFile=fs.readFileSync(path.join(ROOT,'version.txt'),'utf8').trim(); } catch(_) {}
+    try { buildFile=fs.readFileSync(path.join(ROOT,'BUILD_ID.txt'),'utf8').trim(); } catch(_) {}
+    const deploymentConsistent=uiVersion===APP_VERSION && uiBuildId===BUILD_ID && versionFile===APP_VERSION && buildFile===BUILD_ID;
+    return json(res,200,{ok:true,app:APP_NAME,version:APP_VERSION,buildId:BUILD_ID,uiVersion,uiBuildId,versionFile,buildFile,deploymentConsistent,time:new Date().toISOString(),node:process.version});
+  }
   return json(res,404,{error:'API endpoint not found'});
 }
 
