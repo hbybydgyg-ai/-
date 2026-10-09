@@ -10,8 +10,8 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.52';
-const BUILD_ID = 'SADA-1.5.52-PRICING-QTY-BINANCE-20261009';
+const APP_VERSION = '1.5.53';
+const BUILD_ID = 'SADA-1.5.53-PLATFORM-IMAGE-KEYBOARD-20261009';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
@@ -680,6 +680,7 @@ function providerServiceKey(s){for(const k of ['providerServiceId','smmpartyId',
 function providerServiceRate(s){return validRateField(s,['rate','rate_usd','rateUsd','usd_rate','usdRate','rate_per_1000','ratePer1000','price_per_1000','pricePer1000'])}
 function catalogRate(s){return validRateField(s,['providerRateUsd','smmRateUsd','baseProviderRateUsd','smmRate','provider_rate_usd'])}
 function pricedPatch(s,base,pct){const sell=Number((base*(1+pct/100)).toFixed(8));return {sellingUsd:sell,price:Number((sell*FIXED_RATE).toFixed(6)),basePrice:Number((base*FIXED_RATE).toFixed(6)),providerRateUsd:base,smmRateUsd:base,smmRate:base,markupPct:pct,priceSyncedAt:nowISO()}}
+// Firebase REST multi-path PATCH: write nested field paths, never replace the entire service object.
 function appendServicePricePatch(out,key,values){for(const [field,value] of Object.entries(values))out[String(key)+'/'+field]=value;}
 async function applyCachedGlobalMarkup(pct){
   const root=await firebaseGetJson('services',18000);if(!root||typeof root!=='object'||Array.isArray(root))return {updated:0,skipped:0};
@@ -837,7 +838,7 @@ async function authoritativeWebsiteService(providerId, serviceId, firebaseServic
       if(fb){
         const providerServiceId=String(fb.smmpartyId||fb.providerServiceId||fb.serviceId||'').trim();
         const p=String(fb.providerId||'').trim();
-        if(p===pid && (!providerServiceId || providerServiceId===sid)) return {id:providerServiceId||sid,fbId:fkey,name:String(fb.name||'خدمة'),category:String(fb.category||((fb.groups||[])[0]||'عام')),sellingUsd:Number(fb.sellingUsd??0),rateUsd:Number(fb.sellingUsd??fb.smmRateUsd??fb.rateUsd??(Number(fb.price||0)/FIXED_RATE)),min:Number(fb.min||100),max:Number(fb.max||10000),providerId:p,providerServiceId:providerServiceId||sid,smmRateUsd:Number(fb.smmRateUsd||fb.rate||0),refill:!!fb.refill,cancel:!!fb.cancel};
+        if(p===pid && (!providerServiceId || providerServiceId===sid)) return {id:providerServiceId||sid,fbId:fkey,name:String(fb.name||'خدمة'),category:String(fb.category||((fb.groups||[])[0]||'عام')),app:String(fb.app||fb.serviceApp||(Array.isArray(fb.apps)?fb.apps[0]:'')||(Array.isArray(fb.platforms)?fb.platforms[0]:'Other')),apps:Array.isArray(fb.apps)?fb.apps:[],platforms:Array.isArray(fb.platforms)?fb.platforms:[],groups:Array.isArray(fb.groups)?fb.groups:[],categories:Array.isArray(fb.categories)?fb.categories:[],description:String(fb.desc||''),providerCategory:String(fb.providerCategory||''),sellingUsd:Number(fb.sellingUsd??0),rateUsd:Number(fb.sellingUsd??fb.smmRateUsd??fb.rateUsd??(Number(fb.price||0)/FIXED_RATE)),min:Number(fb.min||100),max:Number(fb.max||10000),providerId:p,providerServiceId:providerServiceId||sid,smmRateUsd:Number(fb.smmRateUsd||fb.rate||0),refill:!!fb.refill,cancel:!!fb.cancel};
       }
     }catch(_){}
   }
@@ -851,6 +852,13 @@ function publicApiService(s){
 function internalApiServices(){ return readJSON('api_services.json',[]).filter(x=>x&&x.id); }
 function findInternalApiService(id){ const sid=String(id||''); return internalApiServices().find(x=>String(x.id)===sid)||null; }
 function apiOrderPublic(o){ return {order_id:String(o.id||''),status:String(o.status||'pending'),service:String(o.serviceId||''),quantity:Number(o.quantity||0),chargeUsd:Number(o.chargeUsd||0),createdAt:o.createdAt||null}; }
+
+function canonicalServicePlatform(s={}){
+  const raw=[s.app,s.serviceApp,s.platform,...(Array.isArray(s.apps)?s.apps:[]),...(Array.isArray(s.platforms)?s.platforms:[]),s.name,s.serviceName,s.description,s.providerCategory,...(Array.isArray(s.groups)?s.groups:[]),...(Array.isArray(s.categories)?s.categories:[]),s.category].filter(Boolean).join(' ').toLowerCase();
+  const defs=[['instagram',['instagram','انستغرام','انستجرام','انستا']],['tiktok',['tiktok','tik tok','تيك توك','تيكتوك']],['facebook',['facebook','فيسبوك','فيس بوك']],['youtube',['youtube','يوتيوب']],['telegram',['telegram','تلجرام','تيليجرام','تليجرام']],['twitter',['twitter','تويتر','x.com']],['snapchat',['snapchat','سناب']],['whatsapp',['whatsapp','واتساب']],['linkedin',['linkedin','لينكد']]];
+  for(const [key,terms] of defs)if(terms.some(term=>raw.includes(term)))return {serviceApp:key,image:'/platform-icons/'+key+'.svg',platformIcon:'/platform-icons/'+key+'.svg'};
+  return {serviceApp:'other',image:'/platform-icons/other.svg',platformIcon:'/platform-icons/other.svg'};
+}
 function calcApiChargeUsd(s,qty,user){
   const pct=Math.max(0,Math.min(100,Number(user?.discountPct)||0));
   const total=Math.max(0,Number(qty)/1000*Number(s.sellingUsd||s.rateUsd||s.rate||0)*(1-pct/100));
@@ -1125,7 +1133,7 @@ async function routeAPI(req,res,urlObj){
         if(!providerOrderId){appendJsonLedger('provider_failures.json',{stage:'provider_response',uncertain:true,user:username,providerId,serviceId,link,quantity,error:'المزود لم يرجع رقم طلب واضح',providerResponse:safeProviderResponse(d),createdAt:nowISO()});return {error:'المزود لم يرجع رقم طلب واضح بعد عملية الإرسال',uncertain:true};}
         const createdAt=nowISO(); const siteOrderId=String(localId||('EXT_'+Date.now()));
         const providerTrackingToken=issueProviderOrderTrackingToken({username,providerId,providerOrderId,siteOrderId});
-        const ord={id:siteOrderId,localId:siteOrderId,user:username,providerId,providerName:prov.name||providerId,providerOrderId,serviceId,serviceName:String(svc.name||'خدمة'),link,quantity,unitSellingUsd:serviceRate,discountPct:userDiscount,chargeUsd,total:chargeIqd,status:'pending',billingMode:isAdminSession?'admin-test':'user',providerRaw:safeProviderResponse(d),createdAt}; appendJsonLedger('orders.json',ord);
+        const platformFields=canonicalServicePlatform(svc);const ord={id:siteOrderId,localId:siteOrderId,user:username,providerId,providerName:prov.name||providerId,providerOrderId,serviceId,serviceName:String(svc.name||'خدمة'),serviceApp:platformFields.serviceApp,image:platformFields.image,platformIcon:platformFields.platformIcon,link,quantity,unitSellingUsd:serviceRate,discountPct:userDiscount,chargeUsd,total:chargeIqd,status:'pending',billingMode:isAdminSession?'admin-test':'user',providerRaw:safeProviderResponse(d),createdAt}; appendJsonLedger('orders.json',ord);
         return {ok:true,order:ord,providerTrackingToken};
       }catch(e){
         const rejected=!!e.providerRejected; const authFail=providerAuthErrorText(e.message); appendJsonLedger('provider_failures.json',{stage:'website_provider_add',uncertain:!rejected,authFailure:authFail,user:username,providerId,serviceId,link,quantity,error:String(e.message||e),createdAt:nowISO()}); return {error:authFail?'مفتاح API للمزود مرفوض أو منتهي':String(e.message||e),uncertain:!rejected,authFailure:authFail};
