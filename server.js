@@ -13,8 +13,8 @@ const LEGACY_DATA = path.join(ROOT, 'data');
 const DATA = path.resolve(process.env.SADA_DATA_DIR || process.env.DATA_DIR || (process.env.RAILWAY_VOLUME_MOUNT_PATH ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sada-data') : LEGACY_DATA));
 const DATA_IS_EXTERNAL = path.resolve(DATA) !== path.resolve(LEGACY_DATA);
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.66';
-const BUILD_ID = 'SADA-1.5.66-WELCOME-REFUNDS-BALANCE-CHANNELS-SPLASH-20261010';
+const APP_VERSION = '1.5.67';
+const BUILD_ID = 'SADA-1.5.67-EARN-NOTIFICATIONS-FAST-PRICE-REFUND-20261010';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
@@ -37,7 +37,7 @@ function ensureTelegramDefaults(){
   const tg=cfg.telegram&&typeof cfg.telegram==='object'?{...cfg.telegram}:{};
   if(tg.enabled===undefined) tg.enabled=true;
   // Keep the public destination in settings, but never persist TELEGRAM_BOT_TOKEN from env.
-  if(!tg.chat || String(tg.chat).trim()==='@jbhbhg58') tg.chat=String(process.env.TELEGRAM_CHAT_ID||'@hddjh55');
+  if(!tg.chat || String(tg.chat).trim()==='@jbhbhg58') tg.chat=String(process.env.TELEGRAM_CHAT_ID||'@jbhbhg58');
   if(tg.chat||cfg.telegram) { cfg.telegram=tg; writeJSON('settings.json',cfg); }
 }
 
@@ -57,6 +57,8 @@ function ensureData() {
     'notifications.json':[],
     'telegram_notifications.json':[],
     'notification_seen.json':{},
+    'user_notifications.json':{},
+    'earn_requests.json':[],
     'providers.json':{activeProvider:'',providers:{},deletedProviderIds:[]},
     // Provider state is stored separately so code updates do not overwrite it.
     'providers.runtime.json':{activeProvider:'',providers:{},deletedProviderIds:[]},
@@ -74,10 +76,10 @@ function ensureData() {
     try{cur=JSON.parse(fs.readFileSync(full,'utf8'));}catch(_){ok=false;}
     if(file==='users.json') ok=!!(cur&&typeof cur==='object'&&cur.users&&typeof cur.users==='object'&&!Array.isArray(cur.users));
     else if(file==='orders.json'||file==='provider_failures.json'||file==='payments.json'||file==='notifications.json'||file==='telegram_notifications.json') ok=Array.isArray(cur);
-    else if(file==='notification_seen.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
+    else if(file==='notification_seen.json'||file==='user_notifications.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
     else if(file==='providers.json') ok=!!(cur&&typeof cur==='object'&&cur.providers&&typeof cur.providers==='object'&&!Array.isArray(cur.providers));
     else if(file==='settings.json'||file==='api_keys.json'||file==='stats_state.json'||file==='order_audit_state.json'||file==='google_accounts.json'||file==='telegram_order_state.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
-    else if(file==='api_services.json'||file==='balance_ledger.json'||file==='refunds.json') ok=Array.isArray(cur);
+    else if(file==='api_services.json'||file==='balance_ledger.json'||file==='refunds.json'||file==='earn_requests.json') ok=Array.isArray(cur);
     if(!ok){ fs.writeFileSync(full,JSON.stringify(def,null,2),'utf8'); }
   }
 }
@@ -626,7 +628,28 @@ function writeNotifications(v){ writeJSON('notifications.json',Array.isArray(v)?
 function readNotificationSeen(){ return readJSON('notification_seen.json',{}); }
 function writeNotificationSeen(v){ writeJSON('notification_seen.json',v&&typeof v==='object'?v:{}); }
 function notifId(){ return 'N'+Date.now().toString(36)+crypto.randomBytes(3).toString('hex'); }
-function sanitizeNotification(n){ return {id:String(n.id||''),title:String(n.title||''),message:String(n.message||''),url:String(n.url||''),required:!!n.required,active:n.active!==false,createdAt:n.createdAt||new Date().toISOString(),updatedAt:n.updatedAt||n.createdAt||new Date().toISOString()}; }
+function sanitizeNotification(n){ return {id:String(n.id||''),title:String(n.title||''),message:String(n.message||''),url:String(n.url||''),required:!!n.required,active:n.active!==false,createdAt:n.createdAt||new Date().toISOString(),updatedAt:n.updatedAt||n.createdAt||new Date().toISOString(),...(n.orderId?{orderId:String(n.orderId)}:{}),...(n.type?{type:String(n.type)}:{}),...(n.status?{status:String(n.status)}:{}),read:!!n.read}; }
+function userNotifId(username,type,orderId,status=''){return 'UN'+sha256([username,type,orderId,status].map(x=>String(x||'')).join('|')).slice(0,24)}
+function createUserNotification(username, data={}){
+  const user=String(username||'').trim();if(!user)return null;
+  const type=String(data.type||'info'),orderId=String(data.orderId||''),status=String(data.status||'');
+  const id=String(data.id||userNotifId(user,type,orderId,status));
+  const n={id,user,title:String(data.title||'إشعار جديد').slice(0,160),message:String(data.message||'').slice(0,1500),orderId,type,status,createdAt:data.createdAt||nowISO(),url:String(data.url||''),read:false,active:true,...(data.meta&&typeof data.meta==='object'?{meta:data.meta}:{})};
+  const all=readJSON('user_notifications.json',{});const rows=Array.isArray(all[user])?all[user]:[];
+  if(!rows.some(x=>String(x.id)===id)){rows.unshift(n);all[user]=rows.slice(0,300);writeJSON('user_notifications.json',all);}
+  const remote={...n};delete remote.user;
+  firebaseWriteJson('userNotifications/'+firebaseSafeKey(user)+'/'+id,remote,4500).catch(()=>{});
+  return n;
+}
+async function listUserNotifications(username){
+  const user=String(username||'').trim(),all=readJSON('user_notifications.json',{}),local=Array.isArray(all[user])?all[user]:[];let remote=[];
+  try{const v=await firebaseGetJson('userNotifications/'+firebaseSafeKey(user),4500);if(v&&typeof v==='object')remote=(Array.isArray(v)?v:Object.values(v)).filter(x=>x&&typeof x==='object').map(x=>({...x,user}));}catch(_){}
+  const merged=new Map();for(const n of [...remote,...local]){if(n?.id)merged.set(String(n.id),{...merged.get(String(n.id)),...n,user});}
+  const seen={...(readNotificationSeen()[user]||{})};try{const rs=await firebaseGetJson('userNotificationSeen/'+firebaseSafeKey(user),3000);if(rs&&typeof rs==='object')Object.assign(seen,rs)}catch(_){}
+  const own=[...merged.values()].map(n=>({...sanitizeNotification(n),read:!!(n.read||seen[n.id]),user}));
+  const broadcasts=readNotifications().filter(n=>n.active!==false).map(n=>({...sanitizeNotification(n),read:!!seen[n.id],type:'broadcast'}));
+  return [...own,...broadcasts].sort((a,b)=>(Date.parse(b.createdAt)||0)-(Date.parse(a.createdAt)||0)).slice(0,500);
+}
 
 function ownedProviderOrder(username,providerId,providerOrderId){
   const rows=readJSON('orders.json',[]); return Array.isArray(rows) && rows.some(x=>String(x.user||'')===String(username||'') && String(x.providerId||'')===String(providerId||'') && String(x.providerOrderId||'')===String(providerOrderId||''));
@@ -738,7 +761,7 @@ function auditNormalizeRecord(order={},source='firebase',sourceKey=''){
     platform:auditPlatform(o),serviceApp:String(o.serviceApp||o.app||o.platform||'').trim(),
     link:String(o.link||o.url||o.target||o.targetUrl||''),quantity:Number(o.quantity??o.qty??0)||0,
     status:auditStatus(rawStatus),rawStatus:rawStatus||'غير مسجلة',createdAt:o.createdAt||o.created_at||o.timestamp||o.date||null,createdMs,
-    providerName:String(o.providerName||o.provider||o.smmProviderName||'').trim(),providerId:String(o.providerId||o.provider_id||o.smmProviderId||'').trim(),providerOrderId,
+    providerName:String(o.providerName||o.provider||o.smmProviderName||'').trim(),providerId:String(o.providerId||o.provider_id||o.smmProviderId||'').trim(),providerOrderId,amountIQD:Number(o.totalIQD??o.total??o.amountIQD??NaN),
     lastCheckedAt:o.lastCheckedAt||o.lastChecked||o.providerCheckedAt||null,
     updatedAt:o.updatedAt||o.updated_at||o.lastUpdatedAt||null,
     completedAt:o.completedAt||o.completed_at||o.finishedAt||null,
@@ -936,6 +959,7 @@ async function applyVerifiedOrderRefund(inputOrder={},providerData={},normalized
     const remainsVal=providerData.remains??providerData.remaining??order.remains;
     const remains=Number(remainsVal);
     if(!Number.isFinite(quantity)||quantity<=0||remainsVal===undefined||remainsVal===null||String(remainsVal).trim()===''||!Number.isFinite(remains)||remains<0)return {ok:true,credited:false,state:'pending',reason:'partial-status-without-reliable-remains'};
+    if(remains===0)return {ok:true,credited:false,state:'no-refund-due',reason:'provider-reports-zero-undelivered-quantity'};
     target=Math.round(charged*Math.max(0,Math.min(1,remains/quantity))*10000)/10000;
   }
   const key=refundIdentity(order);const userPath='users/'+firebaseSafeKey(user);let transaction;
@@ -987,11 +1011,11 @@ async function runRefundReconciliationMonitor(){
   }catch(e){console.warn('refund reconciliation monitor:',String(e.message||e).slice(0,160));}finally{runRefundReconciliationMonitor.running=false;}
 }
 
-const DEFAULT_GLOBAL_PRICING={markupPct:50,autoSync:true,intervalHours:6,lastAttemptAt:null,lastSuccessAt:null,lastUpdatedAt:null,lastResult:null,lastError:''};
+const DEFAULT_GLOBAL_PRICING={markupPct:50,autoSync:true,intervalHours:1,lastAttemptAt:null,lastSuccessAt:null,lastUpdatedAt:null,lastResult:null,lastError:''};
 function cleanGlobalPricing(v={}){
   const pct=Number(v.markupPct??v.markup??DEFAULT_GLOBAL_PRICING.markupPct);
   const interval=Number(v.intervalHours??DEFAULT_GLOBAL_PRICING.intervalHours);
-  return {...DEFAULT_GLOBAL_PRICING,...v,markupPct:Number.isFinite(pct)?Math.max(0,Math.min(1000,pct)):50,autoSync:v.autoSync!==false,intervalHours:[1,3,6,12,24].includes(interval)?interval:6};
+  return {...DEFAULT_GLOBAL_PRICING,...v,markupPct:Number.isFinite(pct)?Math.max(0,Math.min(1000,pct)):50,autoSync:v.autoSync!==false,intervalHours:[1,3,6,12,24].includes(interval)?interval:1};
 }
 function localGlobalPricing(){const settings=readJSON('settings.json',{});return cleanGlobalPricing(settings.pricing||{});}
 async function getGlobalPricing(){
@@ -1047,7 +1071,7 @@ async function runProviderPriceSync(options={}){
         if(!raw.length)throw new Error('المزود لم يرجع قائمة خدمات');
         const byId=new Map();for(const r of raw){const id=String(r?.service??r?.service_id??r?.serviceId??r?.id??r?.serviceID??'').trim();if(id)byId.set(id,r)}
         let pUpdated=0;
-        for(const [key,svc] of rows){if(String(svc.providerId||'')!==pid)continue;const sid=providerServiceKey(svc);if(!sid){result.skipped++;continue}const latest=byId.get(sid);if(!latest){result.skipped++;continue}const base=providerServiceRate(latest);if(base===null){result.skipped++;continue}const priced=pricedPatch(svc,base,pct);appendServicePricePatch(allPatches,key,priced);pUpdated++;result.updated++;
+        for(const [key,svc] of rows){if(String(svc.providerId||'')!==pid)continue;const sid=providerServiceKey(svc);if(!sid){result.skipped++;continue}const latest=byId.get(sid);if(!latest){result.skipped++;continue}const base=providerServiceRate(latest);if(base===null){result.skipped++;continue}const oldBase=catalogRate(svc);if(base===0&&oldBase!==null&&oldBase>0){result.skipped++;result.providerErrors.push(pid+' الخدمة '+sid+': تجاهلنا سعراً صفرياً غير متوقع حتى لا تتحول خدمة مدفوعة إلى مجانية');continue}const priced=pricedPatch(svc,base,pct);appendServicePricePatch(allPatches,key,priced);pUpdated++;result.updated++;
           for(const a of localServices){if(String(a.providerId||'')===pid&&String(a.providerServiceId||a.id||'')===sid){Object.assign(a,priced,{rateUsd:priced.sellingUsd,rate:priced.sellingUsd});localUpdated++}}
         }
         result.providers++;if(!pUpdated)result.providerErrors.push(pid+': لم تتم مطابقة معرّفات الخدمات');
@@ -1100,7 +1124,7 @@ let TELEGRAM_CHANNELS_REMOTE={};
 function telegramConfig(){
   const cfg=readJSON('settings.json',{}).telegram||{};
   const envToken=String(process.env.TELEGRAM_BOT_TOKEN||'').trim();
-  const legacyChat=String(process.env.TELEGRAM_CHAT_ID||cfg.chat||'@hddjh55').trim();
+  const legacyChat=String(process.env.TELEGRAM_CHAT_ID||cfg.chat||'@jbhbhg58').trim();
   const activationEnv=String(process.env.TELEGRAM_ACTIVATION_CHAT_ID||'').trim();
   const overdueEnv=String(process.env.TELEGRAM_OVERDUE_CHAT_ID||'').trim();
   const activationChat=String(activationEnv||cfg.activationChat||TELEGRAM_CHANNELS_REMOTE.activationChat||legacyChat).trim();
@@ -1209,7 +1233,7 @@ async function runTelegramNewOrdersMonitor(){
       return;
     }
     const fresh=(snap.rows||[]).filter(row=>{const key=auditIdentity(row);return key&&!seen[key]}).sort((a,b)=>Number(a.createdMs||0)-Number(b.createdMs||0)).slice(0,25);
-    for(const row of fresh){const key=auditIdentity(row);const r=await notifyTelegramNewOrder({...row,id:row.siteOrderId||row.id||'',_firebaseKey:row._firebaseKey||row.firebaseKey||'',source:row.source||''},{source:'monitor'});if(r.ok)seen[key]={sentAt:nowISO(),source:'monitor'};}
+    for(const row of fresh){const key=auditIdentity(row);const siteId=String(row.siteOrderId||row.id||'');createUserNotification(row.user||row.username,{type:'order_created',orderId:siteId,status:String(row.status||'pending'),title:'تم استلام طلبك #'+siteId,message:'تم استلام طلب '+siteId+' لخدمة '+String(row.serviceName||'خدمة')+'، وسيتم تحديث الحالة هنا.',meta:{serviceName:String(row.serviceName||'خدمة'),quantity:Number(row.quantity||0),providerName:String(row.providerName||''),providerOrderId:String(row.providerOrderId||'')}});const r=await notifyTelegramNewOrder({...row,id:siteId,_firebaseKey:row._firebaseKey||row.firebaseKey||'',source:row.source||''},{source:'monitor'});if(r.ok)seen[key]={sentAt:nowISO(),source:'monitor'};}
     if(fresh.length&&Object.keys(seen).length)await persistTelegramOrderState({initialized:true,seen});
   }catch(e){console.warn('Telegram new-order monitor:',String(e.message||e).slice(0,180))}finally{TELEGRAM_ORDER_MONITOR_RUNNING=false;}
 }
@@ -1217,8 +1241,17 @@ let TELEGRAM_ORDER_MONITOR_RUNNING=false;
 
 async function notifyOrderStatusChange(order, oldStatus, newStatus){
   if(!order || String(oldStatus||'')===String(newStatus||'')) return false;
-  const labels={processing:'🔄 Processing',completed:'✅ Completed',partial:'⚠️ Partial',cancelled:'❌ Canceled',failed:'❌ Failed',refunded:'💰 Refunded',pending:'⏳ Pending'};
-  const msg=`تحديث حالة طلب\n🆔 رقم الطلب: #${order.id}\n👤 المستخدم: ${order.user||'—'}\n📦 الخدمة: ${order.serviceName||'—'}\n🔢 الكمية: ${Number(order.quantity||0).toLocaleString('en-US')}\n💰 السعر: $${Number(order.chargeUsd||Number(order.total||0)/FIXED_RATE).toFixed(2)}\n📊 الحالة: ${labels[newStatus]||newStatus}\n🕐 الوقت: ${new Date().toLocaleString('en-GB',{hour12:false})}`;
+  const labels={processing:'قيد التنفيذ',completed:'مكتمل',partial:'مكتمل جزئياً',cancelled:'ملغي',failed:'فشل',refunded:'تم الاسترداد',pending:'قيد الانتظار'};
+  const orderId=String(order.id||order.siteOrderId||order.localId||'');
+  createUserNotification(order.user||order.username,{type:'order_status',orderId,status:newStatus,title:'تحديث حالة طلبك #'+orderId,message:'الخدمة: '+String(order.serviceName||'خدمة')+' · الكمية: '+Number(order.quantity||0).toLocaleString('ar-IQ')+' · الحالة الجديدة: '+(labels[newStatus]||newStatus),meta:{serviceName:String(order.serviceName||'خدمة'),quantity:Number(order.quantity||0),providerName:String(order.providerName||''),providerOrderId:String(order.providerOrderId||'')}});
+  const msg=`تحديث حالة طلب
+🆔 رقم الطلب: #${orderId}
+👤 المستخدم: ${order.user||'—'}
+📦 الخدمة: ${order.serviceName||'—'}
+🔢 الكمية: ${Number(order.quantity||0).toLocaleString('en-US')}
+💰 السعر: $${Number(order.chargeUsd||Number(order.total||0)/FIXED_RATE).toFixed(2)}
+📊 الحالة: ${labels[newStatus]||newStatus}
+🕐 الوقت: ${new Date().toLocaleString('en-GB',{hour12:false})}`;
   return sendTelegram(msg);
 }
 
@@ -1378,7 +1411,7 @@ async function routeAPI(req,res,urlObj){
       }
     });
     if(result?.authRevoked)return json(res,401,{error:'Invalid API key'}); if(result?.notFound)return json(res,404,{error:'User not found'}); if(result?.insufficient)return json(res,402,{error:'Insufficient balance',balance:result.balanceUsd}); if(result?.duplicate)return json(res,409,{error:'Duplicate order'}); if(result?.error)return json(res,502,{error:result.authFailure?'Provider API key rejected':result.error,uncertain:!!result.uncertain});
-    if(result?.ok){ sendTelegram(`🆕 طلب جديد\n🆔 رقم الطلب: #${result.order.id}\n👤 المستخدم: ${au.username}\n📦 الخدمة: ${result.order.serviceName}\n🔗 الرابط: ${link}\n🔢 الكمية: ${quantity.toLocaleString('en-US')}\n💰 السعر: $${total.toFixed(2)}\n📊 الحالة: Pending\n🕐 الوقت: ${new Date().toLocaleString('en-GB',{hour12:false})}`).catch(()=>{}); return json(res,200,apiOrderPublic(result.order)); }
+    if(result?.ok){ createUserNotification(au.username,{type:'order_created',orderId:String(result.order.id),status:'pending',title:'تم استلام طلبك #'+String(result.order.id),message:'تم استلام طلبك لخدمة '+String(result.order.serviceName||'خدمة')+' والكمية '+quantity+'.',meta:{serviceName:String(result.order.serviceName||'خدمة'),quantity,providerName:String(result.order.providerName||'')}}); sendTelegram(`🆕 طلب جديد\n🆔 رقم الطلب: #${result.order.id}\n👤 المستخدم: ${au.username}\n📦 الخدمة: ${result.order.serviceName}\n🔗 الرابط: ${link}\n🔢 الكمية: ${quantity.toLocaleString('en-US')}\n💰 السعر: $${total.toFixed(2)}\n📊 الحالة: Pending\n🕐 الوقت: ${new Date().toLocaleString('en-GB',{hour12:false})}`).catch(()=>{}); return json(res,200,apiOrderPublic(result.order)); }
     return json(res,500,{error:'تعذر إنشاء الطلب'});
   }
 
@@ -1507,21 +1540,21 @@ async function routeAPI(req,res,urlObj){
     const settings=readJSON('settings.json',{});let remote=null;try{remote=await firebaseGetJson('config/welcomePopup',3500)}catch(_){}
     const v={...(settings.welcomePopup||{}),...(remote&&typeof remote==='object'?remote:{})};
     const safeUrl=value=>{try{const u=new URL(String(value||''));return u.protocol==='https:'?u.toString():''}catch(_){return ''}};
-    const cfg={welcome:{enabled:v.enabled!==false,showEveryEntry:v.showEveryEntry!==false,splashEnabled:v.splashEnabled!==false,title:String(v.title||'مرحباً بكم في صدى العراق!').slice(0,100),subtitle:String(v.subtitle||'مرحباً بك، يسعدنا حضورك. نحن إلى جانبك في كل وقت.').slice(0,240),tutorialTitle:String(v.tutorialTitle||'شرح التطبيق').slice(0,60),tutorialSubtitle:String(v.tutorialSubtitle||'شاهد شرح الاستخدام بالتفصيل').slice(0,100),tutorialUrl:safeUrl(v.tutorialUrl||settings.tutorialUrl||settings.youtubeUrl||''),whatsappTitle:String(v.whatsappTitle||'دعم الواتساب').slice(0,60),whatsappSubtitle:String(v.whatsappSubtitle||'تحدث معنا على واتساب').slice(0,100),whatsappUrl:safeUrl(v.whatsappUrl||settings.waUrl||settings.waNum||'https://wa.me/9647762267959')||normalizeWhatsAppUrl(settings.waUrl||settings.waNum||''),telegramTitle:String(v.telegramTitle||'قناة التليجرام').slice(0,60),telegramSubtitle:String(v.telegramSubtitle||'تابع آخر الأخبار والتحديثات').slice(0,100),telegramUrl:safeUrl(v.telegramUrl||settings.telegramChannelUrl||'https://t.me/hddjh55')||'https://t.me/hddjh55'}};
+    const cfg={welcome:{enabled:v.enabled!==false,showEveryEntry:v.showEveryEntry!==false,splashEnabled:v.splashEnabled!==false,title:String(v.title||'مرحباً بكم في صدى العراق!').slice(0,100),subtitle:String(v.subtitle||'مرحباً بك، يسعدنا حضورك. نحن إلى جانبك في كل وقت.').slice(0,240),tutorialTitle:String(v.tutorialTitle||'شرح التطبيق').slice(0,60),tutorialSubtitle:String(v.tutorialSubtitle||'شاهد شرح الاستخدام بالتفصيل').slice(0,100),tutorialUrl:safeUrl(v.tutorialUrl||settings.tutorialUrl||settings.youtubeUrl||''),whatsappTitle:String(v.whatsappTitle||'دعم الواتساب').slice(0,60),whatsappSubtitle:String(v.whatsappSubtitle||'تحدث معنا على واتساب').slice(0,100),whatsappUrl:safeUrl(v.whatsappUrl||settings.waUrl||settings.waNum||'https://wa.me/9647762267959')||normalizeWhatsAppUrl(settings.waUrl||settings.waNum||''),telegramTitle:String(v.telegramTitle||'قناة التليجرام').slice(0,60),telegramSubtitle:String(v.telegramSubtitle||'تابع آخر الأخبار والتحديثات').slice(0,100),telegramUrl:(()=>{const u=safeUrl(v.telegramUrl||settings.telegramChannelUrl||'https://t.me/jbhbhg58')||'https://t.me/jbhbhg58';return /^https:\/\/t\.me\/hddjh55\/?$/i.test(u)?'https://t.me/jbhbhg58':u})()}};
     return json(res,200,{ok:true,...cfg});
   }
   if(p==='/api/admin/welcome-settings' && req.method==='GET'){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
     const settings=readJSON('settings.json',{});let remote=null;try{remote=await firebaseGetJson('config/welcomePopup',5000)}catch(_){}
     const welcome={...(settings.welcomePopup||{}),...(remote&&typeof remote==='object'?remote:{})};const tg=telegramConfig();
-    return json(res,200,{ok:true,welcome:{enabled:welcome.enabled!==false,showEveryEntry:welcome.showEveryEntry!==false,splashEnabled:welcome.splashEnabled!==false,title:welcome.title||'مرحباً بكم في صدى العراق!',subtitle:welcome.subtitle||'مرحباً بك، يسعدنا حضورك. نحن إلى جانبك في كل وقت.',tutorialTitle:welcome.tutorialTitle||'شرح التطبيق',tutorialSubtitle:welcome.tutorialSubtitle||'شاهد شرح الاستخدام بالتفصيل',tutorialUrl:welcome.tutorialUrl||settings.tutorialUrl||settings.youtubeUrl||'',whatsappTitle:welcome.whatsappTitle||'دعم الواتساب',whatsappSubtitle:welcome.whatsappSubtitle||'تحدث معنا على واتساب',whatsappUrl:welcome.whatsappUrl||settings.waUrl||'https://wa.me/9647762267959',telegramTitle:welcome.telegramTitle||'قناة التليجرام',telegramSubtitle:welcome.telegramSubtitle||'تابع آخر الأخبار والتحديثات',telegramUrl:welcome.telegramUrl||'https://t.me/hddjh55'},channels:{activationChat:tg.activationChat||'',overdueChat:tg.overdueChat||'',activationEnvLocked:tg.activationEnvLocked,overdueEnvLocked:tg.overdueEnvLocked},telegram:{enabled:tg.enabled,tokenSet:!!tg.token}});
+    return json(res,200,{ok:true,welcome:{enabled:welcome.enabled!==false,showEveryEntry:welcome.showEveryEntry!==false,splashEnabled:welcome.splashEnabled!==false,title:welcome.title||'مرحباً بكم في صدى العراق!',subtitle:welcome.subtitle||'مرحباً بك، يسعدنا حضورك. نحن إلى جانبك في كل وقت.',tutorialTitle:welcome.tutorialTitle||'شرح التطبيق',tutorialSubtitle:welcome.tutorialSubtitle||'شاهد شرح الاستخدام بالتفصيل',tutorialUrl:welcome.tutorialUrl||settings.tutorialUrl||settings.youtubeUrl||'',whatsappTitle:welcome.whatsappTitle||'دعم الواتساب',whatsappSubtitle:welcome.whatsappSubtitle||'تحدث معنا على واتساب',whatsappUrl:welcome.whatsappUrl||settings.waUrl||'https://wa.me/9647762267959',telegramTitle:welcome.telegramTitle||'قناة التليجرام',telegramSubtitle:welcome.telegramSubtitle||'تابع آخر الأخبار والتحديثات',telegramUrl:(()=>{const u=String(welcome.telegramUrl||'https://t.me/jbhbhg58');return /^https:\/\/t\.me\/hddjh55\/?$/i.test(u)?'https://t.me/jbhbhg58':u})()},channels:{activationChat:tg.activationChat||'',overdueChat:tg.overdueChat||'',activationEnvLocked:tg.activationEnvLocked,overdueEnvLocked:tg.overdueEnvLocked},telegram:{enabled:tg.enabled,tokenSet:!!tg.token}});
   }
   if(p==='/api/admin/welcome-settings' && req.method==='POST'){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
     const b=await bodyJSON(req);const w=b.welcome&&typeof b.welcome==='object'?b.welcome:{};const channels=b.channels&&typeof b.channels==='object'?b.channels:{};
     const safeText=(x,max,def='')=>String(x??def).trim().slice(0,max);
     const safeUrl=(x)=>{try{const u=new URL(String(x||'').trim());return u.protocol==='https:'?u.toString():''}catch(_){return ''}};
-    const old=readJSON('settings.json',{});const welcome={enabled:w.enabled!==false,showEveryEntry:w.showEveryEntry!==false,splashEnabled:w.splashEnabled!==false,title:safeText(w.title,100,'مرحباً بكم في صدى العراق!'),subtitle:safeText(w.subtitle,240,'مرحباً بك، يسعدنا حضورك. نحن إلى جانبك في كل وقت.'),tutorialTitle:safeText(w.tutorialTitle,60,'شرح التطبيق'),tutorialSubtitle:safeText(w.tutorialSubtitle,100,'شاهد شرح الاستخدام بالتفصيل'),tutorialUrl:safeUrl(w.tutorialUrl),whatsappTitle:safeText(w.whatsappTitle,60,'دعم الواتساب'),whatsappSubtitle:safeText(w.whatsappSubtitle,100,'تحدث معنا على واتساب'),whatsappUrl:safeUrl(w.whatsappUrl),telegramTitle:safeText(w.telegramTitle,60,'قناة التليجرام'),telegramSubtitle:safeText(w.telegramSubtitle,100,'تابع آخر الأخبار والتحديثات'),telegramUrl:safeUrl(w.telegramUrl)||'https://t.me/hddjh55',updatedAt:nowISO()};
+    const old=readJSON('settings.json',{});const welcome={enabled:w.enabled!==false,showEveryEntry:w.showEveryEntry!==false,splashEnabled:w.splashEnabled!==false,title:safeText(w.title,100,'مرحباً بكم في صدى العراق!'),subtitle:safeText(w.subtitle,240,'مرحباً بك، يسعدنا حضورك. نحن إلى جانبك في كل وقت.'),tutorialTitle:safeText(w.tutorialTitle,60,'شرح التطبيق'),tutorialSubtitle:safeText(w.tutorialSubtitle,100,'شاهد شرح الاستخدام بالتفصيل'),tutorialUrl:safeUrl(w.tutorialUrl),whatsappTitle:safeText(w.whatsappTitle,60,'دعم الواتساب'),whatsappSubtitle:safeText(w.whatsappSubtitle,100,'تحدث معنا على واتساب'),whatsappUrl:safeUrl(w.whatsappUrl),telegramTitle:safeText(w.telegramTitle,60,'قناة التليجرام'),telegramSubtitle:safeText(w.telegramSubtitle,100,'تابع آخر الأخبار والتحديثات'),telegramUrl:safeUrl(w.telegramUrl)||'https://t.me/jbhbhg58',updatedAt:nowISO()};
     const tg={...(old.telegram||{})};if(b.telegramEnabled!==undefined)tg.enabled=b.telegramEnabled===true;const validateChat=(x)=>{const v=String(x||'').trim();return !v||/^@?[A-Za-z0-9_]{5,64}$/.test(v)||/^-?\d{5,25}$/.test(v)};
     if(channels.activationChat!==undefined&&!telegramConfig().activationEnvLocked){if(!validateChat(channels.activationChat))return json(res,422,{ok:false,error:'اسم قناة التفعيلات غير صالح'});tg.activationChat=String(channels.activationChat||'').trim();tg.chat=tg.activationChat||tg.chat||'';}
     if(channels.overdueChat!==undefined&&!telegramConfig().overdueEnvLocked){if(!validateChat(channels.overdueChat))return json(res,422,{ok:false,error:'اسم قناة الطلبات المتأخرة غير صالح'});tg.overdueChat=String(channels.overdueChat||'').trim();}
@@ -1560,7 +1593,7 @@ async function routeAPI(req,res,urlObj){
     const ev=tx.result.event;appendJsonLedger('balance_ledger.json',{...ev,admin:String(session(req)?.username||ADMIN_USER)});let local=readJSON('users.json',{users:{}});if(local.users?.[username]){local.users[username].balance=tx.result.balanceIQD;writeJSON('users.json',local)}
     return json(res,200,{ok:true,event:ev,balanceIQD:tx.result.balanceIQD,balanceUSD:Number((tx.result.balanceIQD/FIXED_RATE).toFixed(6))});
   }
-  if(p==='/api/config'){ const cfg=readJSON('settings.json',{}); const waUrl=normalizeWhatsAppUrl(cfg.waUrl||cfg.waNum||'https://wa.me/9647762267959'); return json(res,200,{appName:APP_NAME,version:APP_VERSION,buildId:BUILD_ID,currency:'USD',exchangeRate:FIXED_RATE,fixedRecharge:'5000 IQD = 4 USD',rateTable:[1000,2000,3000,4000,5000,6000,7000,8000,9000,10000].map(i=>({iqd:i,usd:i/FIXED_RATE})),supportWhatsappUrl:waUrl,supportWhatsappNumber:normalizeWhatsAppNumber(waUrl),telegramChannelUrl:'https://t.me/hddjh55'}); }
+  if(p==='/api/config'){ const cfg=readJSON('settings.json',{}); const waUrl=normalizeWhatsAppUrl(cfg.waUrl||cfg.waNum||'https://wa.me/9647762267959'); return json(res,200,{appName:APP_NAME,version:APP_VERSION,buildId:BUILD_ID,currency:'USD',exchangeRate:FIXED_RATE,fixedRecharge:'5000 IQD = 4 USD',rateTable:[1000,2000,3000,4000,5000,6000,7000,8000,9000,10000].map(i=>({iqd:i,usd:i/FIXED_RATE})),supportWhatsappUrl:waUrl,supportWhatsappNumber:normalizeWhatsAppNumber(waUrl),telegramChannelUrl:'https://t.me/jbhbhg58'}); }
   if(p==='/api/auth/google-config'&&req.method==='GET'){return json(res,200,{ok:true,enabled:!!String(process.env.GOOGLE_CLIENT_ID||'').trim(),clientId:String(process.env.GOOGLE_CLIENT_ID||'').trim()});}
   if(p==='/api/auth/captcha'&&req.method==='GET'){const wait=rateLimit(req,'captcha');if(wait)return json(res,429,{ok:false,error:'طلبات تحقق كثيرة؛ أعد المحاولة بعد قليل.'},{'Retry-After':String(wait)});return json(res,200,{ok:true,...issueMathCaptcha(req)});}
   if(p==='/api/auth/google'&&req.method==='POST'){
@@ -1642,11 +1675,39 @@ async function routeAPI(req,res,urlObj){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'}); const b=await bodyJSON(req); const all=readNotifications(); const i=all.findIndex(x=>String(x.id)===String(b.id)); if(i<0)return json(res,404,{ok:false,error:'الإشعار غير موجود'}); if(b.action==='delete')all.splice(i,1); else {all[i]={...sanitizeNotification(all[i]),...(b.active!==undefined?{active:!!b.active}:{}),...(b.required!==undefined?{required:!!b.required}:{}),updatedAt:new Date().toISOString()};} writeNotifications(all); return json(res,200,{ok:true});
   }
   if(p==='/api/notifications' && req.method==='GET'){
-    const s=session(req); if(!s||s.role!=='user')return json(res,401,{ok:false,error:'يجب تسجيل الدخول'}); const seen=readNotificationSeen()[s.username]||{}; const items=readNotifications().filter(n=>n.active!==false).map(sanitizeNotification).filter(n=>!seen[n.id]); return json(res,200,{ok:true,notifications:items});
+    const s=session(req); if(!s||s.role!=='user')return json(res,401,{ok:false,error:'يجب تسجيل الدخول'});
+    const all=await listUserNotifications(s.username);const includeRead=urlObj.searchParams.get('all')==='1';const items=includeRead?all:all.filter(n=>!n.read);return json(res,200,{ok:true,notifications:items,unreadCount:all.filter(n=>!n.read).length,checkedAt:nowISO()});
   }
   if(p==='/api/notifications/seen' && req.method==='POST'){
-    const s=session(req); if(!s||s.role!=='user')return json(res,401,{ok:false,error:'يجب تسجيل الدخول'}); const b=await bodyJSON(req); const id=String(b.id||''); if(!id)return json(res,422,{ok:false,error:'معرف الإشعار مطلوب'}); const seen=readNotificationSeen(); seen[s.username]=seen[s.username]||{}; seen[s.username][id]=new Date().toISOString(); writeNotificationSeen(seen); return json(res,200,{ok:true});
+    const s=session(req); if(!s||s.role!=='user')return json(res,401,{ok:false,error:'يجب تسجيل الدخول'}); const b=await bodyJSON(req); const id=String(b.id||''); if(!id)return json(res,422,{ok:false,error:'معرف الإشعار مطلوب'}); const seen=readNotificationSeen(); seen[s.username]=seen[s.username]||{}; seen[s.username][id]=nowISO(); writeNotificationSeen(seen);firebaseWriteJson('userNotificationSeen/'+firebaseSafeKey(s.username)+'/'+id,nowISO(),4000).catch(()=>{});const all=readJSON('user_notifications.json',{});const rows=Array.isArray(all[s.username])?all[s.username]:[];let found=false;for(let i=0;i<rows.length;i++)if(String(rows[i].id)===id){rows[i]={...rows[i],read:true,readAt:nowISO()};found=true;}if(found){all[s.username]=rows;writeJSON('user_notifications.json',all);firebasePatchJson('userNotifications/'+firebaseSafeKey(s.username)+'/'+id,{read:true,readAt:nowISO()},4000).catch(()=>{});} return json(res,200,{ok:true});
   }
+  if(p==='/api/user/summary' && req.method==='GET'){
+    const s=session(req);if(!s||s.role!=='user')return json(res,401,{ok:false,error:'يجب تسجيل الدخول'});
+    const uname=String(s.username||'');
+    const localOrders=readJSON('orders.json',[]).filter(x=>x&&!x.event&&String(x.user||x.username||'')===uname);
+    const orderMap=new Map();
+    const addSummaryOrder=(o,sourceKey='')=>{const id=String(o.id||o.siteOrderId||o.localId||o.orderId||o.order_id||o.providerOrderId||o.smmpartyOrderId||sourceKey||o.createdAt||'');if(!id)return;const key=uname+'|'+id;const prior=orderMap.get(key)||{};const usdRaw=o.chargeUsd??o.totalUsd??o.priceUsd??o.amountUsd;const usd=Number(usdRaw);const iqRaw=o.totalIQD??o.total??o.amountIQD??o.chargeIqd;const iq=Number(iqRaw);const amountUsd=Number.isFinite(usd)&&usd>=0?usd:prior.amountUsd;const totalIQD=Number.isFinite(iq)&&iq>0?iq:(Number.isFinite(amountUsd)&&amountUsd>=0?Number((amountUsd*FIXED_RATE).toFixed(4)):prior.totalIQD||0);orderMap.set(key,{...prior,id,user:uname,totalIQD,amountUsd});};
+    for(const o of localOrders)addSummaryOrder(o);
+    try{const fbOrders=await firebaseGetJson('orders',4500);if(fbOrders&&typeof fbOrders==='object'){const entries=Array.isArray(fbOrders)?fbOrders.map((v,i)=>[String(i),v]):Object.entries(fbOrders);for(const [key,o] of entries){if(!o||typeof o!=='object'||o.event||String(o.user||o.username||o.userName||'')!==uname)continue;addSummaryOrder(o,key);}}}catch(e){console.warn('user summary remote orders unavailable:',String(e.message||e).slice(0,100))}
+    const orders=[...orderMap.values()];const spentIQD=orders.reduce((a,o)=>a+Math.max(0,Number(o.totalIQD||((Number(o.amountUsd)||0)*FIXED_RATE))||0),0);
+    const refs=readJSON('refunds.json',[]).filter(x=>String(x.user||'')===uname);let refundedIQD=refs.reduce((a,r)=>a+Math.max(0,Number(r.amountIQD||0)),0);let remoteUser=null;try{remoteUser=await firebaseGetJson('users/'+firebaseSafeKey(uname),3500)}catch(_){}if(remoteUser?.sadaRefunds&&typeof remoteUser.sadaRefunds==='object'){const remoteRefunded=Object.values(remoteUser.sadaRefunds).reduce((a,r)=>a+Math.max(0,Number(r?.totalIQD||0)),0);refundedIQD=Math.max(refundedIQD,remoteRefunded)}
+    const er=readJSON('earn_requests.json',[]).filter(x=>String(x.user||'')===uname&&x.status==='approved');const rewardsUSD=Math.max(Number(remoteUser?.sadaEarnTotalUSD||0),er.reduce((a,r)=>a+Math.max(0,Number(r.rewardUSD||0)),0));const localBalance=readJSON('users.json',{users:{}}).users?.[uname]?.balance;const balanceIQD=Number(remoteUser?.balance??localBalance??s.balance??0);
+    return json(res,200,{ok:true,orders:orders.length,spentIQD:Number(spentIQD.toFixed(4)),refundedIQD:Number(refundedIQD.toFixed(4)),rewardsUSD:Number(rewardsUSD.toFixed(6)),balanceIQD,currency:'IQD',checkedAt:nowISO()});
+  }
+  if(p==='/api/earn/requests' && req.method==='GET'){
+    const s=session(req);if(!s||s.role!=='user')return json(res,401,{ok:false,error:'يجب تسجيل الدخول'});const rows=readJSON('earn_requests.json',[]).filter(x=>String(x.user||'')===String(s.username));let remote=[];try{const v=await firebaseGetJson('earnRequestsByUser/'+firebaseSafeKey(s.username),4000);if(v&&typeof v==='object')remote=(Array.isArray(v)?v:Object.values(v)).filter(x=>x&&typeof x==='object')}catch(_){}const m=new Map();for(const r of [...remote,...rows])if(r.id)m.set(String(r.id),{...m.get(String(r.id)),...r});return json(res,200,{ok:true,requests:[...m.values()].sort((a,b)=>(Date.parse(b.createdAt)||0)-(Date.parse(a.createdAt)||0)).slice(0,100),maxRewardUSD:50});
+  }
+  if(p==='/api/earn/requests' && req.method==='POST'){
+    const wait=rateLimit(req,'auth');if(wait)return json(res,429,{ok:false,error:'طلبات كثيرة، حاول لاحقاً'},{'Retry-After':String(wait)});const s=session(req);if(!s||s.role!=='user')return json(res,401,{ok:false,error:'يجب تسجيل الدخول'});const b=await bodyJSON(req);const platform=String(b.platform||'').toLowerCase();const link=String(b.videoUrl||b.link||'').trim();const followers=Number(b.followers),views=Number(b.views),notes=String(b.notes||'').trim().slice(0,500);let u;try{u=new URL(link)}catch(_){return json(res,422,{ok:false,error:'رابط الفيديو غير صالح'})}const domains={tiktok:['tiktok.com'],youtube:['youtube.com','youtu.be'],instagram:['instagram.com'],facebook:['facebook.com','fb.watch']};if(u.protocol!=='https:'||!(domains[platform]||[]).some(d=>u.hostname===d||u.hostname.endsWith('.'+d)))return json(res,422,{ok:false,error:'اختر المنصة الصحيحة وأدخل رابط فيديو HTTPS مطابقاً لها'});if(!Number.isInteger(followers)||followers<100)return json(res,422,{ok:false,error:'يجب أن يكون لديك 100 مشترك/متابع على الأقل'});if(!Number.isInteger(views)||views<100||views>10000)return json(res,422,{ok:false,error:'عدد المشاهدات المقبول من 100 إلى 10,000'});const rewardUSD=views<500?1.5:views<2000?2:5;const localRows=readJSON('earn_requests.json',[]);if(localRows.some(x=>String(x.user||'')===String(s.username)&&x.status==='pending_review'&&String(x.videoUrl||'')===link))return json(res,409,{ok:false,error:'هذا الفيديو لديه طلب مراجعة قيد الانتظار'});let total=localRows.filter(x=>String(x.user||'')===String(s.username)&&['pending_review','approved'].includes(x.status)).reduce((a,x)=>a+Number(x.rewardUSD||0),0);try{const rem=await firebaseGetJson('earnRequestsByUser/'+firebaseSafeKey(s.username),3000);if(rem&&typeof rem==='object')total=Math.max(total,Object.values(rem).filter(x=>x&&['pending_review','approved'].includes(x.status)).reduce((a,x)=>a+Number(x.rewardUSD||0),0))}catch(_){}if(total+rewardUSD>50)return json(res,422,{ok:false,error:'تجاوزت حد المكافآت المتاحة 50 دولاراً لهذا الحساب'});const id='ER'+Date.now().toString(36).toUpperCase()+crypto.randomBytes(3).toString('hex').toUpperCase();const row={id,user:String(s.username),videoUrl:u.toString(),platform,followers,views,notes,rewardUSD,status:'pending_review',createdAt:nowISO(),updatedAt:nowISO()};localRows.unshift(row);writeJSON('earn_requests.json',localRows.slice(0,10000));let remoteSaved=false,remoteError='';try{await firebaseWriteJson('earnRequests/'+id,row,5000);const urow={...row};delete urow.user;await firebaseWriteJson('earnRequestsByUser/'+firebaseSafeKey(s.username)+'/'+id,urow,5000);remoteSaved=true}catch(e){remoteError=String(e.message||e).slice(0,120)}if(!remoteSaved&&!DATA_IS_EXTERNAL){const arr=readJSON('earn_requests.json',[]).filter(x=>x.id!==id);writeJSON('earn_requests.json',arr);return json(res,503,{ok:false,error:'تعذر حفظ طلب المكافأة في قاعدة بيانات دائمة. أعد المحاولة بعد فحص Firebase أو مساحة التخزين.'})}createUserNotification(s.username,{type:'earn_request',status:'pending_review',title:'تم استلام طلب رصيد مجاني',message:'تم تسجيل طلب مكافأتك بقيمة '+rewardUSD.toFixed(2)+' دولار وهو بانتظار مراجعة الإدارة.'});return json(res,201,{ok:true,request:row,persistedRemotely:remoteSaved,warning:remoteSaved?'':'تم حفظ الطلب في التخزين المحلي الدائم لكن تعذر مزامنته مع Firebase.'});
+  }
+  if(p==='/api/admin/earn-requests' && req.method==='GET'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const page=Math.max(1,Number(urlObj.searchParams.get('page')||1)),limit=Math.min(100,Math.max(10,Number(urlObj.searchParams.get('limit')||30))),q=String(urlObj.searchParams.get('q')||'').trim().toLowerCase();let rows=readJSON('earn_requests.json',[]);try{const v=await firebaseGetJson('earnRequests',5000);if(v&&typeof v==='object'){const m=new Map(rows.map(x=>[String(x.id),x]));for(const x of Object.values(v))if(x&&typeof x==='object'&&x.id)m.set(String(x.id),{...m.get(String(x.id)),...x});rows=[...m.values()]}}catch(_){}rows=rows.filter(x=>!q||[x.id,x.user,x.videoUrl,x.platform,x.status].some(v=>String(v||'').toLowerCase().includes(q))).sort((a,b)=>(Date.parse(b.createdAt)||0)-(Date.parse(a.createdAt)||0));return json(res,200,{ok:true,total:rows.length,page,limit,requests:rows.slice((page-1)*limit,page*limit)});
+  }
+  if(p==='/api/admin/earn-requests/decision' && req.method==='POST'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req),id=String(b.id||''),action=String(b.action||''),reason=String(b.reason||'').trim().slice(0,400);if(!id||!['approve','reject'].includes(action))return json(res,422,{ok:false,error:'بيانات القرار غير مكتملة'});let rows=readJSON('earn_requests.json',[]),row=rows.find(x=>String(x.id)===id);if(!row){try{row=await firebaseGetJson('earnRequests/'+id,4000)}catch(_){}}if(!row||!row.user)return json(res,404,{ok:false,error:'طلب المكافأة غير موجود'});if(row.status==='approved')return json(res,200,{ok:true,alreadyProcessed:true,request:row});if(row.status==='rejected')return json(res,409,{ok:false,error:'تم رفض هذا الطلب سابقاً'});if(action==='reject'){row={...row,status:'rejected',reviewedAt:nowISO(),reviewedBy:session(req)?.username||'admin',reviewReason:reason};}else{const reward=Math.max(0,Number(row.rewardUSD||0));if(reward<=0||reward>50)return json(res,422,{ok:false,error:'قيمة المكافأة غير صالحة'});let tx;try{tx=await firebaseTransaction('users/'+firebaseSafeKey(row.user),current=>{if(!current||typeof current!=='object')return {write:false,result:{error:'user-record-not-found'}};const credits=current.sadaEarnCredits&&typeof current.sadaEarnCredits==='object'?{...current.sadaEarnCredits}:{};if(credits[id])return {write:false,result:{already:true,balanceIQD:Number(current.balance||0)}};const lifetime=Number(current.sadaEarnTotalUSD||0);if(lifetime+reward>50.000001)return {write:false,result:{error:'تجاوز حد المكافآت 50 دولاراً'}};const before=Number(current.balance||0),amountIQD=Number((reward*FIXED_RATE).toFixed(4)),after=Number((before+amountIQD).toFixed(4)),at=nowISO();credits[id]={requestId:id,rewardUSD:reward,amountIQD,createdAt:at};current.sadaEarnCredits=credits;current.sadaEarnTotalUSD=Number((lifetime+reward).toFixed(6));current.balance=after;current.updatedAt=at;return {write:true,value:current,result:{credited:true,balanceBeforeIQD:before,balanceIQD:after,amountIQD,rewardUSD:reward}}},10000);if(tx.result?.error)return json(res,409,{ok:false,error:tx.result.error});}catch(e){return json(res,503,{ok:false,error:'تعذر تحديث رصيد المستخدم في قاعدة البيانات: '+String(e.message||e).slice(0,140)})}row={...row,status:'approved',reviewedAt:nowISO(),reviewedBy:session(req)?.username||'admin',reviewReason:reason};if(tx.result?.credited){appendJsonLedger('balance_ledger.json',{user:row.user,type:'earn_reward',amountUSD:reward,amountIQD:tx.result.amountIQD,after:tx.result.balanceIQD,reason:'مكافأة رصيد مجاني بعد مراجعة الإدارة',admin:session(req)?.username||'admin',reference:id,createdAt:nowISO()});}else if(!tx.result?.already)return json(res,503,{ok:false,error:'لم يتم تأكيد عملية رصيد المكافأة.'});}
+    const idx=rows.findIndex(x=>String(x.id)===id);if(idx>=0)rows[idx]=row;else rows.unshift(row);writeJSON('earn_requests.json',rows.slice(0,10000));try{await firebaseWriteJson('earnRequests/'+id,row,5000);const ur={...row};delete ur.user;await firebaseWriteJson('earnRequestsByUser/'+firebaseSafeKey(row.user)+'/'+id,ur,5000)}catch(e){if(!DATA_IS_EXTERNAL)return json(res,503,{ok:false,error:'تم تحديث السجل المحلي لكن تعذر تثبيته في Firebase؛ تحقق من قاعدة البيانات.'})}createUserNotification(row.user,{type:'earn_decision',status:row.status,title:row.status==='approved'?'تمت الموافقة على مكافأتك':'تمت مراجعة طلب المكافأة',message:row.status==='approved'?'تم اعتماد مكافأتك وإضافة '+Number(row.rewardUSD||0).toFixed(2)+' دولار إلى رصيدك.':'تم رفض طلب المكافأة. '+reason});return json(res,200,{ok:true,request:row});
+  }
+
   if(p==='/api/provider/balance' && req.method==='GET'){
     const wait=rateLimit(req,'provider'); if(wait)return json(res,429,{ok:false,error:'طلبات الرصيد كثيرة، أعد المحاولة لاحقاً'},{'Retry-After':String(wait)});
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح — جلسة الإدارة غير صالحة'});
@@ -1707,7 +1768,7 @@ async function routeAPI(req,res,urlObj){
     });
     if(result?.insufficient)return json(res,402,{ok:false,error:'رصيد المستخدم غير كافٍ',balanceUsd:result.balanceUsd});
     if(result?.error)return json(res,502,{ok:false,error:result.error,uncertain:!!result.uncertain,authFailure:!!result.authFailure});
-    if(result?.ok){const siteId=String(result.order.id||localId||'');notifyTelegramNewOrder(result.order,{source:'backend'}).catch(()=>{});return json(res,200,{ok:true,siteOrderId:siteId,providerId,providerName:prov.name||providerId,providerOrderId:String(result.order.providerOrderId),providerTrackingToken:String(result.providerTrackingToken||''),providerRaw:result.order.providerRaw,providerBalanceBefore:null,chargeUsd,totalIQD:chargeIqd,discountPct:userDiscount,createdAt:result.order.createdAt});}
+    if(result?.ok){const siteId=String(result.order.id||localId||'');createUserNotification(username,{type:'order_created',orderId:siteId,status:'pending',title:'تم استلام طلبك #'+siteId,message:'تم استلام طلب '+siteId+' لخدمة '+String(result.order.serviceName||'خدمة')+'، وسيتم تحديث حالته هنا.',meta:{serviceName:String(result.order.serviceName||'خدمة'),quantity:Number(result.order.quantity||0),providerName:String(result.order.providerName||''),providerOrderId:String(result.order.providerOrderId||'')}});notifyTelegramNewOrder(result.order,{source:'backend'}).catch(()=>{});return json(res,200,{ok:true,siteOrderId:siteId,providerId,providerName:prov.name||providerId,providerOrderId:String(result.order.providerOrderId),providerTrackingToken:String(result.providerTrackingToken||''),providerRaw:result.order.providerRaw,providerBalanceBefore:null,chargeUsd,totalIQD:chargeIqd,discountPct:userDiscount,createdAt:result.order.createdAt});}
     return json(res,500,{ok:false,error:'تعذر إنشاء الطلب'});
   }
 
@@ -2030,4 +2091,11 @@ const server=http.createServer(async (req,res)=>{
     return serveStatic(req,res,u);
   }catch(e){ const st=Number(e?.statusCode)||500; return json(res,st,{error:st===500?'Server error':e.message}); }
 });
-Promise.allSettled([hydrateProviderRuntimeFromFirebase(),hydrateTelegramChannelsFromFirebase()]).finally(()=>server.listen(PORT,'0.0.0.0',()=>{console.log(`${APP_NAME} v${APP_VERSION} running on port ${PORT}`);setTimeout(()=>{runOrderAuditMonitor().catch(()=>{});runTelegramNewOrdersMonitor().catch(()=>{});runRefundReconciliationMonitor().catch(()=>{});},15000).unref();setInterval(()=>{runOrderAuditMonitor().catch(()=>{});runTelegramNewOrdersMonitor().catch(()=>{});runRefundReconciliationMonitor().catch(()=>{});},120*1000).unref();}));
+server.listen(PORT,'0.0.0.0',()=>{
+  console.log(`${APP_NAME} v${APP_VERSION} build ${BUILD_ID} running on port ${PORT}`);
+  // Bind HTTP before any remote Firebase hydration so saved sessions respond immediately.
+  Promise.allSettled([hydrateProviderRuntimeFromFirebase(),hydrateTelegramChannelsFromFirebase()]).then(()=>{
+    setTimeout(()=>{runOrderAuditMonitor().catch(()=>{});runTelegramNewOrdersMonitor().catch(()=>{});runRefundReconciliationMonitor().catch(()=>{});},15000).unref();
+    setInterval(()=>{runOrderAuditMonitor().catch(()=>{});runTelegramNewOrdersMonitor().catch(()=>{});runRefundReconciliationMonitor().catch(()=>{});},120*1000).unref();
+  });
+});
