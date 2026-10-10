@@ -1,15 +1,15 @@
 {
   "name": "sadairaq-railway",
-  "version": "1.5.84",
+  "version": "1.5.85",
   "private": true,
-  "description": "صدى العراق — تحسين إرسال Telegram، ونسخ قاعدة الموقع واستعادتها دون استبدال البيانات الحالية",
+  "description": "صدى العراق — دمج قاعدة Base44 تلقائياً عند أول تشغيل مع الحفاظ على الحسابات والبيانات الحالية",
   "scripts": {
     "start": "node server.js"
   },
   "engines": {
     "node": ">=20"
   },
-  "buildId": "SADA-1.5.84-TELEGRAM-RESTORE-DB-BACKUP-20261010",
+  "buildId": "SADA-1.5.85-BUNDLED-DATABASE-AUTO-RESTORE-20261011",
   "dependencies": {
     "google-auth-library": "^11.2.0"
   }

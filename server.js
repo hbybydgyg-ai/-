@@ -14,8 +14,8 @@ const LEGACY_DATA = path.join(ROOT, 'data');
 const DATA = path.resolve(process.env.SADA_DATA_DIR || process.env.DATA_DIR || (process.env.RAILWAY_VOLUME_MOUNT_PATH ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sada-data') : LEGACY_DATA));
 const DATA_IS_EXTERNAL = path.resolve(DATA) !== path.resolve(LEGACY_DATA);
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.84';
-const BUILD_ID = 'SADA-1.5.84-TELEGRAM-RESTORE-DB-BACKUP-20261010';
+const APP_VERSION = '1.5.85';
+const BUILD_ID = 'SADA-1.5.85-BUNDLED-DATABASE-AUTO-RESTORE-20261011';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 // Restored the default administrator login from the supplied original release. Set ADMIN_PASSWORD in Railway to override it.
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2');
@@ -1586,7 +1586,8 @@ const LEGACY_USERS_PRIVATE_FILE = 'legacy_import_users_private.json';
 const LEGACY_TRANSACTIONS_PRIVATE_FILE = 'legacy_import_transactions_private.json';
 const LEGACY_TRANSACTIONS_REMOTE_PATH = 'config/base44LegacyTransactions';
 const LEGACY_SEED_STATUS_FILE = 'legacy_seed_bootstrap_status.json';
-const LEGACY_SEED_ENCRYPTED_FILE = 'base44-legacy-seed.enc';
+const LEGACY_SEED_ENCRYPTED_FILE = 'base44-legacy-seed.enc'; // legacy compatibility only
+const LEGACY_SEED_ARCHIVE_RELATIVE = path.join('database','SadaIraq_Database_Export.zip');
 const LEGACY_SEED_ID = 'BASE44-EXPORT-20261010-V1';
 const LEGACY_IMPORT_STATE_FILE = 'legacy_import_state.json';
 const LEGACY_IMPORT_CONFIRM = 'IMPORT_LEGACY_DATABASE_1_5_76';
@@ -1624,7 +1625,7 @@ function readZipArchive(buffer){
 function parseLegacyJsonEntry(entries,name){const key=Object.keys(entries).find(k=>k===name||k.endsWith('/'+name));if(!key)throw new Error('ملف ZIP لا يحتوي على '+name);try{return JSON.parse(entries[key].toString('utf8'));}catch(_){throw new Error('ملف '+name+' ليس JSON صالحاً.');}}
 function assertUniqueIds(rows,label){if(!Array.isArray(rows))throw new Error('قائمة '+label+' ليست مصفوفة.');const ids=new Set();for(const row of rows){const id=String(row?.id??'').trim();if(!id)throw new Error('يوجد سجل بلا معرّف في '+label+'.');if(ids.has(id))throw new Error('يوجد معرّف مكرر في '+label+'.');ids.add(id);}return ids;}
 function normalizeLegacyBalance(value){const n=Number(value);return Number.isFinite(n)?n:0;}
-function legacyUserPrivateRow(u){return {id:String(u?.id||''),email:normalizeEmail(u?.email||''),full_name:String(u?.full_name||'').slice(0,160),arabic_name:String(u?.arabic_name||'').slice(0,160),user_code:String(u?.user_code||''),balance:normalizeLegacyBalance(u?.balance),created_date:String(u?.created_date||''),updated_date:String(u?.updated_date||'')};}
+function legacyUserPrivateRow(u){return {id:String(u?.id||''),email:normalizeEmail(u?.email||''),full_name:String(u?.full_name||'').slice(0,160),arabic_name:String(u?.arabic_name||'').slice(0,160),phone:String(u?.phone||''),balance:normalizeLegacyBalance(u?.balance),free_points:Number(u?.free_points||0)||0,user_code:String(u?.user_code||''),referral_code:String(u?.referral_code||''),referred_by:String(u?.referred_by||''),role:String(u?.role||'user'),status:String(u?.status||''),custom_discount:Number(u?.custom_discount||0)||0,telegram_user_id:String(u?.telegram_user_id||''),created_date:String(u?.created_date||''),updated_date:String(u?.updated_date||'')};}
 const LEGACY_USERS_REMOTE_PATH='config/base44LegacyUsers';
 const LEGACY_IMPORT_STATE_REMOTE_PATH='config/base44LegacyImportState';
 function legacyRemoteUserKey(id){return 'u_'+crypto.createHash('sha256').update(String(id||'')).digest('hex').slice(0,32);}
@@ -1650,7 +1651,7 @@ function legacyAliasUser(id){return 'legacy_'+sha256(String(id||'unknown')).slic
 function legacyStatus(value){const v=String(value||'').trim().toLowerCase().replace(/[\\s-]+/g,'_');const map={new:'pending',pending:'pending',waiting:'pending',processing:'processing',in_progress:'processing',completed:'completed',complete:'completed',partial:'partial',canceled:'cancelled',cancelled:'cancelled',refunded:'refunded',error:'failed',failed:'failed'};return map[v]||'pending';}
 function collectionEntries(value){if(Array.isArray(value))return value.map((v,i)=>[String(i),v]);if(value&&typeof value==='object')return Object.entries(value);return [];}
 function normalizeCurrentUsers(root){const users=[];const emailMap=new Map(),nameMap=new Map();for(const [key,raw] of collectionEntries(root)){if(!raw||typeof raw!=='object'||Array.isArray(raw))continue;const username=String(raw.username||decodeFirebaseSafeKey(key)||key).trim();if(!username)continue;const item={key,username,user:raw,email:normalizeEmail(raw.email||raw.mail||raw.emailAddress||'')};users.push(item);if(item.email){const arr=emailMap.get(item.email)||[];arr.push(item);emailMap.set(item.email,arr);}const n=username.toLowerCase();const arr=nameMap.get(n)||[];arr.push(item);nameMap.set(n,arr);}return {users,emailMap,nameMap};}
-function mapLegacyUsersToCurrent(legacyUsers,currentDirectory){const byLegacyId=new Map(),matchedIds=new Set();for(const old of legacyUsers){let match=null;const email=normalizeEmail(old.email||'');const emailRows=email?currentDirectory.emailMap.get(email)||[]:[];if(emailRows.length===1)match=emailRows[0];else if(emailRows.length>1)match=null;if(!match&&old.user_code){const candidates=currentDirectory.nameMap.get(String(old.user_code).trim().toLowerCase())||[];if(candidates.length===1)match=candidates[0];}if(match){byLegacyId.set(String(old.id),match);matchedIds.add(String(old.id));}else byLegacyId.set(String(old.id),null);}return {byLegacyId,matchedIds};}
+function mapLegacyUsersToCurrent(legacyUsers,currentDirectory){const byLegacyId=new Map(),matchedIds=new Set();for(const old of legacyUsers){let match=null;const email=normalizeEmail(old.email||'');const emailRows=email?currentDirectory.emailMap.get(email)||[]:[];if(emailRows.length===1)match=emailRows[0];else if(emailRows.length>1)match=null;/* Only use user_code as a fallback when the export has no email. With an email that does not match, keep the account separate rather than accidentally merging two people. */if(!match&&!email&&old.user_code){const candidates=currentDirectory.nameMap.get(String(old.user_code).trim().toLowerCase())||[];if(candidates.length===1)match=candidates[0];}if(match){byLegacyId.set(String(old.id),match);matchedIds.add(String(old.id));}else byLegacyId.set(String(old.id),null);}return {byLegacyId,matchedIds};}
 function legacyPublicOrderNumber(old,duplicateOrderNumbers,liveNumbers,allocatedNumbers){const n=String(old.order_number||'').trim();if(/^\d{1,9}$/.test(n)&&duplicateOrderNumbers.get(n)===1&&!liveNumbers.has(n)&&!allocatedNumbers.has(n)){allocatedNumbers.add(n);return n;}let candidate=0;for(const value of [...liveNumbers,...allocatedNumbers])if(/^\d{1,9}$/.test(String(value||'')))candidate=Math.max(candidate,Number(value));candidate++;while(candidate<=999999999&&(liveNumbers.has(String(candidate))||allocatedNumbers.has(String(candidate))||duplicateOrderNumbers.has(String(candidate))))candidate++;if(candidate>999999999)throw new Error('لا توجد مساحة أرقام طلبات قصيرة متاحة؛ لم يتم دمج الطلبات.');const result=String(candidate);allocatedNumbers.add(result);return result;}
 function legacyOrderMatchesLive(old,matchedUsername,liveOrders){if(!matchedUsername)return false;const oldProvider=String(old.provider_id||''),oldProviderOrder=String(old.provider_order_id||'');for(const [,r] of liveOrders){if(!r||typeof r!=='object'||r.legacyHistory)continue;if(String(r.user||r.username||'')!==matchedUsername)continue;const rp=String(r.providerId||r.provider_id||''),rpo=String(r.providerOrderId||r.provider_order_id||r.smmpartyOrderId||'');if(oldProviderOrder&&rpo===oldProviderOrder&&(!oldProvider||!rp||oldProvider===rp))return true;const rid=String(r.publicOrderNo||r.id||r.order_id||'');if(old.order_number&&rid===String(old.order_number)&&String(r.serviceName||r.service||'')===String(old.service_name||'')&&String(r.link||'')===String(old.link||'')&&Number(r.quantity||0)===Number(old.quantity||0))return true;}return false;}
 function buildLegacyOrderRecord(old,legacyUser,matched,currentDirectory,publicOrderNo){
@@ -1693,8 +1694,78 @@ function createLegacyPlan(stage,remoteUsers,remoteOrders){
   }
   return {directory,mapped,remoteOrderRows,liveRows,upserts,alreadyImported,liveDuplicates,unmatchedOrderUsers,legacyOrderCountsByUsername,matchedUsers:mapped.matchedIds.size,unmatchedUsers:stage.users.length-mapped.matchedIds.size,balanceRestorePlan,matchedPositiveBalances,unmatchedPositiveBalances,balancesAlreadyRestored,balanceSkippedExisting,negativeBalancesSkipped,legacyUserById:oldUserById,counts:{users:stage.users.length,orders:stage.orders.length,transactions:Number(stage.transactionCount||stage.transactions?.length||0)}};
 }
+function legacyAccountUsername(old,usedNames){
+  const isValid=v=>/^[A-Za-z0-9]{5,32}$/.test(String(v||''))&&!usedNames.has(String(v).toLowerCase())&&String(v).toLowerCase()!==ADMIN_USER.toLowerCase();
+  const candidates=[String(old?.user_code||'').trim(),String(old?.email||'').trim().split('@')[0]];
+  for(const candidate of candidates){if(isValid(candidate)){usedNames.add(candidate.toLowerCase());return candidate;}}
+  const base='b44'+sha256(String(old?.id||old?.email||'legacy-user')).slice(0,20);
+  let candidate=base.slice(0,32),n=0;while(!isValid(candidate)){n++;candidate=('b44'+sha256(String(old?.id||'')+'|'+n).slice(0,20)).slice(0,32);}usedNames.add(candidate.toLowerCase());return candidate;
+}
+async function ensureLegacyUserAccounts(legacyUsers,remoteUsers){
+  const directory=normalizeCurrentUsers(remoteUsers||{}),usedNames=new Set(directory.users.map(x=>x.username.toLowerCase()));
+  const mapped=mapLegacyUsersToCurrent(legacyUsers,directory),patch={},created=[];
+  for(const old of legacyUsers){
+    const oldId=String(old?.id||'').trim();if(!oldId)continue;
+    const matched=mapped.byLegacyId.get(oldId);
+    if(matched)continue; // Never overwrite a current user matched by unique email or user code.
+    const email=normalizeEmail(old.email||'');
+    // The export has unique emails; reserve them to prevent collisions during one-time seeding.
+    const username=legacyAccountUsername(old,usedNames);
+    const sourceBalance=Number(old.balance||0);const balanceIQD=Number((sourceBalance*FIXED_RATE).toFixed(4));
+    const profile={
+      username,
+      name:String(old.arabic_name||old.full_name||email.split('@')[0]||username).slice(0,100),
+      email,
+      emailVerified:false,
+      authProvider:'legacy-import',
+      passwordHash:'',
+      needsPasswordSetup:true,
+      passwordSetupRequired:true,
+      balance:balanceIQD,
+      level:'مبتدئ',
+      telegram:'',
+      telegramUserId:String(old.telegram_user_id||''),
+      phone:String(old.phone||''),
+      joined:String(old.created_date||nowISO()),
+      totalSpent:0,
+      totalOrders:0,
+      role:'user',
+      status:String(old.status||'active'),
+      isDisabled:/^(disabled|inactive|blocked|suspended)$/i.test(String(old.status||'')),
+      freePoints:Math.max(0,Number(old.free_points||0)||0),
+      free_points:Math.max(0,Number(old.free_points||0)||0),
+      userCode:String(old.user_code||''),
+      referralCode:String(old.referral_code||''),
+      referredBy:String(old.referred_by||''),
+      customDiscount:Number(old.custom_discount||0)||0,
+      legacyBase44UserId:oldId,
+      legacyBase44OriginalBalanceUSD:sourceBalance,
+      legacyBalanceRestoredFromBase44:true,
+      legacyOriginalRole:String(old.role||'user'),
+      legacySource:'Base44 database export',
+      createdAt:String(old.created_date||nowISO()),
+      updatedAt:nowISO()
+    };
+    patch[firebaseSafeKey(username)]=profile;created.push({username,email,id:oldId});
+  }
+  const entries=Object.entries(patch);let written=0;
+  for(let i=0;i<entries.length;i+=75){
+    const chunk=Object.fromEntries(entries.slice(i,i+75));
+    await firebasePatchJson('users',chunk,20000);written+=Object.keys(chunk).length;
+  }
+  if(written){
+    const verify=await firebaseGetJson('users',20000);
+    const verifyDirectory=normalizeCurrentUsers(verify||{});
+    const present=new Set(verifyDirectory.users.map(x=>x.username.toLowerCase()));
+    const missing=created.filter(x=>!present.has(x.username.toLowerCase()));
+    if(missing.length)throw new Error('تم حفظ بعض الحسابات القديمة لكن فشل التحقق من '+missing.length+' حساباً؛ أعد التشغيل لإكمال الدمج دون تكرار.');
+  }
+  return {created:written,alreadyMapped:legacyUsers.length-created.length,verified:true};
+}
 async function applyLegacyStage(stage,{bundledSeed=false}={}){
-  const remote=await getLegacyRemoteSnapshot();
+  const before=await getLegacyRemoteSnapshot();
+  const accounts=await ensureLegacyUserAccounts(stage.users,before.remoteUsers);
+  const remote=accounts.created?await getLegacyRemoteSnapshot():before;
   const plan=createLegacyPlan(stage,remote.remoteUsers,remote.remoteOrders);
   let ordersWritten=0;
   if(Object.keys(plan.upserts).length){await firebasePatchJson('orders',plan.upserts,30000);ordersWritten=Math.max(0,Object.keys(plan.upserts).length-plan.alreadyImported);}
@@ -1726,7 +1797,7 @@ async function applyLegacyStage(stage,{bundledSeed=false}={}){
     const chunk=plan.balanceRestorePlan.slice(i,i+8),settled=await Promise.allSettled(chunk.map(async item=>{const patch={balance:item.balanceIQD,legacyBase44UserId:String(item.old.id),legacyBalanceOriginalUSD:item.balanceUsd,legacyBalanceRestoredFromBase44:true,legacyBalanceRestoredAt:nowISO(),updatedAt:nowISO()};await firebasePatchJson('users/'+item.matched.key,patch,9000);return true;}));
     for(const r of settled){if(r.status==='fulfilled')balancesRestored++;else balanceWriteErrors++;}
   }
-  const finalReport={completedAt:nowISO(),sourceFile:stage.sourceFile||'SadaIraq_Database_Export.zip',counts:plan.counts,matchedUsers:plan.matchedUsers,unmatchedUsers:plan.unmatchedUsers,ordersWritten,ordersAlreadyImported:plan.alreadyImported,duplicatesAlreadyInLiveDatabase:plan.liveDuplicates,unmatchedOrderUsers:plan.unmatchedOrderUsers,orderCountersUpdated,orderCounterWriteErrors,balancesRestored,balanceWriteErrors,unmatchedPositiveBalances:plan.unmatchedPositiveBalances,balanceSkippedExisting:plan.balanceSkippedExisting,negativeBalancesSkipped:plan.negativeBalancesSkipped,balancesAlreadyRestored:plan.balancesAlreadyRestored,exchangeRate:FIXED_RATE,legacyUsersRemoteSaved:true,legacyUsersRemoteCount:savedIndex.count,legacyTransactionsSaved:transactionsSaved,legacyTransactionsRemoteCount:transactionsSavedCount};
+  const finalReport={completedAt:nowISO(),sourceFile:stage.sourceFile||'SadaIraq_Database_Export.zip',counts:plan.counts,matchedUsers:plan.matchedUsers,unmatchedUsers:plan.unmatchedUsers,accountProfilesCreated:accounts.created,accountProfilesAlreadyMatched:accounts.alreadyMapped,ordersWritten,ordersAlreadyImported:plan.alreadyImported,duplicatesAlreadyInLiveDatabase:plan.liveDuplicates,unmatchedOrderUsers:plan.unmatchedOrderUsers,orderCountersUpdated,orderCounterWriteErrors,balancesRestored,balanceWriteErrors,unmatchedPositiveBalances:plan.unmatchedPositiveBalances,balanceSkippedExisting:plan.balanceSkippedExisting,negativeBalancesSkipped:plan.negativeBalancesSkipped,balancesAlreadyRestored:plan.balancesAlreadyRestored,exchangeRate:FIXED_RATE,legacyUsersRemoteSaved:true,legacyUsersRemoteCount:savedIndex.count,legacyTransactionsSaved:transactionsSaved,legacyTransactionsRemoteCount:transactionsSavedCount};
   if(stage.seedSourceId||bundledSeed)finalReport.bundledSeedId=stage.seedSourceId||LEGACY_SEED_ID;
   writeJSON(LEGACY_IMPORT_STATE_FILE,finalReport);
   let importStateRemoteSaved=false;try{await firebaseWriteJson(LEGACY_IMPORT_STATE_REMOTE_PATH,finalReport,10000);importStateRemoteSaved=true;}catch(e){console.warn('Legacy import report cloud persistence failed:',String(e.message||e).slice(0,100));}
@@ -1840,10 +1911,11 @@ async function routeAPI(req,res,urlObj){
         if(!fs.existsSync(full))continue;
         try{const val=JSON.parse(fs.readFileSync(full,'utf8'));localFiles[name]=sanitizeBackupValue(val,[name]);}catch(_){}
       }
-      let legacySeedEncBase64='';
-      const seedPath=path.join(ROOT,LEGACY_SEED_ENCRYPTED_FILE);
-      if(fs.existsSync(seedPath))legacySeedEncBase64=fs.readFileSync(seedPath).toString('base64');
-      const backup={format:SADA_DB_BACKUP_FORMAT,schemaVersion:1,appVersion:APP_VERSION,buildId:BUILD_ID,createdAt:nowISO(),secretsIncluded:false,notes:['تم استبعاد التوكنات ومفاتيح API وأسرار المزودين وكلمات المرور النصية وبيانات التحقق المؤقتة. قد تحتوي سجلات المستخدمين على تجزئات كلمات المرور اللازمة لاستمرار تسجيل الدخول؛ احفظ النسخة بسرية.','لا تغيّر النسخة الأصلية؛ الاستعادة تدمج السجلات الناقصة وتحافظ على قيم الإنتاج الحالية.','ملف Base44 المضمّن مشفّر؛ يحتاج مفتاحه المحفوظ خارج الحزمة لإعادة فتحه.'],counts:currentDatabaseCounts(safeFirebase,localFiles),firebaseData:safeFirebase,serverData:localFiles,legacySeedEncryptedBase64:legacySeedEncBase64};
+      let legacySeedArchiveBase64='',legacySeedEncBase64='';
+      const archivePath=path.join(ROOT,LEGACY_SEED_ARCHIVE_RELATIVE),encryptedSeedPath=path.join(ROOT,LEGACY_SEED_ENCRYPTED_FILE);
+      if(fs.existsSync(archivePath))legacySeedArchiveBase64=fs.readFileSync(archivePath).toString('base64');
+      else if(fs.existsSync(encryptedSeedPath))legacySeedEncBase64=fs.readFileSync(encryptedSeedPath).toString('base64');
+      const backup={format:SADA_DB_BACKUP_FORMAT,schemaVersion:1,appVersion:APP_VERSION,buildId:BUILD_ID,createdAt:nowISO(),secretsIncluded:false,notes:['هذه النسخة تحتوي بيانات شخصية خاصة بالمستخدمين والطلبات؛ احفظها بسرية ولا ترفعها إلى مستودع عام.','تم استبعاد التوكنات ومفاتيح API وأسرار المزودين وكلمات المرور النصية وبيانات التحقق المؤقتة. تصدير Base44 لا يحتوي كلمات المرور الأصلية.','الاستعادة تدمج السجلات الناقصة وتحافظ على قيم الإنتاج الحالية. قاعدة Base44 المضمّنة ستُستعاد تلقائياً عند أول تشغيل إذا كانت قاعدة المستخدمين فارغة أو ينقصها بعض الحسابات.'],counts:currentDatabaseCounts(safeFirebase,localFiles),firebaseData:safeFirebase,serverData:localFiles,legacySeedArchiveBase64,legacySeedEncryptedBase64:legacySeedEncBase64};
       const output=Buffer.from(JSON.stringify(backup));
       res.statusCode=200;res.setHeader('Content-Type','application/json; charset=utf-8');res.setHeader('Content-Disposition',`attachment; filename="SadaIraq_Database_Backup_${new Date().toISOString().slice(0,10)}.json"`);res.setHeader('Cache-Control','no-store');res.setHeader('Content-Length',String(output.length));return res.end(output);
     }catch(e){return json(res,503,{ok:false,error:'تعذر إنشاء نسخة كاملة من قاعدة الموقع. لم يتم تنزيل نسخة ناقصة: '+String(e.message||e).slice(0,180)});}
@@ -1864,7 +1936,10 @@ async function routeAPI(req,res,urlObj){
       for(const name of SADA_DB_BACKUP_FILES){if(!Object.prototype.hasOwnProperty.call(backup.serverData,name))continue;const incomingLocal=sanitizeBackupValue(backup.serverData[name],[name]);const currentLocal=readJSON(name,null);const merged=mergeBackupPreservingExisting(currentLocal,incomingLocal);try{writeJSON(name,merged);restoredFiles.push(name)}catch(e){console.warn('Local database restore file failed:',name,String(e.message||e).slice(0,100));}}
     }
     let seedRestored=false;
-    if(typeof backup.legacySeedEncryptedBase64==='string'&&backup.legacySeedEncryptedBase64){
+    if(typeof backup.legacySeedArchiveBase64==='string'&&backup.legacySeedArchiveBase64){
+      const seedPath=path.join(ROOT,LEGACY_SEED_ARCHIVE_RELATIVE);
+      if(!fs.existsSync(seedPath)){try{const bytes=Buffer.from(backup.legacySeedArchiveBase64,'base64');if(bytes.length>0&&bytes.length<15*1024*1024){const entries=readZipArchive(bytes);const dbKey=Object.keys(entries).find(k=>k==='sadairaq.db'||k.endsWith('/sadairaq.db'));if(dbKey&&entries[dbKey].subarray(0,16).toString('binary')==='SQLite format 3\u0000'){fs.mkdirSync(path.dirname(seedPath),{recursive:true});fs.writeFileSync(seedPath,bytes,{flag:'wx',mode:0o600});seedRestored=true;}}}catch(e){console.warn('Bundled database archive restore rejected:',String(e.message||e).slice(0,100));}}
+    }else if(typeof backup.legacySeedEncryptedBase64==='string'&&backup.legacySeedEncryptedBase64){
       const seedPath=path.join(ROOT,LEGACY_SEED_ENCRYPTED_FILE);
       if(!fs.existsSync(seedPath)){try{const bytes=Buffer.from(backup.legacySeedEncryptedBase64,'base64');if(bytes.length>0&&bytes.length<15*1024*1024&&bytes.subarray(0,8).toString('ascii')==='SADAENC1'){fs.writeFileSync(seedPath,bytes,{flag:'wx',mode:0o600});seedRestored=true;}}catch(_){}}
     }
@@ -1941,7 +2016,7 @@ async function routeAPI(req,res,urlObj){
   if(p==='/api/admin/legacy-import/apply'&&req.method==='POST'){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
     const b=await bodyJSON(req);if(String(b.confirm||'')!==LEGACY_IMPORT_CONFIRM)return json(res,422,{ok:false,error:'اكتب تأكيد الدمج الصحيح من لوحة الإدارة.'});
-    const stage=await readLegacyStage();if(!stage)return json(res,404,{ok:false,error:'ملف الترحيل غير موجود. النسخة الحالية ستجلب النسخة المشفرة تلقائياً عند ضبط مفتاحها في Railway.'});
+    const stage=await readLegacyStage();if(!stage)return json(res,404,{ok:false,error:'ملف الترحيل غير موجود. ستتم قراءة قاعدة البيانات المضمّنة تلقائياً عند تشغيل النسخة.'});
     try{const result=await applyLegacyStage(stage,{bundledSeed:!!stage.seedSourceId});return json(res,result.allDone?200:207,{ok:result.allDone,report:result.report,warning:result.warning});}
     catch(e){return json(res,503,{ok:false,error:'تعذر إكمال دمج قاعدة البيانات. لم يتم حذف ملف الترحيل؛ يمكن إعادة المحاولة دون تكرار الطلبات. '+String(e.message||e).slice(0,180)});}
   }
@@ -1950,7 +2025,7 @@ async function routeAPI(req,res,urlObj){
     const stage=await readLegacyStage();let report=readJSON(LEGACY_IMPORT_STATE_FILE,null),remoteUsersCount=0,remoteReadError='';
     try{const raw=await firebaseGetJson(LEGACY_USERS_REMOTE_PATH,8000);remoteUsersCount=Number(raw?.count||Object.keys(raw?.users||{}).length||0);}catch(e){remoteReadError=String(e.message||e).slice(0,100);}
     if(!report){try{const remoteState=await firebaseGetJson(LEGACY_IMPORT_STATE_REMOTE_PATH,7000);if(remoteState&&typeof remoteState==='object')report=remoteState;}catch(_){}}
-    return json(res,200,{ok:true,uploaded:!!stage,stagedCounts:stage?.counts||null,lastImport:report||null,seedBootstrap:readJSON(LEGACY_SEED_STATUS_FILE,{}),importedSnapshotAvailable:remoteUsersCount>0,importedUsersCount:remoteUsersCount,storageDurable:DATA_IS_EXTERNAL||remoteUsersCount>0,remoteReadError,storageWarning:remoteUsersCount>0?'تم حفظ قائمة مستخدمي Base44 في قاعدة الموقع الدائمة؛ لا تحتاج إعادة رفع ملف ZIP بعد كل تحديث.':(remoteReadError?'تعذر فحص نسخة مستخدمي Base44 السحابية: '+remoteReadError:'لا توجد نسخة سحابية دائمة لمستخدمي Base44 حتى الآن. ارفع الملف وادمجه مرة أخيرة ليُحفظ فهرس المستخدمين؛ بعد نجاح الدمج لا يلزم تكرار الرفع عند تحديث الكود.')});
+    return json(res,200,{ok:true,uploaded:!!stage,stagedCounts:stage?.counts||null,lastImport:report||null,seedBootstrap:readJSON(LEGACY_SEED_STATUS_FILE,{}),importedSnapshotAvailable:remoteUsersCount>0,importedUsersCount:remoteUsersCount,storageDurable:DATA_IS_EXTERNAL||remoteUsersCount>0,remoteReadError,storageWarning:remoteUsersCount>0?'تم حفظ قائمة مستخدمي Base44 في قاعدة الموقع الدائمة؛ لا تحتاج إعادة رفع ملف ZIP بعد كل تحديث.':(remoteReadError?'تعذر فحص نسخة مستخدمي Base44 السحابية: '+remoteReadError:'لم يتأكد حفظ فهرس المستخدمين في Firebase بعد. يحتوي هذا الإصدار قاعدة بيانات مضمّنة وسيعيد محاولة الدمج تلقائياً عند نجاح اتصال Firebase؛ راجع حالة الترحيل قبل اعتماد الاستضافة.')});
   }
   if(p==='/api/admin/user-order-stats'&&req.method==='GET'){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});let remoteUsers={},remoteOrders={};let firebaseAvailable=true;try{[remoteUsers,remoteOrders]=await Promise.all([firebaseGetJson('users',12000),firebaseGetJson('orders',15000)]);remoteUsers=remoteUsers||{};remoteOrders=remoteOrders||{};}catch(e){firebaseAvailable=false;return json(res,503,{ok:false,error:'تعذر قراءة المستخدمين والطلبات من Firebase: '+String(e.message||e).slice(0,140)});}
@@ -2324,7 +2399,7 @@ async function routeAPI(req,res,urlObj){
       try{const foundByEmail=await findAccountByEmail(u);if(foundByEmail&&foundByEmail.source!=='admin'){actualUsername=String(foundByEmail.username||foundByEmail.user?.username||u);user=foundByEmail.user;remoteRecord={username:actualUsername,user,firebasePath:foundByEmail.firebasePath||('users/'+firebaseSafeKey(actualUsername))};}}
       catch(e){remoteLookupFailed=true;console.warn('Email login lookup failed:',String(e.message||e).slice(0,120));}
     }
-    if(user&&verifyPassword(pw,user.passwordHash||user.password||user.passHash||user.pass||'')){
+    if(user&&String(user.passwordHash||user.password||user.passHash||user.pass||'').length>0&&verifyPassword(pw,user.passwordHash||user.password||user.passHash||user.pass||'')){
       // Mirror a remote-only legacy account locally without replacing its financial/order fields.
       if(!store.users[actualUsername]||!String(user.passwordHash||'').startsWith('scrypt$')){const upgraded={...(store.users[actualUsername]||user),...user,username:actualUsername};if(!String(user.passwordHash||'').startsWith('scrypt$'))upgraded.passwordHash=hashPassword(pw);delete upgraded.password;delete upgraded.pass;delete upgraded.passHash;store.users[actualUsername]=upgraded;writeJSON('users.json',store);
         if(remoteRecord&&remoteRecord.firebasePath&&!String(user.passwordHash||'').startsWith('scrypt$')){try{await firebasePatchJson(remoteRecord.firebasePath,{passwordHash:upgraded.passwordHash,password:null,pass:null,passHash:null,passwordUpdatedAt:nowISO()},5000);}catch(e){console.warn('Legacy password hash remote migration skipped:',String(e.message||e).slice(0,100));}}
@@ -2918,63 +2993,72 @@ async function ensureProviderRuntime(id=''){
   return store;
 }
 
-function decryptBundledLegacySeed(){
-  const file=path.join(ROOT,LEGACY_SEED_ENCRYPTED_FILE);
-  if(!fs.existsSync(file))throw new Error('ملف قاعدة البيانات المشفر غير موجود داخل الحزمة.');
-  const keyText=String(process.env.SADA_LEGACY_SEED_KEY||'').trim();
-  if(!keyText)throw Object.assign(new Error('يلزم ضبط SADA_LEGACY_SEED_KEY في Railway Variables مرة واحدة لفتح نسخة قاعدة البيانات المشفرة.'),{code:'SEED_KEY_MISSING'});
-  let key;try{key=Buffer.from(keyText,'base64url')}catch(_){key=Buffer.alloc(0)}
-  if(key.length!==32)throw new Error('SADA_LEGACY_SEED_KEY غير صالحة؛ استخدم قيمة Base64URL ذات 32 بايت من ملف المفتاح المرفق منفصلاً.');
-  const box=fs.readFileSync(file);if(box.length<36||box.subarray(0,8).toString('ascii')!=='SADAENC1')throw new Error('تنسيق نسخة قاعدة البيانات المشفرة غير صالح.');
-  const iv=box.subarray(8,20),tag=box.subarray(20,36),body=box.subarray(36);
-  try{const d=crypto.createDecipheriv('aes-256-gcm',key,iv);d.setAuthTag(tag);return Buffer.concat([d.update(body),d.final()]);}
-  catch(_){throw new Error('تعذر فك قاعدة البيانات المشفرة. تحقق من قيمة SADA_LEGACY_SEED_KEY دون تغييرها.');}
+function readBundledLegacySeedArchive(){
+  const archivePath=path.join(ROOT,LEGACY_SEED_ARCHIVE_RELATIVE);
+  if(fs.existsSync(archivePath))return {zipBytes:fs.readFileSync(archivePath),sourceFile:'database/SadaIraq_Database_Export.zip',encrypted:false};
+  const encryptedPath=path.join(ROOT,LEGACY_SEED_ENCRYPTED_FILE);
+  if(fs.existsSync(encryptedPath)){
+    const keyText=String(process.env.SADA_LEGACY_SEED_KEY||'').trim();
+    if(!keyText)throw Object.assign(new Error('النسخة القديمة مشفرة وتحتاج SADA_LEGACY_SEED_KEY.'),{code:'SEED_KEY_MISSING'});
+    let key;try{key=Buffer.from(keyText,'base64url')}catch(_){key=Buffer.alloc(0)}
+    if(key.length!==32)throw new Error('SADA_LEGACY_SEED_KEY غير صالحة.');
+    const box=fs.readFileSync(encryptedPath);if(box.length<36||box.subarray(0,8).toString('ascii')!=='SADAENC1')throw new Error('تنسيق النسخة المشفرة غير صالح.');
+    const iv=box.subarray(8,20),tag=box.subarray(20,36),body=box.subarray(36);
+    try{const d=crypto.createDecipheriv('aes-256-gcm',key,iv);d.setAuthTag(tag);return {zipBytes:Buffer.concat([d.update(body),d.final()]),sourceFile:'base44-legacy-seed.enc',encrypted:true};}
+    catch(_){throw new Error('تعذر فك قاعدة البيانات المشفرة. تحقق من المفتاح.');}
+  }
+  throw new Error('ملف قاعدة البيانات المضمّن غير موجود داخل حزمة المشروع.');
 }
-async function prepareBundledLegacyStage(){
-  const existing=await readLegacyStage();if(existing)return existing;
-  const zipBytes=decryptBundledLegacySeed(),entries=readZipArchive(zipBytes);
+function parseBundledLegacyArchive(){
+  const loaded=readBundledLegacySeedArchive(),entries=readZipArchive(loaded.zipBytes);
   const dbKey=Object.keys(entries).find(k=>k==='sadairaq.db'||k.endsWith('/sadairaq.db'));
-  if(!dbKey||entries[dbKey].subarray(0,16).toString('binary')!=='SQLite format 3\u0000')throw new Error('ملف SQLite مفقود أو غير سليم داخل قاعدة البيانات المشفرة.');
+  if(!dbKey||entries[dbKey].subarray(0,16).toString('binary')!=='SQLite format 3\u0000')throw new Error('ملف SQLite مفقود أو غير سليم داخل قاعدة البيانات المضمّنة.');
   const users=parseLegacyJsonEntry(entries,'sadairaq-users.json'),orders=parseLegacyJsonEntry(entries,'sadairaq-orders.json'),transactions=parseLegacyJsonEntry(entries,'sadairaq-transactions.json');
   const userIds=assertUniqueIds(users,'المستخدمين'),orderIds=assertUniqueIds(orders,'الطلبات'),transactionIds=assertUniqueIds(transactions,'المعاملات');
   const linkedOrders=orders.filter(o=>userIds.has(String(o?.user_id||''))).length;
   if(users.length!==822||orders.length!==2840||transactions.length!==1129||linkedOrders!==orders.length||new Set(userIds).size!==users.length||new Set(orderIds).size!==orders.length||new Set(transactionIds).size!==transactions.length)throw new Error('فشل التحقق من أعداد قاعدة البيانات أو علاقات المستخدمين والطلبات؛ لم يتم دمج شيء.');
-  const stage={version:1,uploadedAt:nowISO(),sourceFile:'SadaIraq_Database_Export.zip',sourceZipBytes:zipBytes.length,seedSourceId:LEGACY_SEED_ID,users:users.map(legacyUserPrivateRow),orders:orders.map(legacyOrderPrivateRow),transactions:transactions.map(legacyTransactionPrivateRow),transactionCount:transactions.length,counts:{users:users.length,orders:orders.length,transactions:transactions.length}};
+  return {...loaded,entries,users,orders,transactions,counts:{users:users.length,orders:orders.length,transactions:transactions.length}};
+}
+async function prepareBundledLegacyStage(){
+  const existing=await readLegacyStage();if(existing)return existing;
+  const loaded=parseBundledLegacyArchive();
+  const stage={version:1,uploadedAt:nowISO(),sourceFile:loaded.sourceFile,sourceZipBytes:loaded.zipBytes.length,seedSourceId:LEGACY_SEED_ID,users:loaded.users.map(legacyUserPrivateRow),orders:loaded.orders.map(legacyOrderPrivateRow),transactions:loaded.transactions.map(legacyTransactionPrivateRow),transactionCount:loaded.transactions.length,counts:loaded.counts};
   writeJSON(LEGACY_STAGE_FILE,stage);return stage;
 }
 let LEGACY_SEED_BOOTSTRAP_RUNNING=false;
 async function runBundledLegacySeedBootstrap(){
   if(LEGACY_SEED_BOOTSTRAP_RUNNING)return;LEGACY_SEED_BOOTSTRAP_RUNNING=true;
-  const updateStatus=v=>{try{writeJSON(LEGACY_SEED_STATUS_FILE,{...v,checkedAt:nowISO(),seedId:LEGACY_SEED_ID,encryptedSeedPresent:fs.existsSync(path.join(ROOT,LEGACY_SEED_ENCRYPTED_FILE))})}catch(_){}};
+  const updateStatus=v=>{try{writeJSON(LEGACY_SEED_STATUS_FILE,{...v,checkedAt:nowISO(),seedId:LEGACY_SEED_ID,seedArchivePresent:fs.existsSync(path.join(ROOT,LEGACY_SEED_ARCHIVE_RELATIVE)),encryptedLegacySeedPresent:fs.existsSync(path.join(ROOT,LEGACY_SEED_ENCRYPTED_FILE))})}catch(_){}};
   try{
-    const encryptedPath=path.join(ROOT,LEGACY_SEED_ENCRYPTED_FILE);if(!fs.existsSync(encryptedPath)){updateStatus({status:'not-included',error:'لا توجد نسخة قاعدة مشفرة ضمن هذا الإصدار.'});return;}
-    const keyText=String(process.env.SADA_LEGACY_SEED_KEY||'').trim();
-    if(!keyText){updateStatus({status:'waiting-for-key',error:'أضف SADA_LEGACY_SEED_KEY إلى Railway Variables باستخدام ملف المفتاح المنفصل. لا ترفعه إلى GitHub.',needsVariable:'SADA_LEGACY_SEED_KEY'});return;}
-    let state=null,remoteUsersIndex=null,remoteTx=null,remoteOrders=null;
-    try{[state,remoteUsersIndex,remoteTx,remoteOrders]=await Promise.all([firebaseGetJson(LEGACY_IMPORT_STATE_REMOTE_PATH,7000),firebaseGetJson(LEGACY_USERS_REMOTE_PATH,7000),firebaseGetJson(LEGACY_TRANSACTIONS_REMOTE_PATH,7000),firebaseGetJson('orders',18000)])}
+    const archivePath=path.join(ROOT,LEGACY_SEED_ARCHIVE_RELATIVE),encryptedPath=path.join(ROOT,LEGACY_SEED_ENCRYPTED_FILE);
+    if(!fs.existsSync(archivePath)&&!fs.existsSync(encryptedPath)){updateStatus({status:'not-included',error:'ملف قاعدة البيانات غير موجود داخل هذا الإصدار.'});return;}
+    if(!fs.existsSync(archivePath)&&!String(process.env.SADA_LEGACY_SEED_KEY||'').trim()){updateStatus({status:'waiting-for-key',error:'النسخة المشفرة القديمة تحتاج SADA_LEGACY_SEED_KEY. ارفع إصدار قاعدة البيانات الجديدة لتعمل دون مفتاح منفصل.',needsVariable:'SADA_LEGACY_SEED_KEY'});return;}
+    let state=null,remoteUsersIndex=null,remoteTx=null,remoteOrders=null,remoteUsers=null;
+    try{[state,remoteUsersIndex,remoteTx,remoteOrders,remoteUsers]=await Promise.all([firebaseGetJson(LEGACY_IMPORT_STATE_REMOTE_PATH,7000),firebaseGetJson(LEGACY_USERS_REMOTE_PATH,7000),firebaseGetJson(LEGACY_TRANSACTIONS_REMOTE_PATH,7000),firebaseGetJson('orders',18000),firebaseGetJson('users',18000)])}
     catch(e){updateStatus({status:'firebase-unavailable',error:String(e.message||e).slice(0,160)});return;}
-    let zipBytes,entries,users,orders,transactions;
-    try{zipBytes=decryptBundledLegacySeed();entries=readZipArchive(zipBytes);users=parseLegacyJsonEntry(entries,'sadairaq-users.json');orders=parseLegacyJsonEntry(entries,'sadairaq-orders.json');transactions=parseLegacyJsonEntry(entries,'sadairaq-transactions.json');}
+    let loaded;
+    try{loaded=parseBundledLegacyArchive();}
     catch(e){updateStatus({status:'seed-read-error',error:String(e.message||e).slice(0,200)});return;}
+    const {users,orders,transactions}=loaded;
     const completedUsers=Number(remoteUsersIndex?.count||Object.keys(remoteUsersIndex?.users||{}).length||0);
     let transactionsSaved=Number(remoteTx?.count||Object.keys(remoteTx?.transactions||{}).length||0)===transactions.length;
-    if(!transactionsSaved){const tx=await persistLegacyTransactionsRemote(transactions,LEGACY_SEED_ID);writeJSON(LEGACY_TRANSACTIONS_PRIVATE_FILE,transactions.map(legacyTransactionPrivateRow));transactionsSaved=tx.count===transactions.length;}
-    // Do not trust the import report alone: an earlier partial run may have written the
-    // target counts to its report while some order records failed. Verify every exported
-    // legacy order ID is actually present before marking the seed as already imported.
+    if(!transactionsSaved){try{const tx=await persistLegacyTransactionsRemote(transactions,LEGACY_SEED_ID);writeJSON(LEGACY_TRANSACTIONS_PRIVATE_FILE,transactions.map(legacyTransactionPrivateRow));transactionsSaved=tx.count===transactions.length;}catch(e){updateStatus({status:'transactions-pending',error:String(e.message||e).slice(0,160)});return;}}
     const persistedLegacyOrderIds=new Set(collectionEntries(remoteOrders).map(([,o])=>o&&o.legacyHistory&&o.legacyImportKey!==undefined?String(o.legacyImportKey):'').filter(Boolean));
     const everyOrderPersisted=orders.every(o=>persistedLegacyOrderIds.has(String(o.id)));
-    const countsMatch=Number(state?.counts?.users||0)===users.length&&Number(state?.counts?.orders||0)===orders.length&&completedUsers>=users.length&&everyOrderPersisted;
+    const liveDirectory=normalizeCurrentUsers(remoteUsers||{});
+    const mappedLiveUsers=mapLegacyUsersToCurrent(users,liveDirectory);
+    const allUsersHaveAccounts=mappedLiveUsers.matchedIds.size===users.length;
+    const countsMatch=Number(state?.counts?.users||0)===users.length&&Number(state?.counts?.orders||0)===orders.length&&completedUsers>=users.length&&everyOrderPersisted&&allUsersHaveAccounts;
     if(countsMatch){
-      const revised={...state,legacyTransactionsSaved:transactionsSaved,legacyTransactionsRemoteCount:transactions.length,bundledSeedId:LEGACY_SEED_ID};
+      const revised={...state,legacyTransactionsSaved:transactionsSaved,legacyTransactionsRemoteCount:transactions.length,bundledSeedId:LEGACY_SEED_ID,accountProfilesVerified:true};
       await firebaseWriteJson(LEGACY_IMPORT_STATE_REMOTE_PATH,revised,10000).catch(()=>{});writeJSON(LEGACY_IMPORT_STATE_FILE,revised);
-      updateStatus({status:transactionsSaved?'already-imported':'transactions-pending',counts:{users:users.length,orders:orders.length,transactions:transactions.length},legacyUsersRemoteCount:completedUsers,transactionsSaved,source:'existing-firebase-snapshot'});return;
+      updateStatus({status:transactionsSaved?'already-imported':'transactions-pending',counts:loaded.counts,legacyUsersRemoteCount:completedUsers,actualUserProfiles:liveDirectory.users.length,transactionsSaved,source:'existing-firebase-snapshot'});return;
     }
     const stage=await prepareBundledLegacyStage();
     const result=await applyLegacyStage(stage,{bundledSeed:true});
-    updateStatus({status:result.allDone?'completed':'partial',counts:result.report.counts,report:result.report,warning:result.warning,transactionsSaved:result.report.legacyTransactionsSaved});
-    console.log('Base44 legacy seed import:',JSON.stringify({status:result.allDone?'completed':'partial',counts:result.report.counts,matchedUsers:result.report.matchedUsers,unmatchedUsers:result.report.unmatchedUsers,ordersWritten:result.report.ordersWritten,transactionsSaved:result.report.legacyTransactionsSaved}));
-  }catch(e){updateStatus({status:'error',error:String(e.message||e).slice(0,200)});console.warn('Base44 legacy seed bootstrap failed:',String(e.message||e).slice(0,180));}
+    updateStatus({status:result.allDone?'completed':'partial',counts:result.report.counts,accountProfilesCreated:result.report.accountProfilesCreated,report:result.report,warning:result.warning,transactionsSaved:result.report.legacyTransactionsSaved});
+    console.log('Base44 bundled database import:',JSON.stringify({status:result.allDone?'completed':'partial',counts:result.report.counts,accountProfilesCreated:result.report.accountProfilesCreated,matchedUsers:result.report.matchedUsers,unmatchedUsers:result.report.unmatchedUsers,ordersWritten:result.report.ordersWritten,transactionsSaved:result.report.legacyTransactionsSaved}));
+  }catch(e){updateStatus({status:'error',error:String(e.message||e).slice(0,200)});console.warn('Base44 database bootstrap failed:',String(e.message||e).slice(0,180));}
   finally{LEGACY_SEED_BOOTSTRAP_RUNNING=false;}
 }
 

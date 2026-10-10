@@ -1,7 +1,7 @@
 {
   "appName": "صدى العراق",
-  "version": "1.5.84",
-  "buildId": "SADA-1.5.84-TELEGRAM-RESTORE-DB-BACKUP-20261010",
+  "version": "1.5.85",
+  "buildId": "SADA-1.5.85-BUNDLED-DATABASE-AUTO-RESTORE-20261011",
   "currency": "USD",
   "exchangeRate": 1250,
   "fixedRecharge": "5000 IQD = 4 USD",
