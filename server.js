@@ -2,6 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const dns = require('dns').promises;
 const net = require('net');
 const {URL} = require('url');
@@ -13,8 +14,8 @@ const LEGACY_DATA = path.join(ROOT, 'data');
 const DATA = path.resolve(process.env.SADA_DATA_DIR || process.env.DATA_DIR || (process.env.RAILWAY_VOLUME_MOUNT_PATH ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sada-data') : LEGACY_DATA));
 const DATA_IS_EXTERNAL = path.resolve(DATA) !== path.resolve(LEGACY_DATA);
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.74';
-const BUILD_ID = 'SADA-1.5.74-REGISTER-EMAIL-LOGIN-ASIACELL-TELEGRAM-ORDERS-20261010';
+const APP_VERSION = '1.5.75';
+const BUILD_ID = 'SADA-1.5.75-LEGACY-ORDERS-USER-STATS-20261010';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 // Restored the default administrator login from the supplied original release. Set ADMIN_PASSWORD in Railway to override it.
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2');
@@ -1464,8 +1465,152 @@ async function googleAuthLogin(credential){
   const sessionToken='';return {username,user,sessionToken,firebaseSaved,firebaseError};
 }
 
+
+// -------------------- Private legacy-database import (v1.5.75) --------------------
+// The ZIP is uploaded by an authenticated administrator. Personal data is staged only
+// under DATA (never in the public project folder or Git source), then orders are merged
+// with stable keys into the live Firebase orders node. Existing live orders are not replaced.
+const LEGACY_STAGE_FILE = 'legacy_import_staging.json';
+const LEGACY_USERS_PRIVATE_FILE = 'legacy_import_users_private.json';
+const LEGACY_IMPORT_STATE_FILE = 'legacy_import_state.json';
+const LEGACY_IMPORT_CONFIRM = 'IMPORT_LEGACY_DATABASE_1_5_75';
+const LEGACY_IMPORT_MAX_ZIP_BYTES = 18 * 1024 * 1024;
+const ZIP_CRC32_TABLE = (()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);t[n]=c>>>0;}return t;})();
+function zipCrc32(buffer){let c=0xFFFFFFFF;for(let i=0;i<buffer.length;i++)c=ZIP_CRC32_TABLE[(c^buffer[i])&0xFF]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+async function readRawRequestBuffer(req,limit=LEGACY_IMPORT_MAX_ZIP_BYTES){const parts=[];let total=0;for await(const chunk of req){total+=chunk.length;if(total>limit)throw Object.assign(new Error('حجم ملف ZIP أكبر من الحد المسموح (18 ميجابايت).'),{statusCode:413});parts.push(chunk);}return Buffer.concat(parts,total);}
+function readZipArchive(buffer){
+  if(!Buffer.isBuffer(buffer)||buffer.length<22)throw new Error('ملف ZIP غير صالح أو فارغ.');
+  const sigEOCD=Buffer.from([0x50,0x4b,0x05,0x06]);let eocd=-1;const min=Math.max(0,buffer.length-65557);
+  for(let i=buffer.length-22;i>=min;i--){if(buffer[i]===0x50&&buffer[i+1]===0x4b&&buffer[i+2]===0x05&&buffer[i+3]===0x06){eocd=i;break;}}
+  if(eocd<0)throw new Error('لم يتم العثور على فهرس ZIP صالح.');
+  const disk=buffer.readUInt16LE(eocd+4),cdDisk=buffer.readUInt16LE(eocd+6),entriesOnDisk=buffer.readUInt16LE(eocd+8),totalEntries=buffer.readUInt16LE(eocd+10),cdSize=buffer.readUInt32LE(eocd+12),cdOffset=buffer.readUInt32LE(eocd+16);
+  if(disk!==0||cdDisk!==0||entriesOnDisk!==totalEntries||totalEntries>2000||cdOffset+cdSize>eocd)throw new Error('صيغة ZIP متعددة الأقراص أو ZIP64 غير مدعومة. أعد إنشاء ملف ZIP القياسي.');
+  const entries={};let pos=cdOffset,totalUncompressed=0;
+  for(let n=0;n<totalEntries;n++){
+    if(pos+46>buffer.length||buffer.readUInt32LE(pos)!==0x02014b50)throw new Error('فهرس ZIP تالف.');
+    const flags=buffer.readUInt16LE(pos+8),method=buffer.readUInt16LE(pos+10),expectedCrc=buffer.readUInt32LE(pos+16),compressedSize=buffer.readUInt32LE(pos+20),uncompressedSize=buffer.readUInt32LE(pos+24),nameLen=buffer.readUInt16LE(pos+28),extraLen=buffer.readUInt16LE(pos+30),commentLen=buffer.readUInt16LE(pos+32),localOffset=buffer.readUInt32LE(pos+42);
+    const name=buffer.subarray(pos+46,pos+46+nameLen).toString('utf8');pos+=46+nameLen+extraLen+commentLen;
+    if(!name||name.startsWith('/')||name.split(/[\\/]/).includes('..'))throw new Error('ملف ZIP يحتوي على مسار غير آمن.');
+    if(name.endsWith('/'))continue;
+    if(flags&1)throw new Error('ملفات ZIP المشفرة بكلمة مرور غير مدعومة.');
+    if(uncompressedSize>12*1024*1024)throw new Error('أحد ملفات ZIP أكبر من الحد المسموح.');
+    totalUncompressed+=uncompressedSize;if(totalUncompressed>30*1024*1024)throw new Error('إجمالي الملفات بعد فك الضغط أكبر من الحد المسموح.');
+    if(localOffset+30>buffer.length||buffer.readUInt32LE(localOffset)!==0x04034b50)throw new Error('رأس ملف داخلي في ZIP تالف.');
+    const localNameLen=buffer.readUInt16LE(localOffset+26),localExtraLen=buffer.readUInt16LE(localOffset+28),dataStart=localOffset+30+localNameLen+localExtraLen,dataEnd=dataStart+compressedSize;
+    if(dataEnd>buffer.length)throw new Error('بيانات أحد ملفات ZIP غير مكتملة.');
+    const compressed=buffer.subarray(dataStart,dataEnd);let output;
+    if(method===0)output=Buffer.from(compressed);else if(method===8)output=zlib.inflateRawSync(compressed,{maxOutputLength:12*1024*1024});else throw new Error('طريقة ضغط ZIP غير مدعومة: '+method);
+    if(output.length!==uncompressedSize||zipCrc32(output)!==expectedCrc)throw new Error('فشل التحقق من سلامة الملف داخل ZIP: '+name);
+    entries[name.replace(/\\/g,'/')]=output;
+  }
+  return entries;
+}
+function parseLegacyJsonEntry(entries,name){const key=Object.keys(entries).find(k=>k===name||k.endsWith('/'+name));if(!key)throw new Error('ملف ZIP لا يحتوي على '+name);try{return JSON.parse(entries[key].toString('utf8'));}catch(_){throw new Error('ملف '+name+' ليس JSON صالحاً.');}}
+function assertUniqueIds(rows,label){if(!Array.isArray(rows))throw new Error('قائمة '+label+' ليست مصفوفة.');const ids=new Set();for(const row of rows){const id=String(row?.id??'').trim();if(!id)throw new Error('يوجد سجل بلا معرّف في '+label+'.');if(ids.has(id))throw new Error('يوجد معرّف مكرر في '+label+'.');ids.add(id);}return ids;}
+function normalizeLegacyBalance(value){const n=Number(value);return Number.isFinite(n)?n:0;}
+function legacyUserPrivateRow(u){return {id:String(u?.id||''),email:normalizeEmail(u?.email||''),full_name:String(u?.full_name||'').slice(0,160),arabic_name:String(u?.arabic_name||'').slice(0,160),user_code:String(u?.user_code||''),balance:normalizeLegacyBalance(u?.balance),created_date:String(u?.created_date||''),updated_date:String(u?.updated_date||'')};}
+function legacyOrderPrivateRow(o){return {id:String(o?.id||''),order_number:String(o?.order_number||''),user_id:String(o?.user_id||''),user_name:String(o?.user_name||''),service_id:String(o?.service_id||''),service_name:String(o?.service_name||'خدمة'),platform_name:String(o?.platform_name||''),provider_id:String(o?.provider_id||''),provider_name:String(o?.provider_name||''),provider_order_id:String(o?.provider_order_id||''),quantity:Number(o?.quantity||0)||0,link:String(o?.link||''),total_price:Number(o?.total_price||0)||0,cost:Number(o?.cost||0)||0,status:String(o?.status||'new'),provider_status:String(o?.provider_status||''),is_free:!!o?.is_free,start_count:o?.start_count??null,remains:o?.remains??null,created_date:String(o?.created_date||''),updated_date:String(o?.updated_date||'')};}
+function legacyStableFirebaseKey(id){return 'legacy_'+sha256(String(id||'')).slice(0,32);}
+function legacyAliasUser(id){return 'legacy_'+sha256(String(id||'unknown')).slice(0,12);}
+function legacyStatus(value){const v=String(value||'').trim().toLowerCase().replace(/[\\s-]+/g,'_');const map={new:'pending',pending:'pending',waiting:'pending',processing:'processing',in_progress:'processing',completed:'completed',complete:'completed',partial:'partial',canceled:'cancelled',cancelled:'cancelled',refunded:'refunded',error:'failed',failed:'failed'};return map[v]||'pending';}
+function collectionEntries(value){if(Array.isArray(value))return value.map((v,i)=>[String(i),v]);if(value&&typeof value==='object')return Object.entries(value);return [];}
+function normalizeCurrentUsers(root){const users=[];const emailMap=new Map(),nameMap=new Map();for(const [key,raw] of collectionEntries(root)){if(!raw||typeof raw!=='object'||Array.isArray(raw))continue;const username=String(raw.username||decodeFirebaseSafeKey(key)||key).trim();if(!username)continue;const item={key,username,user:raw,email:normalizeEmail(raw.email||raw.mail||raw.emailAddress||'')};users.push(item);if(item.email){const arr=emailMap.get(item.email)||[];arr.push(item);emailMap.set(item.email,arr);}const n=username.toLowerCase();const arr=nameMap.get(n)||[];arr.push(item);nameMap.set(n,arr);}return {users,emailMap,nameMap};}
+function mapLegacyUsersToCurrent(legacyUsers,currentDirectory){const byLegacyId=new Map(),matchedIds=new Set();for(const old of legacyUsers){let match=null;const email=normalizeEmail(old.email||'');const emailRows=email?currentDirectory.emailMap.get(email)||[]:[];if(emailRows.length===1)match=emailRows[0];else if(emailRows.length>1)match=null;if(!match&&old.user_code){const candidates=currentDirectory.nameMap.get(String(old.user_code).trim().toLowerCase())||[];if(candidates.length===1)match=candidates[0];}if(match){byLegacyId.set(String(old.id),match);matchedIds.add(String(old.id));}else byLegacyId.set(String(old.id),null);}return {byLegacyId,matchedIds};}
+function legacyPublicOrderNumber(old,duplicateOrderNumbers,liveNumbers,allocatedNumbers){const n=String(old.order_number||'').trim();if(n&&duplicateOrderNumbers.get(n)===1&&!liveNumbers.has(n)&&!allocatedNumbers.has(n)){allocatedNumbers.add(n);return n;}let candidate='H'+sha256(String(old.id)).slice(0,10).toUpperCase();while(liveNumbers.has(candidate)||allocatedNumbers.has(candidate))candidate='H'+sha256(candidate+String(old.id)).slice(0,10).toUpperCase();allocatedNumbers.add(candidate);return candidate;}
+function legacyOrderMatchesLive(old,matchedUsername,liveOrders){if(!matchedUsername)return false;const oldProvider=String(old.provider_id||''),oldProviderOrder=String(old.provider_order_id||'');for(const [,r] of liveOrders){if(!r||typeof r!=='object'||r.legacyHistory)continue;if(String(r.user||r.username||'')!==matchedUsername)continue;const rp=String(r.providerId||r.provider_id||''),rpo=String(r.providerOrderId||r.provider_order_id||r.smmpartyOrderId||'');if(oldProviderOrder&&rpo===oldProviderOrder&&(!oldProvider||!rp||oldProvider===rp))return true;const rid=String(r.publicOrderNo||r.id||r.order_id||'');if(old.order_number&&rid===String(old.order_number)&&String(r.serviceName||r.service||'')===String(old.service_name||'')&&String(r.link||'')===String(old.link||'')&&Number(r.quantity||0)===Number(old.quantity||0))return true;}return false;}
+function buildLegacyOrderRecord(old,legacyUser,matched,currentDirectory,publicOrderNo){
+  const username=matched?.username||legacyAliasUser(old.user_id);const currentName=matched?.user?.name||matched?.user?.fullName||matched?.user?.full_name||'';const priceUsd=Math.max(0,Number(old.total_price||0)||0);const costUsd=Math.max(0,Number(old.cost||0)||0);const qty=Math.max(0,Number(old.quantity||0)||0);
+  return {id:String(publicOrderNo),publicOrderNo:String(publicOrderNo),user:username,userName:String(currentName||legacyUser?.arabic_name||legacyUser?.full_name||old.user_name||username),serviceId:String(old.service_id||''),serviceName:String(old.service_name||'خدمة'),serviceApp:String(old.platform_name||''),platform:String(old.platform_name||''),link:String(old.link||''),quantity:qty,total:Number((priceUsd*FIXED_RATE).toFixed(4)),totalIQD:Number((priceUsd*FIXED_RATE).toFixed(4)),chargeUsd:Number(priceUsd.toFixed(6)),providerCostUsd:Number(costUsd.toFixed(6)),unitSellingUsd:qty?Number((priceUsd*1000/qty).toFixed(6)):0,discountPct:0,status:legacyStatus(old.status),rawLegacyStatus:String(old.status||''),providerStatus:String(old.provider_status||''),providerId:'',providerOrderId:'',providerName:'',legacyProviderId:String(old.provider_id||''),legacyProviderOrderId:String(old.provider_order_id||''),legacyProviderName:String(old.provider_name||''),free:!!old.is_free,remains:old.remains??null,startCount:old.start_count??null,createdAt:String(old.created_date||''),updatedAt:String(old.updated_date||old.created_date||''),legacyHistory:true,readOnly:true,legacyImportKey:String(old.id),legacyOrderId:String(old.id),legacyOrderNumber:String(old.order_number||''),legacyUserId:String(old.user_id||''),legacyEmailHash:legacyUser?.email?sha256(normalizeEmail(legacyUser.email)):'' ,legacySource:'Base44 export'};
+}
+async function readLegacyStage(){const stage=readJSON(LEGACY_STAGE_FILE,null);if(!stage||stage.version!==1||!Array.isArray(stage.users)||!Array.isArray(stage.orders))return null;return stage;}
+async function getLegacyRemoteSnapshot(){let remoteUsers,remoteOrders;try{[remoteUsers,remoteOrders]=await Promise.all([firebaseGetJson('users',12000),firebaseGetJson('orders',15000)]);}catch(e){throw Object.assign(new Error('تعذر الوصول إلى قاعدة Firebase الحية؛ لم يتم تغيير أي بيانات. '+String(e.message||e).slice(0,140)),{statusCode:503});}return {remoteUsers:remoteUsers||{},remoteOrders:remoteOrders||{}};}
+function createLegacyPlan(stage,remoteUsers,remoteOrders){
+  const directory=normalizeCurrentUsers(remoteUsers),mapped=mapLegacyUsersToCurrent(stage.users,directory),remoteOrderRows=collectionEntries(remoteOrders).filter(([,o])=>o&&typeof o==='object'&&!o.event),legacyById=new Map();
+  for(const [k,o] of remoteOrderRows)if(o.legacyHistory&&o.legacyImportKey)legacyById.set(String(o.legacyImportKey),{key:k,order:o});
+  const liveRows=remoteOrderRows.filter(([,o])=>!o.legacyHistory);const liveNumbers=new Set();for(const [,o] of liveRows){for(const n of [o.publicOrderNo,o.id,o.order_id])if(n!==undefined&&n!==null&&String(n).trim())liveNumbers.add(String(n).trim());}
+  const numberCounts=new Map();for(const o of stage.orders){const n=String(o.order_number||'').trim();if(n)numberCounts.set(n,(numberCounts.get(n)||0)+1);}
+  const allocated=new Set(),upserts={},balanceCandidates=[],oldUserById=new Map(stage.users.map(u=>[String(u.id),u])),legacyOrderCountsByUsername={};let alreadyImported=0,liveDuplicates=0,unmatchedOrderUsers=0;
+  for(const old of stage.orders){const oldId=String(old.id),oldUser=oldUserById.get(String(old.user_id));const matched=mapped.byLegacyId.get(String(old.user_id))||null;const existing=legacyById.get(oldId);if(existing)alreadyImported++;
+    if(!existing&&legacyOrderMatchesLive(old,matched?.username,liveRows)){liveDuplicates++;continue;}
+    const pub=legacyPublicOrderNumber(old,numberCounts,liveNumbers,allocated);const row=buildLegacyOrderRecord(old,oldUser,matched,directory,pub);
+    if(!matched)unmatchedOrderUsers++;
+    if(matched)legacyOrderCountsByUsername[matched.username]=(legacyOrderCountsByUsername[matched.username]||0)+1;
+    if(existing){upserts[existing.key]={...existing.order,...row,legacyImportKey:oldId,legacyHistory:true,readOnly:true,legacyCountedForUser:!!matched,legacyImportedAt:existing.order.legacyImportedAt||nowISO()};}
+    else upserts[legacyStableFirebaseKey(oldId)]={...row,legacyCountedForUser:!!matched,legacyImportedAt:nowISO()};
+  }
+  const localLedger=readJSON('balance_ledger.json',[]),localPayments=readJSON('payments.json',[]);const existingOrderCounts=new Map();for(const [,o] of liveRows){const u=String(o.user||o.username||'');if(u)existingOrderCounts.set(u,(existingOrderCounts.get(u)||0)+1);}
+  let matchedPositiveBalances=0,unmatchedPositiveBalances=0,balancesAlreadyRestored=0,balanceSkippedExisting=0,negativeBalancesSkipped=0;const balanceRestorePlan=[];
+  for(const old of stage.users){const oldBalance=Number(old.balance||0);if(oldBalance<0){negativeBalancesSkipped++;continue;}if(oldBalance<=0)continue;const matched=mapped.byLegacyId.get(String(old.id));if(!matched){unmatchedPositiveBalances++;continue;}if(matched.user.legacyBalanceRestoredFromBase44===true){balancesAlreadyRestored++;continue;}
+    const bal=Number(matched.user.balance);const hasBalance=matched.user.balance!==undefined&&matched.user.balance!==null&&matched.user.balance!=='';const activeOrders=Number(existingOrderCounts.get(matched.username)||0)>0;const activeTotals=Number(matched.user.totalOrders||0)>0||Number(matched.user.totalSpent||0)>0;const ledgerActivity=localLedger.some(x=>String(x?.user||'')===matched.username)||localPayments.some(x=>String(x?.user||x?.username||'')===matched.username);const active=activeOrders||activeTotals||ledgerActivity;
+    if((hasBalance&&Math.abs(bal)>0.000001)||active){balanceSkippedExisting++;continue;}
+    balanceRestorePlan.push({old,matched,balanceUsd:oldBalance,balanceIQD:Number((oldBalance*FIXED_RATE).toFixed(4))});matchedPositiveBalances++;
+  }
+  return {directory,mapped,remoteOrderRows,liveRows,upserts,alreadyImported,liveDuplicates,unmatchedOrderUsers,legacyOrderCountsByUsername,matchedUsers:mapped.matchedIds.size,unmatchedUsers:stage.users.length-mapped.matchedIds.size,balanceRestorePlan,matchedPositiveBalances,unmatchedPositiveBalances,balancesAlreadyRestored,balanceSkippedExisting,negativeBalancesSkipped,legacyUserById:oldUserById,counts:{users:stage.users.length,orders:stage.orders.length,transactions:Number(stage.transactionCount||0)}};
+}
+function legacyOrderResponseRecord(order,key){return {...order,source:order.legacyHistory?'legacy':'live',readOnly:!!order.legacyHistory,legacyFirebaseKey:order.legacyHistory?String(key||''):undefined};}
+
 async function routeAPI(req,res,urlObj){
   const p=normalizedPath(urlObj.pathname);
+
+  // Administrator-only legacy database workflow. Uploaded archive is validated and stored
+  // in the private DATA directory; database content is never served as static files.
+  if(p==='/api/admin/legacy-import/upload'&&req.method==='POST'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
+    const ct=String(req.headers['content-type']||'').toLowerCase();if(!ct.includes('application/zip')&&!ct.includes('application/octet-stream'))return json(res,415,{ok:false,error:'ارفع ملف ZIP بصيغة application/zip.'});
+    const bytes=await readRawRequestBuffer(req);const entries=readZipArchive(bytes);const dbKey=Object.keys(entries).find(k=>k==='sadairaq.db'||k.endsWith('/sadairaq.db'));if(!dbKey||entries[dbKey].subarray(0,16).toString('binary')!=='SQLite format 3\u0000')return json(res,422,{ok:false,error:'ملف SQLite غير موجود أو تالف داخل ZIP.'});
+    const users=parseLegacyJsonEntry(entries,'sadairaq-users.json'),orders=parseLegacyJsonEntry(entries,'sadairaq-orders.json'),transactions=parseLegacyJsonEntry(entries,'sadairaq-transactions.json');
+    const userIds=assertUniqueIds(users,'المستخدمين'),orderIds=assertUniqueIds(orders,'الطلبات'),transactionIds=assertUniqueIds(transactions,'المعاملات');const linkedOrders=orders.filter(o=>userIds.has(String(o?.user_id||''))).length;
+    if(!users.length||!orders.length||linkedOrders!==orders.length)return json(res,422,{ok:false,error:'فشل التحقق من العلاقات بين المستخدمين والطلبات؛ لم يتم حفظ أي بيانات.',counts:{users:users.length,orders:orders.length,linkedOrders}});
+    const privateUsers=users.map(legacyUserPrivateRow);const privateOrders=orders.map(legacyOrderPrivateRow);
+    const stage={version:1,uploadedAt:nowISO(),sourceFile:'SadaIraq_Database_Export.zip',sourceZipBytes:bytes.length,users:privateUsers,orders:privateOrders,transactionCount:transactions.length,counts:{users:users.length,orders:orders.length,transactions:transactions.length}};
+    writeJSON(LEGACY_STAGE_FILE,stage);
+    return json(res,200,{ok:true,uploaded:true,zipBytes:bytes.length,counts:stage.counts,linkedOrders,checks:{sqliteHeader:true,zipCrcsValid:true,userIdsUnique:userIds.size===users.length,orderIdsUnique:orderIds.size===orders.length,transactionIdsUnique:transactionIds.size===transactions.length,allOrdersLinkedToUsers:linkedOrders===orders.length},message:'تم فحص الملف وتخزين بيانات الترحيل بشكل خاص. لم يتم تعديل قاعدة Firebase بعد.'});
+  }
+  if(p==='/api/admin/legacy-import/preview'&&req.method==='GET'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const stage=await readLegacyStage();if(!stage)return json(res,404,{ok:false,error:'لم يتم رفع ملف قاعدة البيانات بعد. اختر ملف ZIP أولاً.'});
+    try{const remote=await getLegacyRemoteSnapshot();const plan=createLegacyPlan(stage,remote.remoteUsers,remote.remoteOrders);return json(res,200,{ok:true,ready:true,counts:plan.counts,matchedUsers:plan.matchedUsers,unmatchedUsers:plan.unmatchedUsers,ordersToAdd:Object.keys(plan.upserts).length-plan.alreadyImported,ordersAlreadyImported:plan.alreadyImported,duplicatesAlreadyInLiveDatabase:plan.liveDuplicates,unmatchedOrderUsers:plan.unmatchedOrderUsers,balancesToRestore:plan.balanceRestorePlan.length,unmatchedPositiveBalances:plan.unmatchedPositiveBalances,balanceSkippedExisting:plan.balanceSkippedExisting,negativeBalancesSkipped:plan.negativeBalancesSkipped,balancesAlreadyRestored:plan.balancesAlreadyRestored,exchangeRate:FIXED_RATE,warning:'سيتم ربط الطلبات بالبريد المطابق فقط. الحسابات القديمة التي لا تملك حساباً مطابقاً تبقى ظاهرة للإدارة باسم سجل قديم ولا يمكنها تسجيل الدخول بكلمة مرور Base44 القديمة.'});}catch(e){return json(res,503,{ok:false,error:String(e.message||e)});}
+  }
+  if(p==='/api/admin/legacy-import/apply'&&req.method==='POST'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);if(String(b.confirm||'')!==LEGACY_IMPORT_CONFIRM)return json(res,422,{ok:false,error:'اكتب تأكيد الدمج الصحيح من لوحة الإدارة.'});const stage=await readLegacyStage();if(!stage)return json(res,404,{ok:false,error:'ملف الترحيل غير موجود. ارفع ملف ZIP مرة أخرى.'});
+    let remote;try{remote=await getLegacyRemoteSnapshot();}catch(e){return json(res,503,{ok:false,error:String(e.message||e)});}const plan=createLegacyPlan(stage,remote.remoteUsers,remote.remoteOrders);
+    let ordersWritten=0;try{if(Object.keys(plan.upserts).length){await firebasePatchJson('orders',plan.upserts,30000);ordersWritten=Math.max(0,Object.keys(plan.upserts).length-plan.alreadyImported);}}catch(e){return json(res,503,{ok:false,error:'تعذر حفظ الطلبات القديمة في Firebase. لم نحذف ملف الترحيل؛ أعد المحاولة بعد التأكد من الاتصال. '+String(e.message||e).slice(0,160),partial:false});}
+    // Keep a private, minimal index of legacy users for the admin's user-count report and
+    // future remapping of users who register later. No password, phone, Telegram ID or tokens.
+    writeJSON(LEGACY_USERS_PRIVATE_FILE,stage.users.map(legacyUserPrivateRow));
+    let balancesRestored=0,balanceWriteErrors=0,orderCountersUpdated=0,orderCounterWriteErrors=0;const balanceErrorNames=[];
+    // Synchronize the legacy portion of each matched account's order counter exactly once.
+    // The per-user marker makes retries safe if an earlier HTTP request timed out after Firebase saved.
+    const counterUpdates=[];
+    for(const [username,targetCountRaw] of Object.entries(plan.legacyOrderCountsByUsername||{})){
+      const matched=plan.directory.users.find(x=>x.username===username);if(!matched)continue;
+      const targetCount=Math.max(Number(matched.user.legacyBase44OrdersCount||0),Number(targetCountRaw||0));
+      const previouslyCounted=Math.max(0,Number(matched.user.legacyBase44OrdersCount||0));
+      const delta=Math.max(0,targetCount-previouslyCounted);
+      const totalBefore=Math.max(0,Number(matched.user.totalOrders||0)||0);
+      if(delta===0&&Number(matched.user.legacyBase44OrdersCount||0)===targetCount)continue;
+      counterUpdates.push({matched,targetCount,newTotalOrders:totalBefore+delta});
+    }
+    for(let i=0;i<counterUpdates.length;i+=12){const chunk=counterUpdates.slice(i,i+12);const settled=await Promise.allSettled(chunk.map(async item=>{const patch={totalOrders:item.newTotalOrders,legacyBase44OrdersCount:item.targetCount,legacyOrdersCounterUpdatedAt:nowISO(),updatedAt:nowISO()};await firebasePatchJson('users/'+item.matched.key,patch,9000);return true;}));for(let j=0;j<settled.length;j++){if(settled[j].status==='fulfilled')orderCountersUpdated++;else orderCounterWriteErrors++;}}
+    for(let i=0;i<plan.balanceRestorePlan.length;i+=8){const chunk=plan.balanceRestorePlan.slice(i,i+8);const settled=await Promise.allSettled(chunk.map(async item=>{const patch={balance:item.balanceIQD,legacyBase44UserId:String(item.old.id),legacyBalanceOriginalUSD:item.balanceUsd,legacyBalanceRestoredFromBase44:true,legacyBalanceRestoredAt:nowISO(),updatedAt:nowISO()};await firebasePatchJson('users/'+item.matched.key,patch,9000);return true;}));for(let j=0;j<settled.length;j++){if(settled[j].status==='fulfilled')balancesRestored++;else{balanceWriteErrors++;if(balanceErrorNames.length<3)balanceErrorNames.push(String(settled[j].reason?.message||'فشل حفظ رصيد').slice(0,100));}}}
+    const finalReport={completedAt:nowISO(),sourceFile:stage.sourceFile,counts:plan.counts,matchedUsers:plan.matchedUsers,unmatchedUsers:plan.unmatchedUsers,ordersWritten,ordersAlreadyImported:plan.alreadyImported,duplicatesAlreadyInLiveDatabase:plan.liveDuplicates,unmatchedOrderUsers:plan.unmatchedOrderUsers,orderCountersUpdated,orderCounterWriteErrors,balancesRestored,balanceWriteErrors,unmatchedPositiveBalances:plan.unmatchedPositiveBalances,balanceSkippedExisting:plan.balanceSkippedExisting,negativeBalancesSkipped:plan.negativeBalancesSkipped,balancesAlreadyRestored:plan.balancesAlreadyRestored,exchangeRate:FIXED_RATE};
+    writeJSON(LEGACY_IMPORT_STATE_FILE,finalReport);
+    if(balanceWriteErrors===0){try{fs.unlinkSync(path.join(DATA,LEGACY_STAGE_FILE));}catch(_){} }
+    return json(res,200,{ok:true,report:finalReport,warning:(balanceWriteErrors||orderCounterWriteErrors)?'تم حفظ الطلبات القديمة، لكن تعذر تحديث بعض الأرصدة أو عدادات الطلبات. ملف الترحيل محفوظ؛ أعد الفحص والدمج بعد التأكد من الاتصال.':(plan.unmatchedUsers?'بعض حسابات القاعدة القديمة لا تطابق بريداً في المشروع الجديد؛ طلباتها محفوظة باسم سجل قديم، ولن يستطيع صاحبها رؤيتها بحسابه حتى يوجد حساب مطابق بالبريد ثم تعيد رفع ZIP وتضغط دمج مرة أخرى.':'تم ربط الطلبات بالحسابات المطابقة، ومزامنة عدد الطلبات التاريخية لكل حساب. كل طلب جديد سيزيد الإجمالي تلقائياً بمقدار واحد.')});
+  }
+  if(p==='/api/admin/legacy-import/status'&&req.method==='GET'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const stage=await readLegacyStage(),report=readJSON(LEGACY_IMPORT_STATE_FILE,null);return json(res,200,{ok:true,uploaded:!!stage,stagedCounts:stage?.counts||null,lastImport:report||null});
+  }
+  if(p==='/api/admin/user-order-stats'&&req.method==='GET'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});let remoteUsers={},remoteOrders={};let firebaseAvailable=true;try{[remoteUsers,remoteOrders]=await Promise.all([firebaseGetJson('users',12000),firebaseGetJson('orders',15000)]);remoteUsers=remoteUsers||{};remoteOrders=remoteOrders||{};}catch(e){firebaseAvailable=false;return json(res,503,{ok:false,error:'تعذر قراءة المستخدمين والطلبات من Firebase: '+String(e.message||e).slice(0,140)});}
+    const directory=normalizeCurrentUsers(remoteUsers),currentByUsername=new Map(directory.users.map(u=>[u.username,u]));const oldUsers=readJSON(LEGACY_USERS_PRIVATE_FILE,[]);const oldById=new Map((Array.isArray(oldUsers)?oldUsers:[]).map(u=>[String(u.id),u]));const localOrders=readJSON('orders.json',[]);const dedup=new Map();
+    const addOrder=(o,source,key='')=>{if(!o||typeof o!=='object'||o.event)return;const user=String(o.user||o.username||'').trim();if(!user)return;const identity=String(o.legacyHistory?'legacy:'+o.legacyImportKey:(o.id||o.siteOrderId||o.orderId||o.order_id||o.providerOrderId||o.smmpartyOrderId||key||o.createdAt||''));if(!identity)return;dedup.set(user+'|'+identity,{o,user,source});};
+    for(const [i,o] of (Array.isArray(localOrders)?localOrders:[]).entries())addOrder(o,'local',String(i));for(const [k,o] of collectionEntries(remoteOrders))addOrder(o,o.legacyHistory?'legacy':'firebase',k);
+    const groups=new Map();for(const {o,user,source} of dedup.values()){
+      const curr=currentByUsername.get(user);const legacyId=String(o.legacyUserId||'');const old=oldById.get(legacyId);const groupKey=curr?'current:'+user:(legacyId?'legacy:'+legacyId:'current:'+user);let g=groups.get(groupKey);if(!g){g={username:curr?user:(legacyId?legacyAliasUser(legacyId):user),name:String(curr?.user?.name||curr?.user?.fullName||old?.arabic_name||old?.full_name||o.userName||o.name||user),orderCount:0,legacyOrderCount:0,newOrderCount:0,balanceUsd:curr?Number(curr.user.balance||0)/FIXED_RATE:Number(old?.balance||0),balanceSource:curr?'current-account':'legacy-snapshot',legacyUserId:legacyId||null,hasCurrentAccount:!!curr};groups.set(groupKey,g);}
+      g.orderCount++;if(o.legacyHistory)g.legacyOrderCount++;else g.newOrderCount++;if(curr){g.name=String(curr.user.name||curr.user.fullName||g.name);g.balanceUsd=Number(curr.user.balance||0)/FIXED_RATE;g.balanceSource='current-account';}
+    }
+    const q=String(urlObj.searchParams.get('q')||'').trim().toLowerCase();const limit=Math.min(100,Math.max(5,Number(urlObj.searchParams.get('limit')||50)));const rows=[...groups.values()].filter(x=>x.orderCount>0&&(!q||[x.name,x.username,x.legacyUserId].some(v=>String(v||'').toLowerCase().includes(q)))).sort((a,b)=>b.orderCount-a.orderCount||a.name.localeCompare(b.name,'ar')).slice(0,limit);return json(res,200,{ok:true,users:rows,total:groups.size,orders:dedup.size,firebaseAvailable});
+  }
 
   // -------------------- Public API key management --------------------
   if(p==='/api/user/api-key' && req.method==='GET'){
@@ -1659,7 +1804,11 @@ async function routeAPI(req,res,urlObj){
     return json(res,200,{ok:true,username,balanceUsd:Number((result.after/FIXED_RATE).toFixed(6)),beforeUsd:Number((result.before/FIXED_RATE).toFixed(6)),afterUsd:Number((result.after/FIXED_RATE).toFixed(6))});
   }
   if(p==='/api/admin/balance-ledger' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const user=String(urlObj.searchParams.get('user')||'');const rows=readJSON('balance_ledger.json',[]).filter(x=>!user||String(x.user||'')===user).slice(-500).reverse();return json(res,200,{ok:true,ledger:rows});}
-  if(p==='/api/admin/user-finance' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const username=String(urlObj.searchParams.get('username')||'').trim();if(!username)return json(res,422,{ok:false,error:'اسم المستخدم مطلوب'});const u=readJSON('users.json',{users:{}}).users?.[username];if(!u)return json(res,404,{ok:false,error:'المستخدم غير موجود'});const orders=readJSON('orders.json',[]).filter(o=>String(o.user||'')===username);const ledger=readJSON('balance_ledger.json',[]).filter(x=>String(x.user||'')===username);const deposits=ledger.filter(x=>['charge','deposit'].includes(String(x.type||''))).reduce((a,x)=>a+Number(x.amountUSD||Number(x.amountIQD||0)/FIXED_RATE||0),0);const spent=orders.reduce((a,o)=>a+Number(o.chargeUsd??Number(o.total||0)/FIXED_RATE),0);return json(res,200,{ok:true,user:{username,name:String(u.name||username),balanceUsd:Number((Number(u.balance||0)/FIXED_RATE).toFixed(6)),totalDepositsUsd:Number(deposits.toFixed(6)),totalSpentUsd:Number(spent.toFixed(6)),totalOrders:orders.length,discountPct:Number(u.discountPct||0)}});}
+  if(p==='/api/admin/user-finance' && req.method==='GET'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const username=String(urlObj.searchParams.get('username')||'').trim();if(!username)return json(res,422,{ok:false,error:'اسم المستخدم مطلوب'});const u=readJSON('users.json',{users:{}}).users?.[username];if(!u)return json(res,404,{ok:false,error:'المستخدم غير موجود'});
+    const orderMap=new Map();const add=o=>{if(!o||o.event||String(o.user||o.username||'')!==username)return;const id=String(o.legacyHistory?'legacy:'+o.legacyImportKey:(o.id||o.siteOrderId||o.orderId||o.order_id||o.providerOrderId||o.createdAt||''));if(id)orderMap.set(id,{...(orderMap.get(id)||{}),...o});};for(const o of readJSON('orders.json',[]))add(o);try{const rem=await firebaseGetJson('orders',9000);for(const [,o] of collectionEntries(rem))add(o);}catch(_){}
+    const orders=[...orderMap.values()];const ledger=readJSON('balance_ledger.json',[]).filter(x=>String(x.user||'')===username);const deposits=ledger.filter(x=>['charge','deposit'].includes(String(x.type||''))).reduce((a,x)=>a+Number(x.amountUSD||Number(x.amountIQD||0)/FIXED_RATE||0),0);const spent=orders.reduce((a,o)=>a+Number(o.chargeUsd??Number(o.total||0)/FIXED_RATE),0);return json(res,200,{ok:true,user:{username,name:String(u.name||username),balanceUsd:Number((Number(u.balance||0)/FIXED_RATE).toFixed(6)),totalDepositsUsd:Number(deposits.toFixed(6)),totalSpentUsd:Number(spent.toFixed(6)),totalOrders:orders.length,legacyOrders:orders.filter(o=>o.legacyHistory).length,discountPct:Number(u.discountPct||0)}});
+  }
   if(p==='/api/admin/telegram' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const cfg=telegramConfig();return json(res,200,{ok:true,telegram:{enabled:cfg.enabled,tokenSet:!!cfg.token,chat:cfg.chat||'',activationChat:cfg.activationChat||'',overdueChat:cfg.overdueChat||'',activationEnvLocked:cfg.activationEnvLocked,overdueEnvLocked:cfg.overdueEnvLocked,extraChatsCount:(cfg.extraChats||[]).length}});}
   if(p==='/api/admin/telegram' && req.method==='POST'){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const cfg=readJSON('settings.json',{});const tg=cfg.telegram||{};
@@ -2086,12 +2235,11 @@ async function routeAPI(req,res,urlObj){
     if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
     const q=String(urlObj.searchParams.get('q')||'').trim().toLowerCase();
     const st=String(urlObj.searchParams.get('status')||'').trim().toLowerCase();
-    const rows=readJSON('orders.json',[]).filter(o=>{
-      const hay=[o.id,o.user,o.link,o.serviceName,o.providerOrderId].map(v=>String(v||'').toLowerCase()).join(' ');
-      const norm=normalizeProviderStatus(o.status||'pending');
-      return (!q||hay.includes(q))&&(!st||st==='all'||norm===st);
-    }).sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0)).slice(0,500);
-    return json(res,200,{ok:true,orders:rows});
+    const merged=new Map();const keyOf=o=>String(o?.legacyHistory?'legacy:'+o.legacyImportKey:(o?.id||o?.siteOrderId||o?.orderId||o?.order_id||o?.providerOrderId||o?.smmpartyOrderId||o?.createdAt||''))+'|'+String(o?.user||o?.username||'');
+    for(const o of readJSON('orders.json',[])){if(!o||o.event)continue;merged.set(keyOf(o),{...o,source:'server',readOnly:false});}
+    let firebaseAvailable=true,firebaseWarning='';try{const remote=await firebaseGetJson('orders',12000);for(const [k,o] of collectionEntries(remote)){if(!o||typeof o!=='object'||o.event)continue;const id=keyOf(o),prior=merged.get(id)||{};merged.set(id,{...prior,...o,source:o.legacyHistory?'legacy':'firebase',readOnly:!!o.legacyHistory});}}catch(e){firebaseAvailable=false;firebaseWarning=String(e.message||e).slice(0,140);}
+    const rows=[...merged.values()].filter(o=>{const hay=[o.id,o.publicOrderNo,o.user,o.userName,o.link,o.serviceName,o.providerOrderId,o.legacyOrderId,o.legacyOrderNumber].map(v=>String(v||'').toLowerCase()).join(' ');const norm=normalizeProviderStatus(o.status||'pending');return (!q||hay.includes(q))&&(!st||st==='all'||norm===st);}).sort((a,b)=>(Date.parse(b.createdAt||0)||0)-(Date.parse(a.createdAt||0)||0)).slice(0,500);
+    return json(res,200,{ok:true,orders:rows,firebaseAvailable,warning:firebaseWarning||undefined,readOnlyLegacyCount:rows.filter(x=>x.legacyHistory).length});
   }
   if(p==='/api/admin/order-status' && req.method==='POST'){
     if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});

@@ -1,7 +1,7 @@
 {
   "appName": "صدى العراق",
-  "version": "1.5.74",
-  "buildId": "SADA-1.5.74-REGISTER-EMAIL-LOGIN-ASIACELL-TELEGRAM-ORDERS-20261010",
+  "version": "1.5.75",
+  "buildId": "SADA-1.5.75-LEGACY-ORDERS-USER-STATS-20261010",
   "currency": "USD",
   "exchangeRate": 1250,
   "fixedRecharge": "5000 IQD = 4 USD",
