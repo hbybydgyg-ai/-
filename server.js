@@ -13,8 +13,8 @@ const LEGACY_DATA = path.join(ROOT, 'data');
 const DATA = path.resolve(process.env.SADA_DATA_DIR || process.env.DATA_DIR || (process.env.RAILWAY_VOLUME_MOUNT_PATH ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sada-data') : LEGACY_DATA));
 const DATA_IS_EXTERNAL = path.resolve(DATA) !== path.resolve(LEGACY_DATA);
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.70';
-const BUILD_ID = 'SADA-1.5.70-CONSOLIDATED-NOTIFICATIONS-SUPPORT-ACCOUNT-UI-20261010';
+const APP_VERSION = '1.5.72';
+const BUILD_ID = 'SADA-1.5.72-EMAIL-RECOVERY-PERSISTENT-DATA-EARNINGS-SECURE-SECRETS-20261010';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 // Restored the default administrator login from the supplied original release. Set ADMIN_PASSWORD in Railway to override it.
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2');
@@ -28,7 +28,7 @@ const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PA
 const SESSION_COOKIE = 'sadairaq_sid';
 const SESSION_TOKEN_HEADER = 'x-sada-session';
 const RATE_BUCKETS = new Map();
-const RATE_RULES = { auth:{window:60_000,max:12}, captcha:{window:60_000,max:30}, provider:{window:60_000,max:20}, order:{window:60_000,max:20}, api:{window:60_000,max:60}, general:{window:60_000,max:60} };
+const RATE_RULES = { auth:{window:60_000,max:12}, captcha:{window:60_000,max:30}, email:{window:10*60_000,max:5}, provider:{window:60_000,max:20}, order:{window:60_000,max:20}, api:{window:60_000,max:60}, general:{window:60_000,max:60} };
 function clientIp(req){ return String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim(); }
 function rateLimit(req,bucket='general'){ const r=RATE_RULES[bucket]||RATE_RULES.general; const key=clientIp(req)+'|'+bucket; const now=Date.now(); let x=RATE_BUCKETS.get(key); if(!x||now-x.started>r.window)x={started:now,count:0}; x.count++; RATE_BUCKETS.set(key,x); if(x.count>r.max){ return Math.ceil((x.started+r.window-now)/1000); } return 0; }
 setInterval(()=>{ const now=Date.now(); for(const [k,v] of RATE_BUCKETS) if(now-v.started>120_000) RATE_BUCKETS.delete(k); for(const [k,v] of sessions) if(now-(v.createdAt||0)>SESSION_TTL_MS) sessions.delete(k); }, 120_000).unref();
@@ -70,7 +70,8 @@ function ensureData() {
     'refunds.json':[],
     'api_keys.json':{},
     'stats_state.json':{resetAt:null},
-    'order_audit_state.json':{alerts:{}}
+    'order_audit_state.json':{alerts:{}},
+    'email_challenges.json':{}
   };
   for(const [file,def] of Object.entries(defaults)){
     const full=path.join(DATA,file);
@@ -80,9 +81,13 @@ function ensureData() {
     else if(file==='orders.json'||file==='provider_failures.json'||file==='payments.json'||file==='notifications.json'||file==='telegram_notifications.json') ok=Array.isArray(cur);
     else if(file==='notification_seen.json'||file==='user_notifications.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
     else if(file==='providers.json') ok=!!(cur&&typeof cur==='object'&&cur.providers&&typeof cur.providers==='object'&&!Array.isArray(cur.providers));
-    else if(file==='settings.json'||file==='api_keys.json'||file==='stats_state.json'||file==='order_audit_state.json'||file==='google_accounts.json'||file==='telegram_order_state.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
+    else if(file==='settings.json'||file==='api_keys.json'||file==='stats_state.json'||file==='order_audit_state.json'||file==='google_accounts.json'||file==='telegram_order_state.json'||file==='email_challenges.json') ok=!!(cur&&typeof cur==='object'&&!Array.isArray(cur));
     else if(file==='api_services.json'||file==='balance_ledger.json'||file==='refunds.json'||file==='earn_requests.json') ok=Array.isArray(cur);
-    if(!ok){ fs.writeFileSync(full,JSON.stringify(def,null,2),'utf8'); }
+    if(!ok){
+      // Never silently discard unreadable legacy data: retain a byte-for-byte recovery copy first.
+      if(fs.existsSync(full)){try{const stamp=new Date().toISOString().replace(/[:.]/g,'-');const backup=full+'.corrupt-'+stamp+'.bak';fs.copyFileSync(full,backup);console.error('Invalid JSON preserved for recovery:',path.basename(full),'backup:',path.basename(backup));}catch(e){console.error('Could not back up invalid data file:',path.basename(full),String(e.message||e));throw e;}}
+      fs.writeFileSync(full,JSON.stringify(def,null,2),'utf8');
+    }
   }
 }
 function readJSON(file, fallback) {
@@ -186,7 +191,63 @@ function isAdmin(req){ return session(req)?.role === 'admin'; }
 function safeEqual(a,b){ const aa=Buffer.from(String(a||'')); const bb=Buffer.from(String(b||'')); if(aa.length!==bb.length) return false; return crypto.timingSafeEqual(aa,bb); }
 function hashPassword(password){ const salt=crypto.randomBytes(16).toString('hex'); const hash=crypto.scryptSync(String(password),salt,64).toString('hex'); return `scrypt$${salt}$${hash}`; }
 function verifyPassword(password,stored){ const v=String(stored||''); if(!v.startsWith('scrypt$')) return safeEqual(password,v); const parts=v.split('$'); if(parts.length!==3) return false; try{return safeEqual(crypto.scryptSync(String(password),parts[1],64).toString('hex'),parts[2]);}catch(_){return false;} }
-function adminPasswordValid(password){ if(String(process.env.ADMIN_PASSWORD_HASH||'').startsWith('scrypt$')) return verifyPassword(password,process.env.ADMIN_PASSWORD_HASH); return !!ADMIN_PASSWORD && safeEqual(password,ADMIN_PASSWORD); }
+function adminPasswordValid(password){ if(String(process.env.ADMIN_PASSWORD_HASH||'').startsWith('scrypt$')) return verifyPassword(password,process.env.ADMIN_PASSWORD_HASH); if(process.env.ADMIN_PASSWORD) return safeEqual(password,process.env.ADMIN_PASSWORD); const stored=readJSON('settings.json',{}).adminPasswordHash; if(String(stored||'').startsWith('scrypt$'))return verifyPassword(password,stored); return !!ADMIN_PASSWORD && safeEqual(password,ADMIN_PASSWORD); }
+
+function normalizeEmail(value){return String(value||'').trim().toLowerCase();}
+function validEmail(value){const e=normalizeEmail(value);return e.length<=254&&/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);}
+function decodeFirebaseSafeKey(value){return String(value||'').replace(/_x([0-9a-f]{1,6})_/gi,(_,hex)=>{try{return String.fromCodePoint(parseInt(hex,16));}catch(_){return _;}});}
+function emailChallengeKey(email,purpose){return String(purpose)+':'+sha256(normalizeEmail(email));}
+function emailCodeDigest(email,purpose,username,code){return crypto.createHmac('sha256',SESSION_SECRET).update([normalizeEmail(email),String(purpose),String(username||''),String(code||'')].join('|')).digest('hex');}
+function htmlEscapeAuth(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+async function sendTransactionalEmail({to,subject,text,html}){
+  const apiKey=String(process.env.RESEND_API_KEY||'').trim();
+  const from=String(process.env.RESEND_FROM_EMAIL||process.env.EMAIL_FROM||'').trim();
+  if(!apiKey||!from)throw Object.assign(new Error('خدمة البريد غير مهيأة. أضف RESEND_API_KEY وRESEND_FROM_EMAIL في متغيرات الاستضافة.'),{statusCode:503,code:'email_not_configured'});
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);
+  try{
+    const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{'Authorization':'Bearer '+apiKey,'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({from,to:[normalizeEmail(to)],subject,text,html}),signal:controller.signal});
+    const bodyText=await response.text();let data={};try{data=bodyText?JSON.parse(bodyText):{}}catch(_){data={message:bodyText};}
+    if(!response.ok||!data.id){const reason=String(data.message||data.error||data.name||('HTTP '+response.status)).slice(0,220);throw Object.assign(new Error('رفضت خدمة البريد الإرسال: '+reason),{statusCode:502,code:'email_provider_rejected'});}
+    return {id:String(data.id),sentAt:nowISO()};
+  }catch(e){if(e.name==='AbortError')throw Object.assign(new Error('انتهت مهلة خدمة البريد دون تأكيد الإرسال.'),{statusCode:504,code:'email_timeout'});throw e;}
+  finally{clearTimeout(timer);}
+}
+async function beginEmailChallenge(email,purpose,username,subjectPrefix){
+  const normalized=normalizeEmail(email);if(!validEmail(normalized))throw Object.assign(new Error('أدخل عنوان بريد إلكتروني صحيحاً.'),{statusCode:422});
+  const code=String(crypto.randomInt(0,1000000)).padStart(6,'0');
+  const safePurpose=String(purpose);const expiresAt=Date.now()+10*60*1000;
+  const purposeText=safePurpose==='register'?'تأكيد البريد الإلكتروني':safePurpose==='reset'?'استعادة كلمة المرور':'تغيير البريد الإلكتروني';
+  const html='<div dir="rtl" style="font-family:Arial,sans-serif;line-height:1.9;color:#142033"><h2>صدى العراق</h2><p>استخدم رمز '+htmlEscapeAuth(purposeText)+' التالي:</p><div style="font-size:32px;font-weight:bold;letter-spacing:7px;padding:15px;background:#edf4ff;border-radius:12px;display:inline-block">'+code+'</div><p>تنتهي صلاحية الرمز خلال 10 دقائق. لا تشارك الرمز مع أي شخص.</p><p style="color:#667085;font-size:12px">إذا لم تطلب هذه العملية، تجاهل الرسالة.</p></div>';
+  const mail=await sendTransactionalEmail({to:normalized,subject:'صدى العراق — '+purposeText,text:'رمز '+purposeText+': '+code+'\nتنتهي صلاحية الرمز خلال 10 دقائق. لا تشارك الرمز مع أي شخص.',html});
+  const store=readJSON('email_challenges.json',{});const key=emailChallengeKey(normalized,safePurpose);
+  store[key]={email:normalized,purpose:safePurpose,username:String(username||''),codeDigest:emailCodeDigest(normalized,safePurpose,username,code),createdAt:nowISO(),expiresAt,attempts:0,emailProvider:'resend',providerMessageId:mail.id};
+  writeJSON('email_challenges.json',store);
+  return {expiresInSeconds:600,sent:true};
+}
+function consumeEmailChallenge(email,purpose,code,expectedUsername=''){
+  const normalized=normalizeEmail(email),key=emailChallengeKey(normalized,purpose),store=readJSON('email_challenges.json',{}),row=store[key];
+  if(!row||row.email!==normalized||row.purpose!==String(purpose))return {ok:false,error:'رمز التحقق غير موجود أو انتهت صلاحيته. أرسل رمزاً جديداً.'};
+  if(Number(row.expiresAt||0)<Date.now()){delete store[key];writeJSON('email_challenges.json',store);return {ok:false,error:'انتهت صلاحية رمز التحقق. أرسل رمزاً جديداً.'};}
+  if(Number(row.attempts||0)>=5){delete store[key];writeJSON('email_challenges.json',store);return {ok:false,error:'تم تجاوز عدد محاولات التحقق. أرسل رمزاً جديداً.'};}
+  if(expectedUsername&&String(row.username||'')!==String(expectedUsername)){return {ok:false,error:'رمز التحقق لا يطابق هذا الحساب.'};}
+  row.attempts=Number(row.attempts||0)+1;
+  const good=/^\d{6}$/.test(String(code||''))&&safeEqual(row.codeDigest,emailCodeDigest(normalized,purpose,row.username,code));
+  if(!good){store[key]=row;if(row.attempts>=5)delete store[key];writeJSON('email_challenges.json',store);return {ok:false,error:'رمز التحقق غير صحيح.'};}
+  delete store[key];writeJSON('email_challenges.json',store);return {ok:true,username:String(row.username||'')};
+}
+async function findRemoteUserByUsername(username){
+  const wanted=String(username||'').trim();if(!wanted)return null;let lastError=null;
+  for(const pathName of ['users/'+firebaseSafeKey(wanted),'users/'+wanted]){try{const v=await firebaseGetJson(pathName,3200);if(v&&typeof v==='object'&&!Array.isArray(v))return {username:String(v.username||wanted),user:v,firebasePath:pathName};}catch(e){lastError=e;}}
+  try{const all=await firebaseGetJson('users',5000);if(all&&typeof all==='object'&&!Array.isArray(all)){const found=Object.entries(all).find(([key,v])=>v&&typeof v==='object'&&(String(v.username||'').trim().toLowerCase()===wanted.toLowerCase()||decodeFirebaseSafeKey(key).trim().toLowerCase()===wanted.toLowerCase()||String(key).trim().toLowerCase()===wanted.toLowerCase()));if(found)return {username:String(found[1].username||decodeFirebaseSafeKey(found[0])||wanted),user:found[1],firebasePath:'users/'+found[0]};}return null;}catch(e){lastError=e;}
+  if(lastError)throw lastError;return null;
+}
+async function findAccountByEmail(email){
+  const normalized=normalizeEmail(email),store=readJSON('users.json',{users:{}}),users=store.users||{};
+  const local=Object.entries(users).find(([key,u])=>u&&normalizeEmail(u.email||u.mail||u.emailAddress)===normalized);
+  if(local)return {username:local[0],user:local[1],firebasePath:'users/'+firebaseSafeKey(local[0]),source:'local'};
+  if(normalized===normalizeEmail(ADMIN_USER))return {username:ADMIN_USER,user:{email:ADMIN_USER,role:'admin'},source:'admin'};
+  try{const all=await firebaseGetJson('users',5000);if(all&&typeof all==='object'&&!Array.isArray(all)){const found=Object.entries(all).find(([key,u])=>u&&typeof u==='object'&&normalizeEmail(u.email||u.mail||u.emailAddress)===normalized);if(found)return {username:String(found[1].username||decodeFirebaseSafeKey(found[0])||found[0]),user:found[1],firebasePath:'users/'+found[0],source:'firebase'};}return null;}catch(e){throw e;}
+}
 function envProvider(){
   const id=String(process.env.SMM_PROVIDER_ID||process.env.PROVIDER_ID||'').trim();
   const name=String(process.env.SMM_PROVIDER_NAME||process.env.PROVIDER_NAME||'').trim() || id;
@@ -1132,9 +1193,18 @@ function redactSecretObject(value,depth=0){
 safeProviderResponse = function(d){ return redactSecretObject(d); };
 function providerAuthErrorText(t){ return /invalid|incorrect|wrong|unauthori[sz]ed|authentication|api\s*key|access\s*denied|expired|login|sign\s*in/i.test(String(t||'')); }
 let TELEGRAM_CHANNELS_REMOTE={};
+function readTelegramStoredSecret(settings){
+  const tg=settings?.telegram&&typeof settings.telegram==='object'?settings.telegram:{};
+  if(tg.tokenEncrypted){if(!String(process.env.SADA_ENCRYPTION_KEY||'').trim()&&!String(process.env.TELEGRAM_BOT_TOKEN||'').trim()){console.warn('Stored Telegram token is paused until SADA_ENCRYPTION_KEY is configured.');return '';}const plain=decryptSecret(tg.tokenEncrypted);if(plain)return plain;}
+  // Migrate legacy plaintext only after a dedicated encryption key is configured. Keep the original
+  // on disk for recovery, but fail closed rather than sending with an exposed legacy token.
+  if(tg.token){if(!String(process.env.SADA_ENCRYPTION_KEY||'').trim()){console.warn('Legacy Telegram token is paused until SADA_ENCRYPTION_KEY is configured.');return '';}try{tg.tokenEncrypted=encryptSecret(String(tg.token));delete tg.token;settings.telegram=tg;writeJSON('settings.json',settings);return decryptSecret(tg.tokenEncrypted)||'';}catch(e){console.warn('Telegram token migration failed:',String(e.message||e).slice(0,100));}}
+  return '';
+}
 function telegramConfig(){
-  const cfg=readJSON('settings.json',{}).telegram||{};
+  const settings=readJSON('settings.json',{});const cfg=settings.telegram||{};
   const envToken=String(process.env.TELEGRAM_BOT_TOKEN||'').trim();
+  const storedToken=readTelegramStoredSecret(settings);
   const legacyChat=String(process.env.TELEGRAM_CHAT_ID||cfg.chat||'@jbhbhg58').trim();
   const activationEnv=String(process.env.TELEGRAM_ACTIVATION_CHAT_ID||'').trim();
   const overdueEnv=String(process.env.TELEGRAM_OVERDUE_CHAT_ID||'').trim();
@@ -1143,10 +1213,13 @@ function telegramConfig(){
   const envToggle=String(process.env.TELEGRAM_NOTIFICATIONS_ENABLED||'').trim();
   const enabled=envToggle ? envToggle.toLowerCase()!=='false' : (TELEGRAM_CHANNELS_REMOTE.enabled!==undefined?TELEGRAM_CHANNELS_REMOTE.enabled!==false:cfg.enabled!==false);
   const extra=(String(process.env.TELEGRAM_EXTRA_CHAT_IDS||'').trim()||'').split(',').map(x=>x.trim()).filter(Boolean);
-  return {enabled,token:String(envToken||cfg.token||'').trim(),chat:activationChat,activationChat,overdueChat,activationEnvLocked:!!activationEnv,overdueEnvLocked:!!overdueEnv,extraChats:[...new Set(extra)].filter(x=>x!==activationChat&&x!==overdueChat)};
+  return {enabled,token:String(envToken||storedToken||'').trim(),chat:activationChat,activationChat,overdueChat,activationEnvLocked:!!activationEnv,overdueEnvLocked:!!overdueEnv,extraChats:[...new Set(extra)].filter(x=>x!==activationChat&&x!==overdueChat)};
 }
 async function hydrateTelegramChannelsFromFirebase(){
-  try{const remote=await firebaseGetJson('config/telegramChannels',3500);if(remote&&typeof remote==='object'&&!Array.isArray(remote)){TELEGRAM_CHANNELS_REMOTE={activationChat:String(remote.activationChat||''),overdueChat:String(remote.overdueChat||''),enabled:remote.enabled!==undefined?remote.enabled:undefined,updatedAt:remote.updatedAt||null};const settings=readJSON('settings.json',{});settings.telegram=settings.telegram||{};if(!process.env.TELEGRAM_ACTIVATION_CHAT_ID&&TELEGRAM_CHANNELS_REMOTE.activationChat&&!settings.telegram.activationChat)settings.telegram.activationChat=TELEGRAM_CHANNELS_REMOTE.activationChat;if(!process.env.TELEGRAM_OVERDUE_CHAT_ID&&TELEGRAM_CHANNELS_REMOTE.overdueChat&&!settings.telegram.overdueChat)settings.telegram.overdueChat=TELEGRAM_CHANNELS_REMOTE.overdueChat;if(process.env.TELEGRAM_NOTIFICATIONS_ENABLED===undefined&&TELEGRAM_CHANNELS_REMOTE.enabled!==undefined)settings.telegram.enabled=TELEGRAM_CHANNELS_REMOTE.enabled;writeJSON('settings.json',settings);return true}}catch(e){console.warn('Telegram channel hydration skipped:',String(e.message||e).slice(0,120))}return false;
+  let any=false;
+  try{const remote=await firebaseGetJson('config/telegramChannels',3500);if(remote&&typeof remote==='object'&&!Array.isArray(remote)){TELEGRAM_CHANNELS_REMOTE={activationChat:String(remote.activationChat||''),overdueChat:String(remote.overdueChat||''),enabled:remote.enabled!==undefined?remote.enabled:undefined,updatedAt:remote.updatedAt||null};const settings=readJSON('settings.json',{});settings.telegram=settings.telegram||{};if(!process.env.TELEGRAM_ACTIVATION_CHAT_ID&&TELEGRAM_CHANNELS_REMOTE.activationChat&&!settings.telegram.activationChat)settings.telegram.activationChat=TELEGRAM_CHANNELS_REMOTE.activationChat;if(!process.env.TELEGRAM_OVERDUE_CHAT_ID&&TELEGRAM_CHANNELS_REMOTE.overdueChat&&!settings.telegram.overdueChat)settings.telegram.overdueChat=TELEGRAM_CHANNELS_REMOTE.overdueChat;if(process.env.TELEGRAM_NOTIFICATIONS_ENABLED===undefined&&TELEGRAM_CHANNELS_REMOTE.enabled!==undefined)settings.telegram.enabled=TELEGRAM_CHANNELS_REMOTE.enabled;writeJSON('settings.json',settings);any=true}}catch(e){console.warn('Telegram channel hydration skipped:',String(e.message||e).slice(0,120))}
+  try{if(!process.env.TELEGRAM_BOT_TOKEN){const secret=await firebaseGetJson('config/telegramSecret',3500);if(secret&&typeof secret.tokenEncrypted==='string'&&secret.tokenEncrypted){const settings=readJSON('settings.json',{});settings.telegram=settings.telegram||{};if(!settings.telegram.tokenEncrypted){settings.telegram.tokenEncrypted=secret.tokenEncrypted;delete settings.telegram.token;writeJSON('settings.json',settings);}any=true;}}}catch(e){console.warn('Telegram encrypted secret hydration skipped:',String(e.message||e).slice(0,120))}
+  return any;
 }
 function telegramLog(entry){
   const arr=readJSON('telegram_notifications.json',[]);
@@ -1162,7 +1235,7 @@ async function telegramRequest(method,payload,timeoutMs=8000){
   try{
     const r=await fetch(`${apiBase}/bot${encodeURIComponent(cfg.token)}/${method}`,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload),signal:controller.signal});
     const text=await r.text(); let d={}; try{d=text?JSON.parse(text):{};}catch(_){d={description:text};}
-    return {ok:!!(r.ok&&d.ok!==false),status:r.status,description:String(d.description||''),messageId:d.result?.message_id||null,raw:r.ok?undefined:redactSecretObject(d)};
+    return {ok:!!(r.ok&&d.ok===true),status:r.status,description:String(d.description||''),messageId:d.result?.message_id||null,raw:r.ok?undefined:redactSecretObject(d)};
   }catch(e){return {ok:false,error:e?.name==='AbortError'?'انتهت مهلة Telegram':String(e?.message||e)};}
   finally{clearTimeout(timer);}
 }
@@ -1175,30 +1248,30 @@ async function sendTelegramDetailed(text,meta={}){
   if(!targetChat)return {ok:false,error:'معرّف قناة Telegram غير مضبوط'};
   const imagePath=path.join(ROOT,'telegram-notification.png');
   if(cfg.enabled!==false && cfg.token && targetChat && fs.existsSync(imagePath)){
+    const apiBase=String(process.env.TELEGRAM_API_BASE||'https://api.telegram.org').replace(/\/+$/,'');
+    let photoError='';
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
     try{
-      const apiBase=String(process.env.TELEGRAM_API_BASE||'https://api.telegram.org').replace(/\/+$/,'');
       const fd=new FormData();
       fd.append('chat_id',targetChat);
       fd.append('photo',new Blob([fs.readFileSync(imagePath)],{type:'image/png'}),'telegram-notification.png');
       fd.append('caption',caption);
-      const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
-      try{
-        const rr=await fetch(`${apiBase}/bot${encodeURIComponent(cfg.token)}/sendPhoto`,{method:'POST',body:fd,signal:controller.signal});
-        const tx=await rr.text(); let dd={}; try{dd=tx?JSON.parse(tx):{};}catch(_){dd={description:tx};}
-        r={ok:!!(rr.ok&&dd.ok!==false),status:rr.status,description:String(dd.description||''),messageId:dd.result?.message_id||null,raw:rr.ok?undefined:redactSecretObject(dd)};
-      }finally{clearTimeout(timer);}
-      // إذا فشل رفع الصورة، لا نفقد الإشعار النصي.
-      if(!r.ok){
-        const fallback=await telegramRequest('sendMessage',{chat_id:targetChat,text:caption,disable_web_page_preview:true});
-        if(fallback.ok) r={...fallback,description:'تم إرسال النص بعد تعذر إرسال الصورة'};
-      }
-    }catch(e){
-      r={ok:false,error:e?.name==='AbortError'?'انتهت مهلة Telegram':String(e?.message||e)};
+      const rr=await fetch(`${apiBase}/bot${encodeURIComponent(cfg.token)}/sendPhoto`,{method:'POST',body:fd,signal:controller.signal});
+      const tx=await rr.text();let dd={};try{dd=tx?JSON.parse(tx):{}}catch(_){dd={description:tx};}
+      r={ok:!!(rr.ok&&dd.ok===true),status:rr.status,description:String(dd.description||''),messageId:dd.result?.message_id||null,raw:rr.ok?undefined:redactSecretObject(dd)};
+      if(!r.ok)photoError=r.description||'لم يؤكد Telegram إرسال الصورة.';
+    }catch(e){photoError=e?.name==='AbortError'?'انتهت مهلة إرسال الصورة إلى Telegram':String(e?.message||e);r={ok:false,error:photoError};}
+    finally{clearTimeout(timer)}
+    // Network failure and rejected photo uploads both fall back to a real text-message call.
+    if(!r.ok){
+      const fallback=await telegramRequest('sendMessage',{chat_id:targetChat,text:caption,disable_web_page_preview:true});
+      if(fallback.ok)r={...fallback,description:'تم إرسال النص بعد تعذر إرسال الصورة'+(photoError?' — '+photoError:'')};
+      else r={...fallback,ok:false,error:fallback.error||fallback.description||photoError||'فشل إرسال الرسالة النصية أيضاً',description:fallback.description||photoError||''};
     }
   }else{
     r=await telegramRequest('sendMessage',{chat_id:targetChat,text:caption,disable_web_page_preview:true});
   }
-  telegramLog({kind:meta.kind||'message',ok:r.ok,status:r.status,description:r.description||r.error||'',messageId:r.messageId||null,orderId:meta.orderId||null,media:'photo'});
+  telegramLog({kind:meta.kind||'message',ok:r.ok,status:r.status,description:r.description||r.error||'',messageId:r.messageId||null,orderId:meta.orderId||null,media:r.ok&&String(r.description||'').includes('تم إرسال النص')?'text-fallback':'photo-or-text'});
   return r;
 }
 async function notifyTelegramRecipients(text,meta={}){
@@ -1303,17 +1376,23 @@ function calcApiChargeUsd(s,qty,user){
   const total=Math.max(0,Number(qty)/1000*Number(s.sellingUsd||s.rateUsd||s.rate||0)*(1-pct/100));
   return {pct,total:Number(total.toFixed(6))};
 }
-function statsSnapshot(range='all'){
-  const orders=readJSON('orders.json',[]); const reset=readJSON('stats_state.json',{resetAt:null}).resetAt; let since=reset?new Date(reset):null; const now=new Date(); if(range==='today')since=new Date(now.getTime()-24*60*60*1000); else if(range==='7d')since=new Date(now.getTime()-7*24*60*60*1000); else if(range==='month')since=new Date(now.getFullYear(),now.getMonth(),1); const list=Array.isArray(orders)?orders.filter(o=>{const d=new Date(o.createdAt||0);return (!since||d>since)}):[];
-  const counts={total:0,today:0,completed:0,processing:0,pending:0,cancelled:0,failed:0,refunded:0,partial:0}; let sales=0,cost=0;
-  const todayNow=new Date(); const day=todayNow.toISOString().slice(0,10); const services={}; const users={}; const profits={};
-  for(const o of list){ counts.total++; const st=normalizeProviderStatus(o.status||'pending'); if(st in counts)counts[st]++; if(String(o.createdAt||'').slice(0,10)===day)counts.today++;
-    const sale=Number(o.chargeUsd!==undefined?o.chargeUsd:(Number(o.total||0)/FIXED_RATE)); const providerCost=Number(o.providerCostUsd!==undefined?o.providerCostUsd:(Number(o.providerRateUsd||o.smmRateUsd||0)*Number(o.quantity||0)/1000)); sales+=Number.isFinite(sale)?sale:0; cost+=Number.isFinite(providerCost)?providerCost:0;
-    const sn=String(o.serviceName||o.serviceId||'خدمة'); services[sn]=(services[sn]||0)+1; profits[sn]=(profits[sn]||0)+(Number.isFinite(sale)?sale:0)-(Number.isFinite(providerCost)?providerCost:0); const un=String(o.user||''); users[un]=(users[un]||0)+1;
-  }
-  const vals=list.map(o=>Number(o.chargeUsd!==undefined?o.chargeUsd:Number(o.total||0)/FIXED_RATE)).filter(Number.isFinite);
-  const serviceMost=Object.entries(services).sort((a,b)=>b[1]-a[1])[0]||null, userMost=Object.entries(users).sort((a,b)=>b[1]-a[1])[0]||null, profitMost=Object.entries(profits).sort((a,b)=>b[1]-a[1])[0]||null;
-  return {counts,salesUsd:Number(sales.toFixed(6)),providerCostUsd:Number(cost.toFixed(6)),profitUsd:Number((sales-cost).toFixed(6)),highestOrderUsd:vals.length?Math.max(...vals):0,lowestOrderUsd:vals.length?Math.min(...vals):0,mostOrderedService:serviceMost?.[0]||null,mostOrderingUser:userMost?.[0]||null,highestProfitService:profitMost?{name:profitMost[0],profitUsd:Number(Number(profitMost[1]).toFixed(6))}:null,resetAt:reset||null};
+function baghdadDateKey(value){
+  const d=value instanceof Date?value:new Date(value||0);if(!Number.isFinite(d.getTime()))return '';
+  const parts=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Baghdad',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d);const m={};for(const p of parts)m[p.type]=p.value;return `${m.year}-${m.month}-${m.day}`;
+}
+function baghdadWeekStartKey(date=new Date()){
+  const key=baghdadDateKey(date);if(!key)return '';const [y,m,d]=key.split('-').map(Number);const dt=new Date(Date.UTC(y,m-1,d));const days=(dt.getUTCDay()+6)%7;dt.setUTCDate(dt.getUTCDate()-days);return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,'0')}-${String(dt.getUTCDate()).padStart(2,'0')}`;
+}
+function statsSnapshot(range='all',ordersOverride=null){
+  const allOrders=Array.isArray(ordersOverride)?ordersOverride:readJSON('orders.json',[]);const reset=readJSON('stats_state.json',{resetAt:null}).resetAt;const now=new Date();const todayKey=baghdadDateKey(now),weekStart=baghdadWeekStartKey(now),monthStart=todayKey.slice(0,7)+'-01',resetKey=reset?baghdadDateKey(reset):'';
+  const kept=(Array.isArray(allOrders)?allOrders:[]).filter(o=>o&&!o.event&&(!reset||new Date(o.createdAt||0)>new Date(reset)));
+  const list=kept.filter(o=>{const key=baghdadDateKey(o.createdAt);if(!key)return false;if(range==='today')return key===todayKey;if(range==='7d')return key>=weekStart&&key<=todayKey;if(range==='month')return key>=monthStart&&key<=todayKey;return true;});
+  const metrics=rows=>{let sales=0,cost=0;for(const o of rows){const sale=Number(o.chargeUsd!==undefined?o.chargeUsd:(Number(o.total||0)/FIXED_RATE));const providerCost=Number(o.providerCostUsd!==undefined?o.providerCostUsd:(Number(o.providerRateUsd||o.smmRateUsd||0)*Number(o.quantity||0)/1000));sales+=Number.isFinite(sale)?sale:0;cost+=Number.isFinite(providerCost)?providerCost:0;}return {orders:rows.length,salesUsd:Number(sales.toFixed(6)),providerCostUsd:Number(cost.toFixed(6)),profitUsd:Number((sales-cost).toFixed(6)),profitMarginPct:sales>0?Number(((sales-cost)/sales*100).toFixed(2)):0};};
+  const counts={total:0,today:0,completed:0,processing:0,pending:0,cancelled:0,failed:0,refunded:0,partial:0};const services={},users={},profits={};
+  for(const o of list){counts.total++;const st=normalizeProviderStatus(o.status||'pending');if(st in counts)counts[st]++;if(baghdadDateKey(o.createdAt)===todayKey)counts.today++;const sale=Number(o.chargeUsd!==undefined?o.chargeUsd:(Number(o.total||0)/FIXED_RATE));const providerCost=Number(o.providerCostUsd!==undefined?o.providerCostUsd:(Number(o.providerRateUsd||o.smmRateUsd||0)*Number(o.quantity||0)/1000));const sn=String(o.serviceName||o.serviceId||'خدمة');services[sn]=(services[sn]||0)+1;profits[sn]=(profits[sn]||0)+(Number.isFinite(sale)?sale:0)-(Number.isFinite(providerCost)?providerCost:0);const un=String(o.user||o.username||'');users[un]=(users[un]||0)+1;}
+  const vals=list.map(o=>Number(o.chargeUsd!==undefined?o.chargeUsd:Number(o.total||0)/FIXED_RATE)).filter(Number.isFinite);const serviceMost=Object.entries(services).sort((a,b)=>b[1]-a[1])[0]||null,userMost=Object.entries(users).sort((a,b)=>b[1]-a[1])[0]||null,profitMost=Object.entries(profits).sort((a,b)=>b[1]-a[1])[0]||null;
+  const todayRows=kept.filter(o=>baghdadDateKey(o.createdAt)===todayKey),weekRows=kept.filter(o=>{const k=baghdadDateKey(o.createdAt);return k>=weekStart&&k<=todayKey;});const rangeMetrics=metrics(list),todayMetrics=metrics(todayRows),weekMetrics=metrics(weekRows);
+  return {counts,...rangeMetrics,salesUsd:rangeMetrics.salesUsd,providerCostUsd:rangeMetrics.providerCostUsd,profitUsd:rangeMetrics.profitUsd,profitMarginPct:rangeMetrics.profitMarginPct,ordersToday:todayMetrics.orders,ordersWeek:weekMetrics.orders,salesTodayUsd:todayMetrics.salesUsd,salesWeekUsd:weekMetrics.salesUsd,costTodayUsd:todayMetrics.providerCostUsd,costWeekUsd:weekMetrics.providerCostUsd,profitTodayUsd:todayMetrics.profitUsd,profitWeekUsd:weekMetrics.profitUsd,highestOrderUsd:vals.length?Math.max(...vals):0,lowestOrderUsd:vals.length?Math.min(...vals):0,mostOrderedService:serviceMost?.[0]||null,mostOrderingUser:userMost?.[0]||null,highestProfitService:profitMost?{name:profitMost[0],profitUsd:Number(Number(profitMost[1]).toFixed(6))}:null,resetAt:reset||null,source:'local-or-merged',todayDate:todayKey,weekStartDate:weekStart};
 }
 
 const MATH_CAPTCHA_CHALLENGES=new Map();
@@ -1360,6 +1439,7 @@ async function routeAPI(req,res,urlObj){
     return json(res,200,{ok:true,exists:!!rec,masked:rec?.masked||null});
   }
   if(p==='/api/user/api-key' && req.method==='POST'){
+    if(!String(process.env.SADA_ENCRYPTION_KEY||'').trim())return json(res,503,{ok:false,error:'يلزم ضبط SADA_ENCRYPTION_KEY لحفظ مفتاح API مشفراً قبل إنشائه.'});
     const wait=rateLimit(req,'auth'); if(wait)return json(res,429,{ok:false,error:'محاولات كثيرة، أعد المحاولة لاحقاً'},{'Retry-After':String(wait)});
     const u=userFromSession(req); if(!u)return json(res,401,{ok:false,error:'يجب تسجيل الدخول'});
     const keys=readJSON('api_keys.json',{}); for(const [h,v] of Object.entries(keys)){if(v?.username===u&&!v.revokedAt)delete keys[h];}
@@ -1520,7 +1600,13 @@ async function routeAPI(req,res,urlObj){
   if(p==='/api/admin/sync-users' && req.method==='POST'){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const list=Array.isArray(b.users)?b.users:[];const store=readJSON('users.json',{users:{}});let n=0;for(const x of list.slice(0,10000)){const u=String(x?.username||'').trim();const bal=Number(x?.balance);if(!u||!Number.isFinite(bal)||bal<0)continue;store.users[u]={...(store.users[u]||{name:u,role:'user'}),balance:Number(bal.toFixed(4)),totalSpent:Number(x?.totalSpent||store.users[u]?.totalSpent||0),totalOrders:Number(x?.totalOrders||store.users[u]?.totalOrders||0),discountPct:Number(x?.discountPct??store.users[u]?.discountPct??0)};n++;}writeJSON('users.json',store);return json(res,200,{ok:true,count:n});
   }
-  if(p==='/api/admin/stats' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const range=String(urlObj.searchParams.get('range')||'all');if(!['today','7d','month','all'].includes(range))return json(res,422,{ok:false,error:'نطاق غير صالح'});return json(res,200,{ok:true,range,stats:statsSnapshot(range)});}
+  if(p==='/api/admin/stats' && req.method==='GET'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const range=String(urlObj.searchParams.get('range')||'all');if(!['today','7d','month','all'].includes(range))return json(res,422,{ok:false,error:'نطاق غير صالح'});
+    const local=readJSON('orders.json',[]),map=new Map();const keyOf=(o,k='')=>String(o?.id||o?.siteOrderId||o?.orderId||o?.order_id||o?.providerOrderId||(String(o?.user||o?.username||'')+'|'+String(o?.createdAt||'')+'|'+String(o?.serviceId||'')+'|'+String(o?.quantity||''))||k);
+    for(const o of Array.isArray(local)?local:[])if(o&&!o.event)map.set(keyOf(o),o);let firebaseAvailable=false,firebaseError='';
+    try{const remote=await firebaseGetJson('orders',6000);firebaseAvailable=true;if(remote&&typeof remote==='object'){const entries=Array.isArray(remote)?remote.map((o,i)=>[String(i),o]):Object.entries(remote);for(const [k,o] of entries){if(!o||typeof o!=='object'||o.event)continue;const key=keyOf(o,k);map.set(key,{...(map.get(key)||{}),...o,...(map.get(key)?.providerCostUsd!==undefined&&o.providerCostUsd===undefined?{providerCostUsd:map.get(key).providerCostUsd}:{})});}}}catch(e){firebaseError=String(e.message||e).slice(0,160);}
+    const stats=statsSnapshot(range,[...map.values()]);stats.source=firebaseAvailable?'firebase+local':'local-only';stats.firebaseAvailable=firebaseAvailable;return json(res,200,{ok:true,range,stats,warning:firebaseAvailable?'':('تعذر قراءة طلبات Firebase؛ الأرقام محسوبة من سجل الخادم المتاح فقط. '+firebaseError)});
+  }
   if(p==='/api/admin/stats/reset' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);if(String(b.confirm||'')!=='RESET_STATS')return json(res,422,{ok:false,error:'تأكيد التصفير غير صحيح'});const now=nowISO();writeJSON('stats_state.json',{resetAt:now});return json(res,200,{ok:true,resetAt:now});}
   if(p==='/api/admin/balance-adjust' && req.method==='POST'){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
@@ -1540,7 +1626,19 @@ async function routeAPI(req,res,urlObj){
   if(p==='/api/admin/balance-ledger' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const user=String(urlObj.searchParams.get('user')||'');const rows=readJSON('balance_ledger.json',[]).filter(x=>!user||String(x.user||'')===user).slice(-500).reverse();return json(res,200,{ok:true,ledger:rows});}
   if(p==='/api/admin/user-finance' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const username=String(urlObj.searchParams.get('username')||'').trim();if(!username)return json(res,422,{ok:false,error:'اسم المستخدم مطلوب'});const u=readJSON('users.json',{users:{}}).users?.[username];if(!u)return json(res,404,{ok:false,error:'المستخدم غير موجود'});const orders=readJSON('orders.json',[]).filter(o=>String(o.user||'')===username);const ledger=readJSON('balance_ledger.json',[]).filter(x=>String(x.user||'')===username);const deposits=ledger.filter(x=>['charge','deposit'].includes(String(x.type||''))).reduce((a,x)=>a+Number(x.amountUSD||Number(x.amountIQD||0)/FIXED_RATE||0),0);const spent=orders.reduce((a,o)=>a+Number(o.chargeUsd??Number(o.total||0)/FIXED_RATE),0);return json(res,200,{ok:true,user:{username,name:String(u.name||username),balanceUsd:Number((Number(u.balance||0)/FIXED_RATE).toFixed(6)),totalDepositsUsd:Number(deposits.toFixed(6)),totalSpentUsd:Number(spent.toFixed(6)),totalOrders:orders.length,discountPct:Number(u.discountPct||0)}});}
   if(p==='/api/admin/telegram' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const cfg=telegramConfig();return json(res,200,{ok:true,telegram:{enabled:cfg.enabled,tokenSet:!!cfg.token,chat:cfg.chat||'',activationChat:cfg.activationChat||'',overdueChat:cfg.overdueChat||'',activationEnvLocked:cfg.activationEnvLocked,overdueEnvLocked:cfg.overdueEnvLocked,extraChatsCount:(cfg.extraChats||[]).length}});}
-  if(p==='/api/admin/telegram' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const cfg=readJSON('settings.json',{});const tg=cfg.telegram||{};if(b.enabled!==undefined)tg.enabled=!!b.enabled;if(b.token!==undefined&&String(b.token).trim())tg.token=String(b.token).trim();if(b.chat!==undefined)tg.chat=String(b.chat).trim();if(b.activationChat!==undefined&&!telegramConfig().activationEnvLocked){tg.activationChat=String(b.activationChat||'').trim();tg.chat=tg.activationChat||tg.chat||'';}if(b.overdueChat!==undefined&&!telegramConfig().overdueEnvLocked)tg.overdueChat=String(b.overdueChat||'').trim();cfg.telegram=tg;writeJSON('settings.json',cfg);try{const channelData={activationChat:tg.activationChat||tg.chat||'',overdueChat:tg.overdueChat||'',enabled:tg.enabled!==false,updatedAt:nowISO()};await firebaseWriteJson('config/telegramChannels',channelData,6000);TELEGRAM_CHANNELS_REMOTE=channelData}catch(_){}return json(res,200,{ok:true,telegram:{enabled:tg.enabled!==false,tokenSet:!!(process.env.TELEGRAM_BOT_TOKEN||tg.token),chat:tg.activationChat||tg.chat||'',activationChat:tg.activationChat||tg.chat||'',overdueChat:tg.overdueChat||''}});}
+  if(p==='/api/admin/telegram' && req.method==='POST'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const cfg=readJSON('settings.json',{});const tg=cfg.telegram||{};
+    if(b.enabled!==undefined)tg.enabled=!!b.enabled;
+    const newToken=String(b.token||'').trim();if(newToken&&!String(process.env.SADA_ENCRYPTION_KEY||'').trim())return json(res,503,{ok:false,error:'لا يمكن حفظ Bot Token بأمان قبل ضبط SADA_ENCRYPTION_KEY في Railway Variables؛ لم يتم حفظ التوكن.'});if(newToken){tg.tokenEncrypted=encryptSecret(newToken);delete tg.token;}
+    if(b.chat!==undefined)tg.chat=String(b.chat).trim();if(b.activationChat!==undefined&&!telegramConfig().activationEnvLocked){tg.activationChat=String(b.activationChat||'').trim();tg.chat=tg.activationChat||tg.chat||'';}if(b.overdueChat!==undefined&&!telegramConfig().overdueEnvLocked)tg.overdueChat=String(b.overdueChat||'').trim();
+    // Migrate any legacy cleartext token before saving, never expose it in the response.
+    if(tg.token&&!tg.tokenEncrypted){tg.tokenEncrypted=encryptSecret(tg.token);delete tg.token;}cfg.telegram=tg;writeJSON('settings.json',cfg);
+    let firebaseChannelsSaved=false,firebaseSecretSaved=false;try{const channelData={activationChat:tg.activationChat||tg.chat||'',overdueChat:tg.overdueChat||'',enabled:tg.enabled!==false,updatedAt:nowISO()};await firebaseWriteJson('config/telegramChannels',channelData,6000);TELEGRAM_CHANNELS_REMOTE=channelData;firebaseChannelsSaved=true;}catch(e){console.warn('Telegram channel persistence Firebase failed:',String(e.message||e).slice(0,100));}
+    if(tg.tokenEncrypted){try{await firebaseWriteJson('config/telegramSecret',{tokenEncrypted:tg.tokenEncrypted,updatedAt:nowISO()},6000);firebaseSecretSaved=true;}catch(e){console.warn('Encrypted Telegram secret Firebase persistence failed:',String(e.message||e).slice(0,100));}}
+    const durable=DATA_IS_EXTERNAL||firebaseChannelsSaved&&(!tg.tokenEncrypted||firebaseSecretSaved);
+    if(!durable)return json(res,503,{ok:false,error:'حُفظت الإعدادات في المسار المحلي فقط لكن لم نتأكد من تخزين دائم. اربط Railway Volume بمسار /data أو أصلح صلاحية كتابة Firebase ثم أعد الحفظ.',persistent:false});
+    return json(res,200,{ok:true,persistent:true,storageMode:firebaseChannelsSaved?'firebase+local':'external-volume',warning:tg.tokenEncrypted&&!firebaseSecretSaved?'تم حفظ الإعدادات على مساحة التخزين الدائمة، لكن نسخة Firebase المشفرة لم تتحدث.':undefined,telegram:{enabled:tg.enabled!==false,tokenSet:!!(process.env.TELEGRAM_BOT_TOKEN||tg.tokenEncrypted),chat:tg.activationChat||tg.chat||'',activationChat:tg.activationChat||tg.chat||'',overdueChat:tg.overdueChat||''}});
+  }
   if(p==='/api/admin/telegram/test' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const r=await sendTelegramDetailed(String(b.text||'✅ اختبار إشعارات صدى العراق'),{kind:'manual_test'});return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'تم إرسال اختبار Telegram':(r.description||r.error||'فشل إرسال اختبار Telegram'),status:r.status||null,messageId:r.messageId||null});}
   if(p==='/api/admin/telegram/test-connection' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const r=await telegramTestConnection();return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'اتصال Telegram ناجح':(r.description||r.error||'فشل الاتصال بـ Telegram'),status:r.status||null});}
   if(p==='/api/admin/telegram/test-order' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const sample='🧪 اختبار إشعار طلب\n🆔 رقم طلب صدى العراق: #TEST-001\n👤 المستخدم: اختبار\n📦 الخدمة: خدمة تجريبية\n🔗 الرابط: https://example.com\n🔢 الكمية: 1,000\n💰 السعر: $0.50\n📊 الحالة: Pending\n🕐 الوقت: '+new Date().toLocaleString('en-GB',{hour12:false});const r=await sendTelegramDetailed(sample,{kind:'test_order',orderId:'TEST-001'});return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'تم إرسال إشعار طلب تجريبي':(r.description||r.error||'فشل إرسال إشعار الطلب'),status:r.status||null,messageId:r.messageId||null});}
@@ -1617,20 +1715,89 @@ async function routeAPI(req,res,urlObj){
   }
   if(p==='/api/auth' && req.method==='POST'){
     const wait=rateLimit(req,'auth'); if(wait) return json(res,429,{ok:false,error:'محاولات كثيرة، أعد المحاولة بعد '+wait+' ثانية'},{'Retry-After':String(wait)});
-    const b=await bodyJSON(req);const captchaError=consumeMathCaptcha(req,b);if(captchaError)return json(res,422,{ok:false,error:captchaError,captchaFailed:true});const u=String(b.username||'').trim(); const pw=String(b.password||'');
+    const b=await bodyJSON(req);const captchaError=consumeMathCaptcha(req,b);if(captchaError)return json(res,422,{ok:false,error:captchaError,captchaFailed:true});
+    const u=String(b.username||'').trim(),pw=String(b.password||'');
     if(String(b.action||'')==='register'){
       if(!/^[a-zA-Z0-9_]+$/.test(u)) return json(res,422,{ok:false,error:'اسم المستخدم يجب أن يكون بالإنجليزية والأرقام فقط'});
       if(pw.length<8) return json(res,422,{ok:false,error:'كلمة المرور يجب أن تكون 8 أحرف على الأقل'});
-      if(u===ADMIN_USER) return json(res,409,{ok:false,error:'اسم المستخدم محجوز'});
-      const store=readJSON('users.json',{users:{}}); if(store.users[u]) return json(res,409,{ok:false,error:'اسم المستخدم موجود مسبقاً'});
-      const user={name:u,passwordHash:hashPassword(pw),balance:0,level:'مبتدئ',telegram:String(b.telegram||''),phone:String(b.phone||''),joined:new Date().toISOString(),totalSpent:0,totalOrders:0,role:'user'};
-      store.users[u]=user; writeJSON('users.json',store); const sessionToken=setSession(res,{role:'user',username:u});
-      const safeUser={...user}; delete safeUser.password; delete safeUser.passwordHash; return json(res,200,{ok:true,role:'user',username:u,user:safeUser,sessionToken});
+      const email=normalizeEmail(b.email);if(!validEmail(email))return json(res,422,{ok:false,error:'أدخل بريدك الإلكتروني الصحيح حتى نرسل رمز التحقق.'});
+      if(u.toLowerCase()===ADMIN_USER.toLowerCase()) return json(res,409,{ok:false,error:'اسم المستخدم محجوز'});
+      const store=readJSON('users.json',{users:{}});if(Object.keys(store.users||{}).some(k=>k.toLowerCase()===u.toLowerCase()))return json(res,409,{ok:false,error:'اسم المستخدم موجود مسبقاً'});
+      let remoteCheck;try{remoteCheck=await findRemoteUserByUsername(u);}catch(e){return json(res,503,{ok:false,error:'تعذر التحقق من الحسابات القديمة في قاعدة البيانات. لم ننشئ حساباً مكرراً؛ أعد المحاولة بعد قليل.'});}
+      if(remoteCheck)return json(res,409,{ok:false,error:'اسم المستخدم موجود مسبقاً في قاعدة الحسابات الحالية'});
+      let emailAccount;try{emailAccount=await findAccountByEmail(email);}catch(e){return json(res,503,{ok:false,error:'تعذر التحقق من البريد في قاعدة البيانات؛ لم ننشئ حساباً جديداً.'});}
+      if(emailAccount)return json(res,409,{ok:false,error:'هذا البريد مرتبط بحساب موجود بالفعل. سجّل الدخول أو استخدم استعادة كلمة المرور.'});
+      if(!String(b.emailCode||'')){
+        const emailWait=rateLimit(req,'email');if(emailWait)return json(res,429,{ok:false,error:'طلبات البريد كثيرة؛ أعد المحاولة بعد '+emailWait+' ثانية'},{'Retry-After':String(emailWait)});
+        try{await beginEmailChallenge(email,'register',u,'تأكيد البريد الإلكتروني');return json(res,200,{ok:true,verificationRequired:true,message:'أرسلنا رمز تحقق حقيقياً إلى بريدك. أدخله لإكمال إنشاء الحساب.'});}
+        catch(e){return json(res,Number(e.statusCode)||502,{ok:false,error:String(e.message||'تعذر إرسال بريد التحقق').slice(0,260)});}
+      }
+      const verified=consumeEmailChallenge(email,'register',String(b.emailCode||''),u);if(!verified.ok)return json(res,422,{ok:false,error:verified.error});
+      const now=nowISO();const user={username:u,name:u,email,emailVerified:true,emailVerifiedAt:now,passwordHash:hashPassword(pw),balance:0,level:'مبتدئ',telegram:String(b.telegram||''),phone:String(b.phone||''),joined:now,totalSpent:0,totalOrders:0,role:'user'};
+      store.users[u]=user;writeJSON('users.json',store);
+      let firebaseSaved=false;try{await firebaseWriteJson('users/'+firebaseSafeKey(u),user,5000);firebaseSaved=true;}catch(e){console.warn('New user Firebase mirror unavailable:',String(e.message||e).slice(0,120));}
+      if(!firebaseSaved&&!DATA_IS_EXTERNAL){delete store.users[u];writeJSON('users.json',store);return json(res,503,{ok:false,error:'تم التحقق من البريد لكن التخزين الدائم غير مضبوط. لم يكتمل إنشاء الحساب ولم يتم تسجيل الدخول؛ اربط Railway Volume أو Firebase قبل إعادة المحاولة.'});}
+      const sessionToken=setSession(res,{role:'user',username:u});const clean={...user};delete clean.password;delete clean.passwordHash;return json(res,200,{ok:true,role:'user',username:u,user:clean,sessionToken,emailVerified:true});
     }
-    if(u===ADMIN_USER && adminPasswordValid(pw)){ const sessionToken=setSession(res,{role:'admin',username:ADMIN_USER}); return json(res,200,{ok:true,role:'admin',username:ADMIN_USER,sessionToken}); }
-    const store=readJSON('users.json',{users:{}}); const user=store.users?.[u];
-    if(user && verifyPassword(pw,user.passwordHash || user.password || '')){ const role=user.role==='admin'?'admin':'user'; const sessionToken=setSession(res,{role,username:u}); const clean={...user}; delete clean.password; delete clean.passwordHash; return json(res,200,{ok:true,role,username:u,user:clean,sessionToken}); }
+    if(u.toLowerCase()===ADMIN_USER.toLowerCase()&&adminPasswordValid(pw)){const sessionToken=setSession(res,{role:'admin',username:ADMIN_USER});return json(res,200,{ok:true,role:'admin',username:ADMIN_USER,sessionToken});}
+    const store=readJSON('users.json',{users:{}});let actualUsername=u;let user=store.users?.[u]||null;
+    if(!user){const found=Object.entries(store.users||{}).find(([key,val])=>key.toLowerCase()===u.toLowerCase()||String(val?.username||'').toLowerCase()===u.toLowerCase());if(found){actualUsername=found[0];user=found[1];}}
+    let remoteRecord=null,remoteLookupFailed=false;
+    if(!user){try{remoteRecord=await findRemoteUserByUsername(u);if(remoteRecord){actualUsername=remoteRecord.username||u;user=remoteRecord.user;}}catch(e){remoteLookupFailed=true;console.warn('Legacy Firebase login lookup failed:',String(e.message||e).slice(0,120));}}
+    if(user&&verifyPassword(pw,user.passwordHash||user.password||user.passHash||user.pass||'')){
+      // Mirror a remote-only legacy account locally without replacing its financial/order fields.
+      if(!store.users[actualUsername]||!String(user.passwordHash||'').startsWith('scrypt$')){const upgraded={...(store.users[actualUsername]||user),...user,username:actualUsername};if(!String(user.passwordHash||'').startsWith('scrypt$'))upgraded.passwordHash=hashPassword(pw);delete upgraded.password;delete upgraded.pass;delete upgraded.passHash;store.users[actualUsername]=upgraded;writeJSON('users.json',store);
+        if(remoteRecord&&remoteRecord.firebasePath&&!String(user.passwordHash||'').startsWith('scrypt$')){try{await firebasePatchJson(remoteRecord.firebasePath,{passwordHash:upgraded.passwordHash,password:null,pass:null,passHash:null,passwordUpdatedAt:nowISO()},5000);}catch(e){console.warn('Legacy password hash remote migration skipped:',String(e.message||e).slice(0,100));}}
+      }
+      const localUser=readJSON('users.json',{users:{}}).users?.[actualUsername]||user;
+      const sessionToken=setSession(res,{role:localUser.role==='admin'?'admin':'user',username:actualUsername});const clean={...localUser};delete clean.password;delete clean.passwordHash;delete clean.pass;delete clean.passHash;
+      return json(res,200,{ok:true,role:localUser.role==='admin'?'admin':'user',username:actualUsername,user:clean,sessionToken,legacyAccountRecovered:!Boolean(store.users?.[u])});
+    }
+    if(remoteLookupFailed)return json(res,503,{ok:false,error:'تعذر الاتصال بقاعدة الحسابات للتحقق من حسابك القديم. حسابك لم يُحذف؛ حاول مرة أخرى بعد قليل.'});
+    if(user&&!String(user.passwordHash||user.password||user.passHash||user.pass||''))return json(res,409,{ok:false,error:'تم العثور على سجل حسابك القديم، لكن سجل كلمة المرور غير متوفر لهذا الحساب. لا تنشئ حساباً مكرراً؛ استخدم استعادة كلمة المرور إذا كان البريد موثقاً أو تواصل مع الدعم.'});
     return json(res,401,{ok:false,error:'بيانات الدخول غير صحيحة'});
+  }
+  if(p==='/api/auth/forgot-password' && req.method==='POST'){
+    const wait=rateLimit(req,'email');if(wait)return json(res,429,{ok:false,error:'طلبات الاستعادة كثيرة؛ أعد المحاولة بعد '+wait+' ثانية'},{'Retry-After':String(wait)});
+    const b=await bodyJSON(req),email=normalizeEmail(b.email);if(!validEmail(email))return json(res,422,{ok:false,error:'أدخل عنوان بريد إلكتروني صحيحاً.'});
+    let account=null;try{account=await findAccountByEmail(email);}catch(e){return json(res,503,{ok:false,error:'تعذر فحص قاعدة الحسابات الآن. لم نغيّر أي حساب؛ أعد المحاولة بعد قليل.'});}
+    // Same public response for existing and unknown emails to reduce account enumeration.
+    if(!account||account.source!=='admin'&&account.user?.emailVerified!==true)return json(res,200,{ok:true,message:'إذا كان البريد موثقاً ومرتبطاً بحساب، فستصلك رسالة استعادة.'});
+    if(account.source==='admin'&&(process.env.ADMIN_PASSWORD||process.env.ADMIN_PASSWORD_HASH))return json(res,503,{ok:false,error:'كلمة مرور الإدارة مضبوطة من متغيرات الاستضافة؛ حدّث ADMIN_PASSWORD أو ADMIN_PASSWORD_HASH من Railway.'});
+    try{await beginEmailChallenge(email,'reset',account.username,'استعادة كلمة المرور');return json(res,200,{ok:true,message:'إذا كان البريد مرتبطاً بحساب، فستصلك رسالة استعادة.'});}
+    catch(e){return json(res,Number(e.statusCode)||502,{ok:false,error:String(e.message||'تعذر إرسال رسالة الاستعادة').slice(0,260)});}
+  }
+  if(p==='/api/auth/reset-password' && req.method==='POST'){
+    const wait=rateLimit(req,'email');if(wait)return json(res,429,{ok:false,error:'محاولات كثيرة؛ أعد المحاولة بعد '+wait+' ثانية'},{'Retry-After':String(wait)});
+    const b=await bodyJSON(req),email=normalizeEmail(b.email),code=String(b.code||''),newPassword=String(b.newPassword||'');if(!validEmail(email)||!/^[0-9]{6}$/.test(code))return json(res,422,{ok:false,error:'أدخل البريد ورمز التحقق المكوّن من 6 أرقام.'});if(newPassword.length<8)return json(res,422,{ok:false,error:'كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل.'});
+    const challengeStore=readJSON('email_challenges.json',{}),challenge=challengeStore[emailChallengeKey(email,'reset')];if(!challenge||!challenge.username)return json(res,422,{ok:false,error:'أرسل رمز استعادة جديداً أولاً.'});
+    if(challenge.username===ADMIN_USER){if(process.env.ADMIN_PASSWORD||process.env.ADMIN_PASSWORD_HASH)return json(res,409,{ok:false,error:'كلمة مرور الإدارة تُدار من Railway Variables؛ لم يتغير شيء.'});const verified=consumeEmailChallenge(email,'reset',code,challenge.username);if(!verified.ok)return json(res,422,{ok:false,error:verified.error});const cfg=readJSON('settings.json',{});cfg.adminPasswordHash=hashPassword(newPassword);cfg.adminPasswordUpdatedAt=nowISO();writeJSON('settings.json',cfg);return json(res,200,{ok:true,message:'تم تغيير كلمة مرور الإدارة. سجّل الدخول بكلمة المرور الجديدة.'});}
+    const usersStore=readJSON('users.json',{users:{}});let localKey=Object.keys(usersStore.users||{}).find(k=>k===challenge.username)||Object.keys(usersStore.users||{}).find(k=>k.toLowerCase()===String(challenge.username).toLowerCase());let user=localKey?usersStore.users[localKey]:null;let resetFirebasePath=localKey?'users/'+firebaseSafeKey(localKey):'';let remoteRecord=null;
+    if(!user){try{remoteRecord=await findRemoteUserByUsername(challenge.username);if(remoteRecord){localKey=remoteRecord.username||challenge.username;resetFirebasePath=remoteRecord.firebasePath||('users/'+firebaseSafeKey(localKey));user={...remoteRecord.user,username:localKey};usersStore.users[localKey]=user;}}catch(e){return json(res,503,{ok:false,error:'تعذر تحميل سجل الحساب القديم من قاعدة البيانات؛ لم تتغير كلمة المرور. أعد إرسال رمز جديد لاحقاً.'});}}
+    if(!user||normalizeEmail(user.email||user.mail||user.emailAddress)!==email)return json(res,409,{ok:false,error:'تعذر مطابقة البريد مع حسابك؛ لم تتغير كلمة المرور.'});
+    const verified=consumeEmailChallenge(email,'reset',code,challenge.username);if(!verified.ok)return json(res,422,{ok:false,error:verified.error});
+    if(!remoteRecord){try{remoteRecord=await findRemoteUserByUsername(localKey);}catch(e){return json(res,503,{ok:false,error:'تعذر التأكد من قاعدة الحسابات؛ لم تتغير كلمة المرور. أرسل رمزاً جديداً بعد عودة الاتصال.'});}}
+    if(!remoteRecord&&!DATA_IS_EXTERNAL)return json(res,503,{ok:false,error:'لا يوجد تخزين دائم مؤكد لتغيير كلمة المرور بأمان. اربط Railway Volume أو أصلح Firebase ثم أرسل رمزاً جديداً.'});
+    const newHash=hashPassword(newPassword),updatedAt=nowISO();
+    if(remoteRecord){try{await firebasePatchJson(remoteRecord.firebasePath||resetFirebasePath||('users/'+firebaseSafeKey(localKey)),{passwordHash:newHash,password:null,pass:null,passHash:null,passwordUpdatedAt:updatedAt},7000);}catch(e){return json(res,502,{ok:false,error:'تعذر حفظ كلمة المرور الجديدة في قاعدة الحسابات؛ لم نغيّر النسخة المحلية حتى لا تتعارض الحسابات. أرسل رمزاً جديداً وأعد المحاولة.'});}}
+    user.passwordHash=newHash;delete user.password;delete user.pass;delete user.passHash;user.passwordUpdatedAt=updatedAt;usersStore.users[localKey]=user;writeJSON('users.json',usersStore);
+    return json(res,200,{ok:true,message:'تم تغيير كلمة المرور بنجاح.',remoteSynced:!!remoteRecord,storageMode:DATA_IS_EXTERNAL?'persistent-volume':'check-persistence'});
+  }
+  if(p==='/api/account/email/request' && req.method==='POST'){
+    if(!requestHasSameOrigin(req))return json(res,403,{ok:false,error:'رفض الطلب بسبب اختلاف مصدر الصفحة؛ أعد فتح الموقع الرسمي.'});const s=session(req);if(!s||s.role!=='user')return json(res,401,{ok:false,error:'سجّل الدخول أولاً.'});const wait=rateLimit(req,'email');if(wait)return json(res,429,{ok:false,error:'طلبات البريد كثيرة؛ أعد المحاولة بعد '+wait+' ثانية'},{'Retry-After':String(wait)});
+    const b=await bodyJSON(req),email=normalizeEmail(b.email);if(!validEmail(email))return json(res,422,{ok:false,error:'أدخل البريد الجديد بصورة صحيحة.'});let account;try{account=await findAccountByEmail(email);}catch(e){return json(res,503,{ok:false,error:'تعذر فحص البريد في قاعدة البيانات.'});}if(account&&account.username.toLowerCase()!==String(s.username).toLowerCase())return json(res,409,{ok:false,error:'البريد مستخدم في حساب آخر.'});
+    try{await beginEmailChallenge(email,'change-email',s.username,'تأكيد البريد الجديد');return json(res,200,{ok:true,message:'تم إرسال رمز حقيقي إلى البريد الجديد.'});}catch(e){return json(res,Number(e.statusCode)||502,{ok:false,error:String(e.message||'تعذر إرسال رمز البريد').slice(0,260)});}
+  }
+  if(p==='/api/account/email/confirm' && req.method==='POST'){
+    if(!requestHasSameOrigin(req))return json(res,403,{ok:false,error:'رفض الطلب بسبب اختلاف مصدر الصفحة؛ أعد فتح الموقع الرسمي.'});const s=session(req);if(!s||s.role!=='user')return json(res,401,{ok:false,error:'سجّل الدخول أولاً.'});const b=await bodyJSON(req),email=normalizeEmail(b.email),code=String(b.code||'');if(!validEmail(email))return json(res,422,{ok:false,error:'البريد الجديد غير صالح.'});const check=consumeEmailChallenge(email,'change-email',code,s.username);if(!check.ok)return json(res,422,{ok:false,error:check.error});
+    let collision=null;try{collision=await findAccountByEmail(email);}catch(e){return json(res,503,{ok:false,error:'تعذر التأكد من أن البريد غير مستخدم لأن قاعدة البيانات غير متاحة؛ لم يتغير البريد.'});}if(collision&&String(collision.username).toLowerCase()!==String(s.username).toLowerCase())return json(res,409,{ok:false,error:'البريد أصبح مرتبطاً بحساب آخر.'});
+    const store=readJSON('users.json',{users:{}});let key=Object.keys(store.users||{}).find(k=>k===s.username)||Object.keys(store.users||{}).find(k=>k.toLowerCase()===String(s.username).toLowerCase());let user=key?store.users[key]:null;let remoteRecord=null;
+    if(!user){try{remoteRecord=await findRemoteUserByUsername(s.username);if(remoteRecord){key=remoteRecord.username||s.username;user={...remoteRecord.user,username:key};}}catch(e){return json(res,503,{ok:false,error:'تعذر تحميل الحساب القديم من قاعدة البيانات؛ لم يتغير البريد.'});}}
+    else {try{remoteRecord=await findRemoteUserByUsername(key);}catch(e){return json(res,503,{ok:false,error:'تعذر التأكد من مزامنة الحساب مع قاعدة البيانات؛ لم يتغير البريد.'});}}
+    if(!user)return json(res,404,{ok:false,error:'الحساب غير موجود في مخزن الحسابات الحالي؛ لم يتغير البريد.'});
+    const updatedAt=nowISO();if(remoteRecord){try{await firebasePatchJson(remoteRecord.firebasePath||('users/'+firebaseSafeKey(key)),{email,emailVerified:true,emailVerifiedAt:updatedAt,updatedAt},7000);}catch(e){return json(res,502,{ok:false,error:'تعذر حفظ البريد الجديد في قاعدة الحسابات؛ لم نغيّر نسخة الحساب المحلية. أرسل رمزاً جديداً وأعد المحاولة.'});}}else if(!DATA_IS_EXTERNAL)return json(res,503,{ok:false,error:'لا يوجد تخزين دائم مؤكد لتغيير البريد بأمان. اربط Railway Volume أو أصلح Firebase ثم أرسل رمزاً جديداً.'});
+    user.email=email;user.emailVerified=true;user.emailVerifiedAt=updatedAt;user.updatedAt=updatedAt;store.users[key]=user;writeJSON('users.json',store);
+    return json(res,200,{ok:true,email,emailVerified:true,remoteSynced:!!remoteRecord,storageMode:DATA_IS_EXTERNAL?'persistent-volume':'check-persistence'});
   }
   if(p==='/api/session' && req.method==='GET'){
     const token=sid(req); const s=session(req);
@@ -2051,7 +2218,10 @@ async function routeAPI(req,res,urlObj){
     try { versionFile=fs.readFileSync(path.join(ROOT,'version.txt'),'utf8').trim(); } catch(_) {}
     try { buildFile=fs.readFileSync(path.join(ROOT,'BUILD_ID.txt'),'utf8').trim(); } catch(_) {}
     const deploymentConsistent=uiVersion===APP_VERSION && uiBuildId===BUILD_ID && versionFile===APP_VERSION && buildFile===BUILD_ID;
-    return json(res,200,{ok:true,app:APP_NAME,version:APP_VERSION,buildId:BUILD_ID,uiVersion,uiBuildId,versionFile,buildFile,deploymentConsistent,dataStorageMode:DATA_IS_EXTERNAL?'external-directory':'release-local',providerCount:Object.keys(providerStore().providers||{}).length,time:new Date().toISOString(),node:process.version});
+    const health={ok:true,app:APP_NAME,version:APP_VERSION,buildId:BUILD_ID,uiVersion,uiBuildId,versionFile,buildFile,deploymentConsistent,dataStorageMode:DATA_IS_EXTERNAL?'external-directory':'release-local',providerCount:Object.keys(providerStore().providers||{}).length,time:new Date().toISOString(),node:process.version};
+    // Keep operational configuration details private; only an authenticated admin can inspect them.
+    if(isAdmin(req))health.securityConfig={sessionSecretConfigured:!!String(process.env.SESSION_SECRET||'').trim(),dedicatedEncryptionKeyConfigured:!!String(process.env.SADA_ENCRYPTION_KEY||'').trim(),firebaseConfigured:!!String(process.env.FIREBASE_DATABASE_URL||'').trim(),emailServiceConfigured:!!(String(process.env.RESEND_API_KEY||'').trim()&&String(process.env.RESEND_FROM_EMAIL||process.env.EMAIL_FROM||'').trim()),telegramTokenFromEnvironment:!!String(process.env.TELEGRAM_BOT_TOKEN||'').trim(),adminPasswordFromEnvironment:!!(String(process.env.ADMIN_PASSWORD||'').trim()||String(process.env.ADMIN_PASSWORD_HASH||'').trim())};
+    return json(res,200,health);
   }
   return json(res,404,{error:'API endpoint not found'});
 }

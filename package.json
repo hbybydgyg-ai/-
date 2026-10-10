@@ -1,6 +1,6 @@
 {
   "name": "sadairaq-railway",
-  "version": "1.5.70",
+  "version": "1.5.72",
   "private": true,
   "description": "صدى العراق - Railway deployment",
   "scripts": {
@@ -9,7 +9,7 @@
   "engines": {
     "node": ">=20"
   },
-  "buildId": "SADA-1.5.70-CONSOLIDATED-NOTIFICATIONS-SUPPORT-ACCOUNT-UI-20261010",
+  "buildId": "SADA-1.5.72-EMAIL-RECOVERY-PERSISTENT-DATA-EARNINGS-SECURE-SECRETS-20261010",
   "dependencies": {
     "google-auth-library": "^11.2.0"
   }
