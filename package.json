@@ -1,15 +1,15 @@
 {
   "name": "sadairaq-railway",
-  "version": "1.5.82",
+  "version": "1.5.84",
   "private": true,
-  "description": "صدى العراق — تحميل مضغوط أسرع وتحديث بيانات الأقسام واختبار إشعارات Telegram",
+  "description": "صدى العراق — تحسين إرسال Telegram، ونسخ قاعدة الموقع واستعادتها دون استبدال البيانات الحالية",
   "scripts": {
     "start": "node server.js"
   },
   "engines": {
     "node": ">=20"
   },
-  "buildId": "SADA-1.5.82-FAST-LOAD-TELEGRAM-DELIVERY-LIVE-REFRESH-20261010",
+  "buildId": "SADA-1.5.84-TELEGRAM-RESTORE-DB-BACKUP-20261010",
   "dependencies": {
     "google-auth-library": "^11.2.0"
   }
