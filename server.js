@@ -14,8 +14,8 @@ const LEGACY_DATA = path.join(ROOT, 'data');
 const DATA = path.resolve(process.env.SADA_DATA_DIR || process.env.DATA_DIR || (process.env.RAILWAY_VOLUME_MOUNT_PATH ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sada-data') : LEGACY_DATA));
 const DATA_IS_EXTERNAL = path.resolve(DATA) !== path.resolve(LEGACY_DATA);
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.81';
-const BUILD_ID = 'SADA-1.5.81-PERSISTENT-USERS-SHORT-ORDER-NUMBERS-20261010';
+const APP_VERSION = '1.5.82';
+const BUILD_ID = 'SADA-1.5.82-FAST-LOAD-TELEGRAM-DELIVERY-LIVE-REFRESH-20261010';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 // Restored the default administrator login from the supplied original release. Set ADMIN_PASSWORD in Railway to override it.
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2');
@@ -113,7 +113,24 @@ function json(res, status, obj, extra={}) {
   res.setHeader('Content-Type','application/json; charset=utf-8');
   res.setHeader('Cache-Control','no-store, no-cache, must-revalidate, max-age=0');
   for (const [k,v] of Object.entries(extra)) res.setHeader(k,v);
-  res.end(JSON.stringify(obj));
+  const raw=Buffer.from(JSON.stringify(obj));
+  let body=raw, encoding='';
+  // Compress larger API lists (users/orders/services) to avoid slow mobile downloads.
+  // Auth/session and secret-bearing endpoints opt out in the request dispatcher.
+  if(res._allowJsonCompression!==false && raw.length>=2048){
+    const ae=String(res._acceptEncoding||'');
+    try{
+      if(/(?:^|,\s*)br(?:\s*;q=(?!0(?:\.0*)?)[0-9.]+)?(?:,|$)/i.test(ae)){
+        body=zlib.brotliCompressSync(raw,{params:{[zlib.constants.BROTLI_PARAM_QUALITY]:4}});encoding='br';
+      }else if(/(?:^|,\s*)gzip(?:\s*;q=(?!0(?:\.0*)?)[0-9.]+)?(?:,|$)/i.test(ae)){
+        body=zlib.gzipSync(raw,{level:6});encoding='gzip';
+      }
+    }catch(_){body=raw;encoding='';}
+  }
+  res.setHeader('Vary','Accept-Encoding');
+  if(encoding)res.setHeader('Content-Encoding',encoding);
+  res.setHeader('Content-Length',String(body.length));
+  res.end(body);
 }
 function parseCookies(req){
   const out={};
@@ -1349,10 +1366,10 @@ async function sendTelegramDetailed(text,meta={}){
   const cfg=telegramConfig();
   const caption=String(text||'').slice(0,1024);
   let r;
-  const targetChat=String(meta.chatId||cfg.chat||'').trim();
+  const targetChat=String(meta.chatId||cfg.activationChat||cfg.chat||cfg.adminChat||'').trim();
   if(!targetChat)return {ok:false,error:'معرّف قناة Telegram غير مضبوط'};
   const imagePath=path.join(ROOT,'telegram-notification.png');
-  if(cfg.enabled!==false && cfg.token && targetChat && fs.existsSync(imagePath)){
+  if(meta.attachPhoto===true && cfg.enabled!==false && cfg.token && targetChat && fs.existsSync(imagePath)){
     const apiBase=String(process.env.TELEGRAM_API_BASE||'https://api.telegram.org').replace(/\/+$/,'');
     let photoError='';
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
@@ -1387,8 +1404,7 @@ async function notifyTelegramRecipients(text,meta={}){
   else{primaryChat=cfg.activationChat||cfg.chat||cfg.adminChat;targets=[primaryChat,cfg.adminChat,...(cfg.extraChats||[])];}
   targets=[...new Set(targets.map(x=>String(x||'').trim()).filter(Boolean))];
   if(!cfg.enabled||!cfg.token||!targets.length){const msg=channel==='admin'?'معرّف حساب الأدمن غير محفوظ':channel==='overdue'?'قناة الطلبات المتأخرة وحساب الأدمن غير مضبوطين':'قناة التفعيلات وحساب الأدمن غير مضبوطين';return {ok:false,error:!cfg.enabled?'إشعارات تيليجرام غير مفعلة':!cfg.token?'Bot Token غير محفوظ':msg,results:[]};}
-  const results=[];
-  for(const chatId of targets){const r=await sendTelegramDetailed(text,{...meta,chatId});results.push({chatId,ok:!!r.ok,error:r.error||r.description||'',status:r.status||null,messageId:r.messageId||null,chat:r.resultInfo?.chat||null});}
+  const results=await Promise.all(targets.map(async chatId=>{const r=await sendTelegramDetailed(text,{...meta,chatId});return {chatId,ok:!!r.ok,error:r.error||r.description||'',status:r.status||null,messageId:r.messageId||null,chat:r.resultInfo?.chat||null};}));
   const primary=results.find(x=>x.chatId===primaryChat);const ok=!!primary?.ok;return {ok,results,description:ok?'أكد Telegram إرسال الرسالة إلى الوجهة الأساسية.':results.map(x=>`${x.chatId}: ${x.error}`).join(' | ')};
 }
 async function sendTelegram(text){return (await notifyTelegramRecipients(text,{kind:'message'})).ok;}
@@ -2017,8 +2033,12 @@ async function routeAPI(req,res,urlObj){
     return json(res,200,{ok:true,persistent:true,storageMode:firebaseChannelsSaved?'firebase+local':'external-volume',verifiedBot,warning:tg.tokenEncrypted&&!firebaseSecretSaved?'تم تشفير التوكن وحفظه على مساحة دائمة، لكن النسخة المشفرة في Firebase لم تتحدث.':undefined,telegram:{enabled:tg.enabled!==false,tokenSet:!!(tg.tokenEncrypted||process.env.TELEGRAM_BOT_TOKEN),tokenSource:tg.tokenEncrypted?'admin-panel':process.env.TELEGRAM_BOT_TOKEN?'railway-variable':'none',chat:tg.activationChat||tg.chat||'',activationChat:tg.activationChat||tg.chat||'',adminChat:tg.adminChat||'',overdueChat:tg.overdueChat||''}});
   }
   if(p==='/api/admin/telegram/test' && req.method==='POST'){
-    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const r=await sendTelegramDetailed(String(b.text||'✅ اختبار إشعارات صدى العراق'),{kind:'manual_test'});
-    return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'أكد Telegram إرسال رسالة الاختبار':(r.description||r.error||'فشل إرسال اختبار Telegram'),status:r.status||null,messageId:r.messageId||null,chat:r.resultInfo?.chat||null});
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
+    const b=await bodyJSON(req),cfg=telegramConfig(),target=String(b.target||'activation');
+    const chatId=target==='admin'?cfg.adminChat:target==='overdue'?(cfg.overdueChat||cfg.adminChat):(cfg.activationChat||cfg.chat||cfg.adminChat);
+    if(!chatId)return json(res,422,{ok:false,error:target==='admin'?'معرّف حساب الأدمن غير محفوظ.':'معرّف القناة غير محفوظ. أدخل الوجهة من لوحة الإعدادات.'});
+    const r=await sendTelegramDetailed(String(b.text||'✅ اختبار إشعارات صدى العراق'),{kind:'manual_test',chatId});
+    return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'أكد Telegram إرسال رسالة الاختبار فعلياً.':(r.description||r.error||'فشل إرسال اختبار Telegram'),status:r.status||null,messageId:r.messageId||null,chat:r.resultInfo?.chat||null,target});
   }
   if(p==='/api/admin/telegram/test-connection' && req.method==='POST'){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const r=await telegramTestConnection();
@@ -2623,8 +2643,27 @@ async function routeAPI(req,res,urlObj){
 }
 
 const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.svg':'image/svg+xml','.json':'application/json; charset=utf-8','.txt':'text/plain; charset=utf-8'};
+const STATIC_CACHE=new Map();
+const STATIC_TEXT_EXTS=new Set(['.html','.js','.css','.svg','.json','.txt','.xml']);
+function staticRecord(file,st,ext,callback){
+  const key=file, cached=STATIC_CACHE.get(key);
+  if(cached&&cached.mtimeMs===st.mtimeMs&&cached.size===st.size)return callback(null,cached);
+  fs.readFile(file,(err,raw)=>{
+    if(err)return callback(err);
+    const etag='"'+crypto.createHash('sha1').update(raw).digest('hex')+'"';
+    const record={mtimeMs:st.mtimeMs,size:st.size,etag,lastModified:st.mtime.toUTCString(),raw,br:null,gzip:null};
+    if(STATIC_TEXT_EXTS.has(ext)&&raw.length>=512){
+      try{record.br=zlib.brotliCompressSync(raw,{params:{[zlib.constants.BROTLI_PARAM_QUALITY]:4}})}catch(_){}
+      try{record.gzip=zlib.gzipSync(raw,{level:6})}catch(_){}
+    }
+    STATIC_CACHE.set(key,record);
+    // Keep the cache bounded for long-lived instances.
+    while(STATIC_CACHE.size>80)STATIC_CACHE.delete(STATIC_CACHE.keys().next().value);
+    callback(null,record);
+  });
+}
 function serveStatic(req,res,urlObj){
-  let p=decodeURIComponent(urlObj.pathname); if(p==='/'||p==='') p='/index.html';
+  let p;try{p=decodeURIComponent(urlObj.pathname)}catch(_){return json(res,400,{error:'Invalid path'})} if(p==='/'||p==='') p='/index.html';
   const baseName=path.posix.basename(p).toLowerCase();
   const blockedFiles=new Set(['server.js','package.json','config.json','authproviders.json','login.json','noauth.json','cookies.txt']);
   if(blockedFiles.has(baseName) || /^\/data(?:\/|$)/i.test(p) || /(?:^|\/)\.(?:env|git|npmrc)/i.test(p)) return json(res,403,{error:'Forbidden'});
@@ -2634,10 +2673,26 @@ function serveStatic(req,res,urlObj){
   fs.stat(file,(err,st)=>{
     if(err||!st.isFile()) return json(res,404,{error:'Not found'});
     const ext=path.extname(file).toLowerCase();
-    res.statusCode=200; res.setHeader('Content-Type',MIME[ext]||'application/octet-stream');
-    res.setHeader('Cache-Control','no-store, no-cache, must-revalidate, max-age=0');
-    if(ext==='.html') res.setHeader('Pragma','no-cache');
-    fs.createReadStream(file).pipe(res);
+    staticRecord(file,st,ext,(readErr,record)=>{
+      if(readErr)return json(res,404,{error:'Not found'});
+      res.setHeader('Content-Type',MIME[ext]||'application/octet-stream');res.setHeader('Last-Modified',record.lastModified);res.setHeader('Vary','Accept-Encoding');
+      // HTML revalidates on every visit so deployments appear immediately; assets can be reused briefly.
+      res.setHeader('Cache-Control',ext==='.html'?'no-cache, must-revalidate':'public, max-age=300, must-revalidate');
+      let body=record.raw,encoding='';const ae=String(req.headers['accept-encoding']||'');
+      if(record.br&&/(?:^|,\s*)br(?:\s*;q=(?!0(?:\.0*)?)[0-9.]+)?(?:,|$)/i.test(ae)){body=record.br;encoding='br';}
+      else if(record.gzip&&/(?:^|,\s*)gzip(?:\s*;q=(?!0(?:\.0*)?)[0-9.]+)?(?:,|$)/i.test(ae)){body=record.gzip;encoding='gzip';}
+      // Use representation-specific ETags for compressed vs. uncompressed bodies.
+      const etagKey=encoding||'raw';record.etags=record.etags||{raw:record.etag};
+      if(!record.etags[etagKey])record.etags[etagKey]='"'+crypto.createHash('sha1').update(body).digest('hex')+'"';
+      const selectedEtag=record.etags[etagKey];res.setHeader('ETag',selectedEtag);
+      const inm=String(req.headers['if-none-match']||'');const ims=String(req.headers['if-modified-since']||'');
+      if(inm&&(inm.split(',').map(x=>x.trim()).includes(selectedEtag)||inm.trim()==='*')){res.statusCode=304;return res.end();}
+      if(!inm&&ims&&Number.isFinite(Date.parse(ims))&&Math.floor(st.mtimeMs/1000)<=Math.floor(Date.parse(ims)/1000)){res.statusCode=304;return res.end();}
+      if(encoding)res.setHeader('Content-Encoding',encoding);
+      res.statusCode=200;res.setHeader('Content-Length',String(body.length));
+      if(req.method==='HEAD')return res.end();
+      res.end(body);
+    });
   });
 }
 
@@ -2710,6 +2765,9 @@ const server=http.createServer(async (req,res)=>{
     res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');
     if(res._forwardedProto==='https') res.setHeader('Strict-Transport-Security','max-age=15552000; includeSubDomains');
     const u=new URL(req.url,`http://${req.headers.host||'localhost'}`);
+    res._acceptEncoding=String(req.headers['accept-encoding']||'');
+    // Never compress authentication/session or Telegram secret-management responses.
+    res._allowJsonCompression=!(/^\/api\/auth(?:\/|$)/i.test(u.pathname)||/^\/api\/admin\/telegram(?:\/|$)/i.test(u.pathname));
     if(u.pathname.startsWith('/api/')) return routeAPI(req,res,u);
     return serveStatic(req,res,u);
   }catch(e){ const st=Number(e?.statusCode)||500; return json(res,st,{error:st===500?'Server error':e.message}); }
