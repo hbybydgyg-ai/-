@@ -14,8 +14,8 @@ const LEGACY_DATA = path.join(ROOT, 'data');
 const DATA = path.resolve(process.env.SADA_DATA_DIR || process.env.DATA_DIR || (process.env.RAILWAY_VOLUME_MOUNT_PATH ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sada-data') : LEGACY_DATA));
 const DATA_IS_EXTERNAL = path.resolve(DATA) !== path.resolve(LEGACY_DATA);
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.79';
-const BUILD_ID = 'SADA-1.5.79-ACCOUNT-PROFILE-SERVICE-NAMES-20261010';
+const APP_VERSION = '1.5.81';
+const BUILD_ID = 'SADA-1.5.81-PERSISTENT-USERS-SHORT-ORDER-NUMBERS-20261010';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 // Restored the default administrator login from the supplied original release. Set ADMIN_PASSWORD in Railway to override it.
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2');
@@ -44,8 +44,9 @@ function ensureTelegramDefaults(){
   const cfg=readJSON('settings.json',{});
   const tg=cfg.telegram&&typeof cfg.telegram==='object'?{...cfg.telegram}:{};
   if(tg.enabled===undefined) tg.enabled=true;
-  // Keep the public destination in settings, but never persist TELEGRAM_BOT_TOKEN from env.
-  if(!tg.chat || String(tg.chat).trim()==='@jbhbhg58') tg.chat=String(process.env.TELEGRAM_CHAT_ID||'@jbhbhg58');
+  // Never silently fall back to an unrelated default Telegram destination.
+  // A destination must be configured explicitly in Railway or the admin panel.
+  if(!tg.chat) tg.chat=String(process.env.TELEGRAM_CHAT_ID||'').trim();
   if(tg.chat||cfg.telegram) { cfg.telegram=tg; writeJSON('settings.json',cfg); }
 }
 
@@ -1275,6 +1276,14 @@ function redactSecretObject(value,depth=0){
 safeProviderResponse = function(d){ return redactSecretObject(d); };
 function providerAuthErrorText(t){ return /invalid|incorrect|wrong|unauthori[sz]ed|authentication|api\s*key|access\s*denied|expired|login|sign\s*in/i.test(String(t||'')); }
 let TELEGRAM_CHANNELS_REMOTE={};
+function validTelegramBotToken(value){return /^\d{5,}:[A-Za-z0-9_-]{20,}$/.test(String(value||'').trim());}
+function validTelegramChatTarget(value){const v=String(value||'').trim();return !v||/^@?[A-Za-z][A-Za-z0-9_]{4,63}$/.test(v)||/^-?\d{5,25}$/.test(v);}
+function telegramResultSummary(method,result){
+  if(!result||typeof result!=='object')return null;
+  if(method==='getMe')return {botId:result.id||null,isBot:!!result.is_bot,firstName:String(result.first_name||''),username:String(result.username||'')};
+  const chat=result.chat&&typeof result.chat==='object'?result.chat:{};
+  return {messageId:result.message_id||null,chat:{id:chat.id??null,type:String(chat.type||''),title:String(chat.title||''),username:String(chat.username||''),firstName:String(chat.first_name||''),lastName:String(chat.last_name||'')}};
+}
 function readTelegramStoredSecret(settings){
   const tg=settings?.telegram&&typeof settings.telegram==='object'?settings.telegram:{};
   if(tg.tokenEncrypted){if(!telegramEncryptionReady()&&!String(process.env.TELEGRAM_BOT_TOKEN||'').trim()){console.warn('Stored Telegram token is paused because a local encryption key could not be read or created.');return '';}const plain=decryptSecret(tg.tokenEncrypted);if(plain)return plain;}
@@ -1285,21 +1294,29 @@ function readTelegramStoredSecret(settings){
 function telegramConfig(){
   const settings=readJSON('settings.json',{});const cfg=settings.telegram||{};
   const envToken=String(process.env.TELEGRAM_BOT_TOKEN||'').trim();
+  const hasStoredCipher=!!String(cfg.tokenEncrypted||'').trim();
   const storedToken=readTelegramStoredSecret(settings);
-  const legacyChat=String(process.env.TELEGRAM_CHAT_ID||cfg.chat||'@jbhbhg58').trim();
+  // An admin-panel token is authoritative. If it cannot be decrypted, do not silently fall
+  // back to a possibly revoked/stale Railway token; surface the key problem instead.
+  const token=String(storedToken||(!hasStoredCipher?envToken:'')).trim();
+  const legacyChat=String(process.env.TELEGRAM_CHAT_ID||cfg.chat||'').trim();
   const activationEnv=String(process.env.TELEGRAM_ACTIVATION_CHAT_ID||'').trim();
   const overdueEnv=String(process.env.TELEGRAM_OVERDUE_CHAT_ID||'').trim();
+  const adminEnv=String(process.env.TELEGRAM_ADMIN_CHAT_ID||'').trim();
   const activationChat=String(activationEnv||cfg.activationChat||TELEGRAM_CHANNELS_REMOTE.activationChat||legacyChat).trim();
   const overdueChat=String(overdueEnv||cfg.overdueChat||TELEGRAM_CHANNELS_REMOTE.overdueChat||'').trim();
+  const adminChat=String(adminEnv||cfg.adminChat||TELEGRAM_CHANNELS_REMOTE.adminChat||'').trim();
   const envToggle=String(process.env.TELEGRAM_NOTIFICATIONS_ENABLED||'').trim();
   const enabled=envToggle ? envToggle.toLowerCase()!=='false' : (TELEGRAM_CHANNELS_REMOTE.enabled!==undefined?TELEGRAM_CHANNELS_REMOTE.enabled!==false:cfg.enabled!==false);
-  const extra=(String(process.env.TELEGRAM_EXTRA_CHAT_IDS||'').trim()||'').split(',').map(x=>x.trim()).filter(Boolean);
-  return {enabled,token:String(envToken||storedToken||'').trim(),chat:activationChat,activationChat,overdueChat,activationEnvLocked:!!activationEnv,overdueEnvLocked:!!overdueEnv,extraChats:[...new Set(extra)].filter(x=>x!==activationChat&&x!==overdueChat)};
+  const extraEnv=(String(process.env.TELEGRAM_EXTRA_CHAT_IDS||'').trim()||'').split(',').map(x=>x.trim()).filter(Boolean);
+  const extraCfg=Array.isArray(cfg.extraChats)?cfg.extraChats.map(x=>String(x||'').trim()).filter(Boolean):[];
+  const extra=[...new Set([...extraEnv,...extraCfg])].filter(x=>x!==activationChat&&x!==overdueChat&&x!==adminChat);
+  return {enabled,token,tokenSource:storedToken?'admin-panel':(!hasStoredCipher&&envToken)?'railway-variable':hasStoredCipher?'stored-unreadable':'none',tokenEncryptionError:hasStoredCipher&&!storedToken,chat:activationChat,activationChat,overdueChat,adminChat,activationEnvLocked:!!activationEnv,overdueEnvLocked:!!overdueEnv,adminEnvLocked:!!adminEnv,extraChats:extra};
 }
 async function hydrateTelegramChannelsFromFirebase(){
   let any=false;
-  try{const remote=await firebaseGetJson('config/telegramChannels',3500);if(remote&&typeof remote==='object'&&!Array.isArray(remote)){TELEGRAM_CHANNELS_REMOTE={activationChat:String(remote.activationChat||''),overdueChat:String(remote.overdueChat||''),enabled:remote.enabled!==undefined?remote.enabled:undefined,updatedAt:remote.updatedAt||null};const settings=readJSON('settings.json',{});settings.telegram=settings.telegram||{};if(!process.env.TELEGRAM_ACTIVATION_CHAT_ID&&TELEGRAM_CHANNELS_REMOTE.activationChat&&!settings.telegram.activationChat)settings.telegram.activationChat=TELEGRAM_CHANNELS_REMOTE.activationChat;if(!process.env.TELEGRAM_OVERDUE_CHAT_ID&&TELEGRAM_CHANNELS_REMOTE.overdueChat&&!settings.telegram.overdueChat)settings.telegram.overdueChat=TELEGRAM_CHANNELS_REMOTE.overdueChat;if(process.env.TELEGRAM_NOTIFICATIONS_ENABLED===undefined&&TELEGRAM_CHANNELS_REMOTE.enabled!==undefined)settings.telegram.enabled=TELEGRAM_CHANNELS_REMOTE.enabled;writeJSON('settings.json',settings);any=true}}catch(e){console.warn('Telegram channel hydration skipped:',String(e.message||e).slice(0,120))}
-  try{if(!process.env.TELEGRAM_BOT_TOKEN){const secret=await firebaseGetJson('config/telegramSecret',3500);if(secret&&typeof secret.tokenEncrypted==='string'&&secret.tokenEncrypted){const settings=readJSON('settings.json',{});settings.telegram=settings.telegram||{};if(!settings.telegram.tokenEncrypted){settings.telegram.tokenEncrypted=secret.tokenEncrypted;delete settings.telegram.token;writeJSON('settings.json',settings);}any=true;}}}catch(e){console.warn('Telegram encrypted secret hydration skipped:',String(e.message||e).slice(0,120))}
+  try{const remote=await firebaseGetJson('config/telegramChannels',3500);if(remote&&typeof remote==='object'&&!Array.isArray(remote)){TELEGRAM_CHANNELS_REMOTE={activationChat:String(remote.activationChat||''),overdueChat:String(remote.overdueChat||''),adminChat:String(remote.adminChat||''),enabled:remote.enabled!==undefined?remote.enabled:undefined,updatedAt:remote.updatedAt||null};const settings=readJSON('settings.json',{});settings.telegram=settings.telegram||{};if(!process.env.TELEGRAM_ACTIVATION_CHAT_ID&&TELEGRAM_CHANNELS_REMOTE.activationChat&&!settings.telegram.activationChat)settings.telegram.activationChat=TELEGRAM_CHANNELS_REMOTE.activationChat;if(!process.env.TELEGRAM_OVERDUE_CHAT_ID&&TELEGRAM_CHANNELS_REMOTE.overdueChat&&!settings.telegram.overdueChat)settings.telegram.overdueChat=TELEGRAM_CHANNELS_REMOTE.overdueChat;if(!process.env.TELEGRAM_ADMIN_CHAT_ID&&TELEGRAM_CHANNELS_REMOTE.adminChat&&!settings.telegram.adminChat)settings.telegram.adminChat=TELEGRAM_CHANNELS_REMOTE.adminChat;if(process.env.TELEGRAM_NOTIFICATIONS_ENABLED===undefined&&TELEGRAM_CHANNELS_REMOTE.enabled!==undefined)settings.telegram.enabled=TELEGRAM_CHANNELS_REMOTE.enabled;writeJSON('settings.json',settings);any=true}}catch(e){console.warn('Telegram channel hydration skipped:',String(e.message||e).slice(0,120))}
+  try{const secret=await firebaseGetJson('config/telegramSecret',3500);if(secret&&typeof secret.tokenEncrypted==='string'&&secret.tokenEncrypted){const settings=readJSON('settings.json',{});settings.telegram=settings.telegram||{};if(!settings.telegram.tokenEncrypted){settings.telegram.tokenEncrypted=secret.tokenEncrypted;delete settings.telegram.token;writeJSON('settings.json',settings);}any=true;}}catch(e){console.warn('Telegram encrypted secret hydration skipped:',String(e.message||e).slice(0,120))}
   return any;
 }
 function telegramLog(entry){
@@ -1307,20 +1324,27 @@ function telegramLog(entry){
   arr.push({...entry,createdAt:entry.createdAt||nowISO()});
   writeJSON('telegram_notifications.json',arr.slice(-300));
 }
-async function telegramRequest(method,payload,timeoutMs=8000){
-  const cfg=telegramConfig();
-  if(!cfg.enabled) return {ok:false,skipped:true,error:'إشعارات القناة غير مفعلة'};
-  if(!cfg.token||(method!=='getMe'&&!String(payload?.chat_id||cfg.chat||'').trim())) return {ok:false,error:'Bot Token أو Chat ID غير محفوظ'};
+async function telegramApiRequest(token,method,payload,timeoutMs=8000){
+  const secret=String(token||'').trim();
+  if(!validTelegramBotToken(secret))return {ok:false,error:'صيغة Bot Token غير صحيحة؛ استخدم توكناً جديداً من BotFather.'};
   const apiBase=String(process.env.TELEGRAM_API_BASE||'https://api.telegram.org').replace(/\/+$/,'');
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);
   try{
-    const r=await fetch(`${apiBase}/bot${encodeURIComponent(cfg.token)}/${method}`,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload),signal:controller.signal});
-    const text=await r.text(); let d={}; try{d=text?JSON.parse(text):{};}catch(_){d={description:text};}
-    return {ok:!!(r.ok&&d.ok===true),status:r.status,description:String(d.description||''),messageId:d.result?.message_id||null,raw:r.ok?undefined:redactSecretObject(d)};
-  }catch(e){return {ok:false,error:e?.name==='AbortError'?'انتهت مهلة Telegram':String(e?.message||e)};}
+    const r=await fetch(`${apiBase}/bot${secret}/${method}`,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload||{}),signal:controller.signal});
+    const text=await r.text();let d={};try{d=text?JSON.parse(text):{}}catch(_){d={description:text};}
+    const summary=telegramResultSummary(method,d.result);
+    return {ok:!!(r.ok&&d.ok===true),status:r.status,description:String(d.description||''),messageId:d.result?.message_id||null,resultInfo:summary,raw:r.ok?undefined:redactSecretObject(d)};
+  }catch(e){return {ok:false,error:e?.name==='AbortError'?'انتهت مهلة الاتصال بخوادم Telegram':String(e?.message||e)};}
   finally{clearTimeout(timer);}
 }
-async function telegramTestConnection(){const r=await telegramRequest('getMe',{});telegramLog({kind:'connection_test',ok:r.ok,status:r.status,description:r.description||r.error||'',messageId:r.messageId||null});return r;}
+async function telegramRequest(method,payload,timeoutMs=8000){
+  const cfg=telegramConfig();
+  if(!cfg.enabled)return {ok:false,skipped:true,error:'إشعارات تيليجرام غير مفعلة من الإعدادات'};
+  if(!cfg.token)return {ok:false,error:'Bot Token غير محفوظ؛ احفظ توكناً جديداً أولاً'};
+  if(method!=='getMe'&&!String(payload?.chat_id||cfg.chat||'').trim())return {ok:false,error:'معرّف الوجهة Chat ID غير محفوظ'};
+  return telegramApiRequest(cfg.token,method,payload,timeoutMs);
+}
+async function telegramTestConnection(){const cfg=telegramConfig();const r=cfg.token?await telegramApiRequest(cfg.token,'getMe',{},8000):{ok:false,error:cfg.tokenEncryptionError?'التوكن المحفوظ لا يمكن فك تشفيره؛ تحقق من ثبات مفتاح التشفير.':'Bot Token غير محفوظ؛ أدخل توكناً جديداً بعد إلغاء التوكن المكشوف.'};telegramLog({kind:'connection_test',ok:r.ok,status:r.status,description:r.description||r.error||'',botId:r.resultInfo?.botId||null,botUsername:r.resultInfo?.username||'',messageId:r.messageId||null});return r;}
 async function sendTelegramDetailed(text,meta={}){
   const cfg=telegramConfig();
   const caption=String(text||'').slice(0,1024);
@@ -1337,9 +1361,9 @@ async function sendTelegramDetailed(text,meta={}){
       fd.append('chat_id',targetChat);
       fd.append('photo',new Blob([fs.readFileSync(imagePath)],{type:'image/png'}),'telegram-notification.png');
       fd.append('caption',caption);
-      const rr=await fetch(`${apiBase}/bot${encodeURIComponent(cfg.token)}/sendPhoto`,{method:'POST',body:fd,signal:controller.signal});
+      const rr=await fetch(`${apiBase}/bot${cfg.token}/sendPhoto`,{method:'POST',body:fd,signal:controller.signal});
       const tx=await rr.text();let dd={};try{dd=tx?JSON.parse(tx):{}}catch(_){dd={description:tx};}
-      r={ok:!!(rr.ok&&dd.ok===true),status:rr.status,description:String(dd.description||''),messageId:dd.result?.message_id||null,raw:rr.ok?undefined:redactSecretObject(dd)};
+      r={ok:!!(rr.ok&&dd.ok===true),status:rr.status,description:String(dd.description||''),messageId:dd.result?.message_id||null,resultInfo:telegramResultSummary('sendPhoto',dd.result),raw:rr.ok?undefined:redactSecretObject(dd)};
       if(!r.ok)photoError=r.description||'لم يؤكد Telegram إرسال الصورة.';
     }catch(e){photoError=e?.name==='AbortError'?'انتهت مهلة إرسال الصورة إلى Telegram':String(e?.message||e);r={ok:false,error:photoError};}
     finally{clearTimeout(timer)}
@@ -1357,11 +1381,15 @@ async function sendTelegramDetailed(text,meta={}){
 }
 async function notifyTelegramRecipients(text,meta={}){
   const cfg=telegramConfig();const channel=String(meta.channel||'activation');
-  const primaryChat=channel==='overdue'?cfg.overdueChat:(cfg.activationChat||cfg.chat);
-  if(!cfg.enabled||!cfg.token||!primaryChat)return {ok:false,error:channel==='overdue'?'قناة الطلبات المتأخرة غير مضبوطة':'إعدادات قناة التفعيلات غير مكتملة'};
-  const targets=channel==='overdue'?[primaryChat]:[...new Set([primaryChat,...(cfg.extraChats||[])])];const results=[];
-  for(const chatId of targets){const r=await sendTelegramDetailed(text,{...meta,chatId});results.push({chatId,ok:!!r.ok,error:r.error||r.description||''});}
-  const primary=results.find(x=>x.chatId===primaryChat);const ok=!!primary?.ok;return {ok,results,description:ok?'تم إرسال الإشعار إلى القناة المحددة':results.map(x=>`${x.chatId}: ${x.error}`).join(' | ')};
+  let primaryChat='';let targets=[];
+  if(channel==='admin'){primaryChat=cfg.adminChat;targets=[primaryChat];}
+  else if(channel==='overdue'){primaryChat=cfg.overdueChat||cfg.adminChat;targets=[primaryChat,cfg.adminChat,...(cfg.extraChats||[])];}
+  else{primaryChat=cfg.activationChat||cfg.chat||cfg.adminChat;targets=[primaryChat,cfg.adminChat,...(cfg.extraChats||[])];}
+  targets=[...new Set(targets.map(x=>String(x||'').trim()).filter(Boolean))];
+  if(!cfg.enabled||!cfg.token||!targets.length){const msg=channel==='admin'?'معرّف حساب الأدمن غير محفوظ':channel==='overdue'?'قناة الطلبات المتأخرة وحساب الأدمن غير مضبوطين':'قناة التفعيلات وحساب الأدمن غير مضبوطين';return {ok:false,error:!cfg.enabled?'إشعارات تيليجرام غير مفعلة':!cfg.token?'Bot Token غير محفوظ':msg,results:[]};}
+  const results=[];
+  for(const chatId of targets){const r=await sendTelegramDetailed(text,{...meta,chatId});results.push({chatId,ok:!!r.ok,error:r.error||r.description||'',status:r.status||null,messageId:r.messageId||null,chat:r.resultInfo?.chat||null});}
+  const primary=results.find(x=>x.chatId===primaryChat);const ok=!!primary?.ok;return {ok,results,description:ok?'أكد Telegram إرسال الرسالة إلى الوجهة الأساسية.':results.map(x=>`${x.chatId}: ${x.error}`).join(' | ')};
 }
 async function sendTelegram(text){return (await notifyTelegramRecipients(text,{kind:'message'})).ok;}
 
@@ -1384,7 +1412,7 @@ async function notifyTelegramNewOrder(o,meta={}){
 async function runTelegramNewOrdersMonitor(){
   if(TELEGRAM_ORDER_MONITOR_RUNNING)return;TELEGRAM_ORDER_MONITOR_RUNNING=true;
   try{
-    const tg=telegramConfig();if(!tg.enabled||!tg.token||!tg.chat)return;
+    const tg=telegramConfig();if(!tg.enabled||!tg.token||!(tg.chat||tg.adminChat))return;
     const snap=await loadOrderAuditSnapshot(true);if(!snap.firebaseAvailable&&(!snap.rows||!snap.rows.length))return;
     const st=await readTelegramOrderState(),seen={...(st.seen||{})};
     const now=Date.now();
@@ -1573,6 +1601,25 @@ function parseLegacyJsonEntry(entries,name){const key=Object.keys(entries).find(
 function assertUniqueIds(rows,label){if(!Array.isArray(rows))throw new Error('قائمة '+label+' ليست مصفوفة.');const ids=new Set();for(const row of rows){const id=String(row?.id??'').trim();if(!id)throw new Error('يوجد سجل بلا معرّف في '+label+'.');if(ids.has(id))throw new Error('يوجد معرّف مكرر في '+label+'.');ids.add(id);}return ids;}
 function normalizeLegacyBalance(value){const n=Number(value);return Number.isFinite(n)?n:0;}
 function legacyUserPrivateRow(u){return {id:String(u?.id||''),email:normalizeEmail(u?.email||''),full_name:String(u?.full_name||'').slice(0,160),arabic_name:String(u?.arabic_name||'').slice(0,160),user_code:String(u?.user_code||''),balance:normalizeLegacyBalance(u?.balance),created_date:String(u?.created_date||''),updated_date:String(u?.updated_date||'')};}
+const LEGACY_USERS_REMOTE_PATH='config/base44LegacyUsers';
+const LEGACY_IMPORT_STATE_REMOTE_PATH='config/base44LegacyImportState';
+function legacyRemoteUserKey(id){return 'u_'+crypto.createHash('sha256').update(String(id||'')).digest('hex').slice(0,32);}
+async function loadLegacyUsersRemote(){
+  const raw=await firebaseGetJson(LEGACY_USERS_REMOTE_PATH,12000);
+  if(!raw||typeof raw!=='object')return [];
+  const rows=Array.isArray(raw.users)?raw.users:collectionEntries(raw.users||raw).map(([,u])=>u);
+  return rows.filter(u=>u&&typeof u==='object').map(legacyUserPrivateRow).filter(u=>u.id);
+}
+async function persistLegacyUsersRemote(rows){
+  const clean=(Array.isArray(rows)?rows:[]).map(legacyUserPrivateRow).filter(u=>u.id);
+  const users={};for(const u of clean)users[legacyRemoteUserKey(u.id)]=u;
+  const record={schemaVersion:1,source:'base44-export',count:clean.length,updatedAt:nowISO(),users};
+  await firebaseWriteJson(LEGACY_USERS_REMOTE_PATH,record,18000);
+  const check=await firebaseGetJson(LEGACY_USERS_REMOTE_PATH,10000);
+  const count=Number(check?.count||Object.keys(check?.users||{}).length||0);
+  if(count!==clean.length)throw new Error('عدد مستخدمي Base44 المحفوظين في قاعدة الموقع لا يطابق الملف ('+count+'/'+clean.length+').');
+  return {count,updatedAt:record.updatedAt};
+}
 function legacyOrderPrivateRow(o){return {id:String(o?.id||''),order_number:String(o?.order_number||''),user_id:String(o?.user_id||''),user_name:String(o?.user_name||''),service_id:String(o?.service_id||''),service_name:String(o?.service_name||'خدمة'),platform_name:String(o?.platform_name||''),provider_id:String(o?.provider_id||''),provider_name:String(o?.provider_name||''),provider_order_id:String(o?.provider_order_id||''),quantity:Number(o?.quantity||0)||0,link:String(o?.link||''),total_price:Number(o?.total_price||0)||0,cost:Number(o?.cost||0)||0,status:String(o?.status||'new'),provider_status:String(o?.provider_status||''),is_free:!!o?.is_free,start_count:o?.start_count??null,remains:o?.remains??null,created_date:String(o?.created_date||''),updated_date:String(o?.updated_date||'')};}
 function legacyStableFirebaseKey(id){return 'legacy_'+sha256(String(id||'')).slice(0,32);}
 function legacyAliasUser(id){return 'legacy_'+sha256(String(id||'unknown')).slice(0,12);}
@@ -1580,7 +1627,7 @@ function legacyStatus(value){const v=String(value||'').trim().toLowerCase().repl
 function collectionEntries(value){if(Array.isArray(value))return value.map((v,i)=>[String(i),v]);if(value&&typeof value==='object')return Object.entries(value);return [];}
 function normalizeCurrentUsers(root){const users=[];const emailMap=new Map(),nameMap=new Map();for(const [key,raw] of collectionEntries(root)){if(!raw||typeof raw!=='object'||Array.isArray(raw))continue;const username=String(raw.username||decodeFirebaseSafeKey(key)||key).trim();if(!username)continue;const item={key,username,user:raw,email:normalizeEmail(raw.email||raw.mail||raw.emailAddress||'')};users.push(item);if(item.email){const arr=emailMap.get(item.email)||[];arr.push(item);emailMap.set(item.email,arr);}const n=username.toLowerCase();const arr=nameMap.get(n)||[];arr.push(item);nameMap.set(n,arr);}return {users,emailMap,nameMap};}
 function mapLegacyUsersToCurrent(legacyUsers,currentDirectory){const byLegacyId=new Map(),matchedIds=new Set();for(const old of legacyUsers){let match=null;const email=normalizeEmail(old.email||'');const emailRows=email?currentDirectory.emailMap.get(email)||[]:[];if(emailRows.length===1)match=emailRows[0];else if(emailRows.length>1)match=null;if(!match&&old.user_code){const candidates=currentDirectory.nameMap.get(String(old.user_code).trim().toLowerCase())||[];if(candidates.length===1)match=candidates[0];}if(match){byLegacyId.set(String(old.id),match);matchedIds.add(String(old.id));}else byLegacyId.set(String(old.id),null);}return {byLegacyId,matchedIds};}
-function legacyPublicOrderNumber(old,duplicateOrderNumbers,liveNumbers,allocatedNumbers){const n=String(old.order_number||'').trim();if(n&&duplicateOrderNumbers.get(n)===1&&!liveNumbers.has(n)&&!allocatedNumbers.has(n)){allocatedNumbers.add(n);return n;}let candidate='H'+sha256(String(old.id)).slice(0,10).toUpperCase();while(liveNumbers.has(candidate)||allocatedNumbers.has(candidate))candidate='H'+sha256(candidate+String(old.id)).slice(0,10).toUpperCase();allocatedNumbers.add(candidate);return candidate;}
+function legacyPublicOrderNumber(old,duplicateOrderNumbers,liveNumbers,allocatedNumbers){const n=String(old.order_number||'').trim();if(/^\d{1,9}$/.test(n)&&duplicateOrderNumbers.get(n)===1&&!liveNumbers.has(n)&&!allocatedNumbers.has(n)){allocatedNumbers.add(n);return n;}let candidate=0;for(const value of [...liveNumbers,...allocatedNumbers])if(/^\d{1,9}$/.test(String(value||'')))candidate=Math.max(candidate,Number(value));candidate++;while(candidate<=999999999&&(liveNumbers.has(String(candidate))||allocatedNumbers.has(String(candidate))||duplicateOrderNumbers.has(String(candidate))))candidate++;if(candidate>999999999)throw new Error('لا توجد مساحة أرقام طلبات قصيرة متاحة؛ لم يتم دمج الطلبات.');const result=String(candidate);allocatedNumbers.add(result);return result;}
 function legacyOrderMatchesLive(old,matchedUsername,liveOrders){if(!matchedUsername)return false;const oldProvider=String(old.provider_id||''),oldProviderOrder=String(old.provider_order_id||'');for(const [,r] of liveOrders){if(!r||typeof r!=='object'||r.legacyHistory)continue;if(String(r.user||r.username||'')!==matchedUsername)continue;const rp=String(r.providerId||r.provider_id||''),rpo=String(r.providerOrderId||r.provider_order_id||r.smmpartyOrderId||'');if(oldProviderOrder&&rpo===oldProviderOrder&&(!oldProvider||!rp||oldProvider===rp))return true;const rid=String(r.publicOrderNo||r.id||r.order_id||'');if(old.order_number&&rid===String(old.order_number)&&String(r.serviceName||r.service||'')===String(old.service_name||'')&&String(r.link||'')===String(old.link||'')&&Number(r.quantity||0)===Number(old.quantity||0))return true;}return false;}
 function buildLegacyOrderRecord(old,legacyUser,matched,currentDirectory,publicOrderNo){
   const username=matched?.username||legacyAliasUser(old.user_id);const currentName=matched?.user?.name||matched?.user?.fullName||matched?.user?.full_name||'';const priceUsd=Math.max(0,Number(old.total_price||0)||0);const costUsd=Math.max(0,Number(old.cost||0)||0);const qty=Math.max(0,Number(old.quantity||0)||0);
@@ -1636,7 +1683,11 @@ async function routeAPI(req,res,urlObj){
     }
     const storedOld=readJSON(LEGACY_USERS_PRIVATE_FILE,[]);
     const stage=await readLegacyStage();
-    const legacyUsers=Array.isArray(storedOld)&&storedOld.length?storedOld:(Array.isArray(stage?.users)?stage.users:[]);
+    let remoteLegacyUsers=[];let remoteLegacyError='';
+    try{remoteLegacyUsers=await loadLegacyUsersRemote();}catch(e){remoteLegacyError=String(e.message||e).slice(0,120);}
+    let legacyUsers=Array.isArray(storedOld)&&storedOld.length?storedOld:(remoteLegacyUsers.length?remoteLegacyUsers:(Array.isArray(stage?.users)?stage.users:[]));
+    // Migrate an older local-only snapshot to durable Firebase storage when it is still available.
+    if(Array.isArray(storedOld)&&storedOld.length&&!remoteLegacyUsers.length){try{await persistLegacyUsersRemote(storedOld);remoteLegacyUsers=storedOld.map(legacyUserPrivateRow);legacyUsers=storedOld;}catch(e){remoteLegacyError=String(e.message||e).slice(0,120);}}
     const stageOrders=Array.isArray(stage?.orders)?stage.orders:[];
     const legacyStageCounts=new Map();for(const o of stageOrders){const id=String(o.user_id||'');if(id)legacyStageCounts.set(id,(legacyStageCounts.get(id)||0)+1);}
     const mapped=mapLegacyUsersToCurrent(legacyUsers,directory);
@@ -1657,7 +1708,7 @@ async function routeAPI(req,res,urlObj){
     const q=String(urlObj.searchParams.get('q')||'').trim().toLowerCase();
     const filtered=result.filter(u=>!q||[u.username,u.name,u.email,u.legacyUserId].some(v=>String(v||'').toLowerCase().includes(q)));
     filtered.sort((a,b)=>Number(b.totalOrders||0)-Number(a.totalOrders||0)||String(b.joined||'').localeCompare(String(a.joined||''))||String(a.name||'').localeCompare(String(b.name||''),'ar'));
-    return json(res,200,{ok:true,users:filtered,total:result.length,currentUsers:directory.users.length,legacyUsers:legacyUsers.length,matchedLegacyUsers,legacyOnlyUsers,ordersAvailable,storageDurable:DATA_IS_EXTERNAL,source:ordersAvailable?'firebase+server-ledger':'firebase-users-only',warning:warning||(!DATA_IS_EXTERNAL?'قاعدة بيانات Base44 الخاصة محفوظة في مجلد التشغيل الحالي فقط. قبل الاعتماد عليها عبر عمليات النشر، اربط Railway Volume واجعل SADA_DATA_DIR=/data.':'')});
+    return json(res,200,{ok:true,users:filtered,total:result.length,currentUsers:directory.users.length,legacyUsers:legacyUsers.length,matchedLegacyUsers,legacyOnlyUsers,ordersAvailable,storageDurable:DATA_IS_EXTERNAL||remoteLegacyUsers.length>0,legacyUsersSavedRemotely:remoteLegacyUsers.length>0,source:ordersAvailable?'firebase+server-ledger':'firebase-users-only',warning:warning||(remoteLegacyError?'تعذر قراءة النسخة الدائمة لمستخدمي Base44: '+remoteLegacyError:(!DATA_IS_EXTERNAL&&!remoteLegacyUsers.length?'قائمة المستخدمين القديمة غير محفوظة سحابياً بعد. ارفع ملف التصدير وادمجه مرة أخيرة لحفظها بشكل دائم.':''))});
   }
 
   // Administrator-only legacy database workflow. Uploaded archive is validated and stored
@@ -1685,6 +1736,11 @@ async function routeAPI(req,res,urlObj){
     // Keep a private, minimal index of legacy users for the admin's user-count report and
     // future remapping of users who register later. No password, phone, Telegram ID or tokens.
     writeJSON(LEGACY_USERS_PRIVATE_FILE,stage.users.map(legacyUserPrivateRow));
+    // Persist Base44 users in the live Firebase database. After the initial successful import,
+    // future code releases can recover them without re-uploading the ZIP.
+    let legacyUsersRemoteSaved=false,legacyUsersRemoteCount=0;
+    try{const savedIndex=await persistLegacyUsersRemote(stage.users);legacyUsersRemoteSaved=true;legacyUsersRemoteCount=savedIndex.count;}
+    catch(e){return json(res,503,{ok:false,partial:true,ordersAlreadyMerged:true,error:'تم حفظ الطلبات القديمة دون تكرار، لكن فشل حفظ فهرس المستخدمين الدائم: '+String(e.message||e).slice(0,160)+'. لم يُحذف ملف الترحيل؛ أعد المحاولة بعد التأكد من اتصال قاعدة البيانات. إعادة المحاولة لا تكرر الطلبات.'});}
     let balancesRestored=0,balanceWriteErrors=0,orderCountersUpdated=0,orderCounterWriteErrors=0;const balanceErrorNames=[];
     // Synchronize the legacy portion of each matched account's order counter exactly once.
     // The per-user marker makes retries safe if an earlier HTTP request timed out after Firebase saved.
@@ -1701,23 +1757,37 @@ async function routeAPI(req,res,urlObj){
     for(let i=0;i<counterUpdates.length;i+=12){const chunk=counterUpdates.slice(i,i+12);const settled=await Promise.allSettled(chunk.map(async item=>{const patch={totalOrders:item.newTotalOrders,legacyBase44OrdersCount:item.targetCount,legacyOrdersCounterUpdatedAt:nowISO(),updatedAt:nowISO()};await firebasePatchJson('users/'+item.matched.key,patch,9000);return true;}));for(let j=0;j<settled.length;j++){if(settled[j].status==='fulfilled')orderCountersUpdated++;else orderCounterWriteErrors++;}}
     for(let i=0;i<plan.balanceRestorePlan.length;i+=8){const chunk=plan.balanceRestorePlan.slice(i,i+8);const settled=await Promise.allSettled(chunk.map(async item=>{const patch={balance:item.balanceIQD,legacyBase44UserId:String(item.old.id),legacyBalanceOriginalUSD:item.balanceUsd,legacyBalanceRestoredFromBase44:true,legacyBalanceRestoredAt:nowISO(),updatedAt:nowISO()};await firebasePatchJson('users/'+item.matched.key,patch,9000);return true;}));for(let j=0;j<settled.length;j++){if(settled[j].status==='fulfilled')balancesRestored++;else{balanceWriteErrors++;if(balanceErrorNames.length<3)balanceErrorNames.push(String(settled[j].reason?.message||'فشل حفظ رصيد').slice(0,100));}}}
     const finalReport={completedAt:nowISO(),sourceFile:stage.sourceFile,counts:plan.counts,matchedUsers:plan.matchedUsers,unmatchedUsers:plan.unmatchedUsers,ordersWritten,ordersAlreadyImported:plan.alreadyImported,duplicatesAlreadyInLiveDatabase:plan.liveDuplicates,unmatchedOrderUsers:plan.unmatchedOrderUsers,orderCountersUpdated,orderCounterWriteErrors,balancesRestored,balanceWriteErrors,unmatchedPositiveBalances:plan.unmatchedPositiveBalances,balanceSkippedExisting:plan.balanceSkippedExisting,negativeBalancesSkipped:plan.negativeBalancesSkipped,balancesAlreadyRestored:plan.balancesAlreadyRestored,exchangeRate:FIXED_RATE};
+    finalReport.legacyUsersRemoteSaved=legacyUsersRemoteSaved;finalReport.legacyUsersRemoteCount=legacyUsersRemoteCount;
     writeJSON(LEGACY_IMPORT_STATE_FILE,finalReport);
+    let importStateRemoteSaved=false;try{await firebaseWriteJson(LEGACY_IMPORT_STATE_REMOTE_PATH,finalReport,10000);importStateRemoteSaved=true;}catch(e){console.warn('Legacy import report cloud persistence failed:',String(e.message||e).slice(0,100));}
+    finalReport.importStateRemoteSaved=importStateRemoteSaved;
     if(balanceWriteErrors===0){try{fs.unlinkSync(path.join(DATA,LEGACY_STAGE_FILE));}catch(_){} }
     return json(res,200,{ok:true,report:finalReport,warning:(balanceWriteErrors||orderCounterWriteErrors)?'تم حفظ الطلبات القديمة، لكن تعذر تحديث بعض الأرصدة أو عدادات الطلبات. ملف الترحيل محفوظ؛ أعد الفحص والدمج بعد التأكد من الاتصال.':(plan.unmatchedUsers?'بعض حسابات القاعدة القديمة لا تطابق بريداً في المشروع الجديد؛ طلباتها محفوظة باسم سجل قديم، ولن يستطيع صاحبها رؤيتها بحسابه حتى يوجد حساب مطابق بالبريد ثم تعيد رفع ZIP وتضغط دمج مرة أخرى.':'تم ربط الطلبات بالحسابات المطابقة، ومزامنة عدد الطلبات التاريخية لكل حساب. كل طلب جديد سيزيد الإجمالي تلقائياً بمقدار واحد.')});
   }
   if(p==='/api/admin/legacy-import/status'&&req.method==='GET'){
-    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const stage=await readLegacyStage(),report=readJSON(LEGACY_IMPORT_STATE_FILE,null);return json(res,200,{ok:true,uploaded:!!stage,stagedCounts:stage?.counts||null,lastImport:report||null,storageDurable:DATA_IS_EXTERNAL,storageWarning:DATA_IS_EXTERNAL?'':'مجلد بيانات الترحيل ليس تخزيناً دائماً؛ اربط Railway Volume واجعل SADA_DATA_DIR=/data.'});
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
+    const stage=await readLegacyStage();let report=readJSON(LEGACY_IMPORT_STATE_FILE,null),remoteUsersCount=0,remoteReadError='';
+    try{const raw=await firebaseGetJson(LEGACY_USERS_REMOTE_PATH,8000);remoteUsersCount=Number(raw?.count||Object.keys(raw?.users||{}).length||0);}catch(e){remoteReadError=String(e.message||e).slice(0,100);}
+    if(!report){try{const remoteState=await firebaseGetJson(LEGACY_IMPORT_STATE_REMOTE_PATH,7000);if(remoteState&&typeof remoteState==='object')report=remoteState;}catch(_){}}
+    return json(res,200,{ok:true,uploaded:!!stage,stagedCounts:stage?.counts||null,lastImport:report||null,importedSnapshotAvailable:remoteUsersCount>0,importedUsersCount:remoteUsersCount,storageDurable:DATA_IS_EXTERNAL||remoteUsersCount>0,remoteReadError,storageWarning:remoteUsersCount>0?'تم حفظ قائمة مستخدمي Base44 في قاعدة الموقع الدائمة؛ لا تحتاج إعادة رفع ملف ZIP بعد كل تحديث.':(remoteReadError?'تعذر فحص نسخة مستخدمي Base44 السحابية: '+remoteReadError:'لا توجد نسخة سحابية دائمة لمستخدمي Base44 حتى الآن. ارفع الملف وادمجه مرة أخيرة ليُحفظ فهرس المستخدمين؛ بعد نجاح الدمج لا يلزم تكرار الرفع عند تحديث الكود.')});
   }
   if(p==='/api/admin/user-order-stats'&&req.method==='GET'){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});let remoteUsers={},remoteOrders={};let firebaseAvailable=true;try{[remoteUsers,remoteOrders]=await Promise.all([firebaseGetJson('users',12000),firebaseGetJson('orders',15000)]);remoteUsers=remoteUsers||{};remoteOrders=remoteOrders||{};}catch(e){firebaseAvailable=false;return json(res,503,{ok:false,error:'تعذر قراءة المستخدمين والطلبات من Firebase: '+String(e.message||e).slice(0,140)});}
-    const directory=normalizeCurrentUsers(remoteUsers),currentByUsername=new Map(directory.users.map(u=>[u.username,u]));const oldUsers=readJSON(LEGACY_USERS_PRIVATE_FILE,[]);const oldById=new Map((Array.isArray(oldUsers)?oldUsers:[]).map(u=>[String(u.id),u]));const localOrders=readJSON('orders.json',[]);const dedup=new Map();
-    const addOrder=(o,source,key='')=>{if(!o||typeof o!=='object'||o.event)return;const user=String(o.user||o.username||'').trim();if(!user)return;const identity=String(o.legacyHistory?'legacy:'+o.legacyImportKey:(o.id||o.siteOrderId||o.orderId||o.order_id||o.providerOrderId||o.smmpartyOrderId||key||o.createdAt||''));if(!identity)return;dedup.set(user+'|'+identity,{o,user,source});};
+    const directory=normalizeCurrentUsers(remoteUsers),currentByUsername=new Map(directory.users.map(u=>[u.username,u]));let oldUsers=readJSON(LEGACY_USERS_PRIVATE_FILE,[]);if(!Array.isArray(oldUsers)||!oldUsers.length){try{oldUsers=await loadLegacyUsersRemote();}catch(_){oldUsers=[];}}
+    const oldById=new Map((Array.isArray(oldUsers)?oldUsers:[]).map(u=>[String(u.id),u]));const legacyMatches=mapLegacyUsersToCurrent(oldUsers,directory);const localOrders=readJSON('orders.json',[]);const dedup=new Map();
+    const addOrder=(o,source,key='')=>{if(!o||typeof o!=='object'||Array.isArray(o)||o.event)return;const user=String(o.user||o.username||o.userName||'').trim();if(!user)return;const identity=String(o.legacyHistory?'legacy:'+o.legacyImportKey:(o.id||o.siteOrderId||o.orderId||o.order_id||o.providerOrderId||o.smmpartyOrderId||key||o.createdAt||''));if(!identity)return;dedup.set(user+'|'+identity,{o,user,source});};
     for(const [i,o] of (Array.isArray(localOrders)?localOrders:[]).entries())addOrder(o,'local',String(i));for(const [k,o] of collectionEntries(remoteOrders))addOrder(o,o.legacyHistory?'legacy':'firebase',k);
-    const groups=new Map();for(const {o,user,source} of dedup.values()){
-      const curr=currentByUsername.get(user);const legacyId=String(o.legacyUserId||'');const old=oldById.get(legacyId);const groupKey=curr?'current:'+user:(legacyId?'legacy:'+legacyId:'current:'+user);let g=groups.get(groupKey);if(!g){g={username:curr?user:(legacyId?legacyAliasUser(legacyId):user),name:String(curr?.user?.name||curr?.user?.fullName||old?.arabic_name||old?.full_name||o.userName||o.name||user),orderCount:0,legacyOrderCount:0,newOrderCount:0,balanceUsd:curr?Number(curr.user.balance||0)/FIXED_RATE:Number(old?.balance||0),balanceSource:curr?'current-account':'legacy-snapshot',legacyUserId:legacyId||null,hasCurrentAccount:!!curr};groups.set(groupKey,g);}
-      g.orderCount++;if(o.legacyHistory)g.legacyOrderCount++;else g.newOrderCount++;if(curr){g.name=String(curr.user.name||curr.user.fullName||g.name);g.balanceUsd=Number(curr.user.balance||0)/FIXED_RATE;g.balanceSource='current-account';}
+    const groups=new Map();
+    const ensureGroup=(groupKey,base={})=>{let g=groups.get(groupKey);if(!g){g={username:String(base.username||''),name:String(base.name||base.username||'مستخدم'),orderCount:0,legacyOrderCount:0,newOrderCount:0,balanceUsd:base.balanceUsd==null?null:Number(base.balanceUsd),balanceSource:base.balanceSource||'current-account',legacyUserId:base.legacyUserId||null,hasCurrentAccount:!!base.hasCurrentAccount,email:String(base.email||''),joined:String(base.joined||'')};groups.set(groupKey,g);}return g;};
+    // Include accounts even when they have zero orders, then enrich them from actual order rows.
+    for(const curr of directory.users){ensureGroup('current:'+curr.username,{username:curr.username,name:String(curr.user.name||curr.user.fullName||curr.username),balanceUsd:Number(curr.user.balance||0)/FIXED_RATE,balanceSource:'current-account',hasCurrentAccount:true,email:curr.email,joined:curr.user.joined||curr.user.createdAt||curr.user.created_date||''});}
+    for(const old of (Array.isArray(oldUsers)?oldUsers:[])){const oldId=String(old.id||'');if(!oldId)continue;const matched=legacyMatches.byLegacyId.get(oldId);const groupKey=matched?'current:'+matched.username:'legacy:'+oldId;const g=ensureGroup(groupKey,matched?{username:matched.username,name:String(matched.user.name||matched.user.fullName||old.arabic_name||old.full_name||matched.username),balanceUsd:Number(matched.user.balance||0)/FIXED_RATE,balanceSource:'current-account',hasCurrentAccount:true,email:matched.email,joined:matched.user.joined||matched.user.createdAt||''}:{username:legacyAliasUser(oldId),name:String(old.arabic_name||old.full_name||('مستخدم قديم '+oldId.slice(0,8))),balanceUsd:Number(old.balance||0),balanceSource:'legacy-snapshot',legacyUserId:oldId,hasCurrentAccount:false,email:old.email,joined:old.created_date});if(!matched)g.legacyUserId=oldId;}
+    for(const {o,user} of dedup.values()){
+      const legacyId=String(o.legacyUserId||'');const old=oldById.get(legacyId);const matched=legacyId?legacyMatches.byLegacyId.get(legacyId):null;const curr=currentByUsername.get(user);const groupKey=matched?'current:'+matched.username:(curr?'current:'+user:(legacyId?'legacy:'+legacyId:'current:'+user));
+      const g=ensureGroup(groupKey,{username:matched?matched.username:(curr?user:(legacyId?legacyAliasUser(legacyId):user)),name:String(matched?.user.name||curr?.user.name||curr?.user.fullName||old?.arabic_name||old?.full_name||o.userName||o.name||user),balanceUsd:matched?Number(matched.user.balance||0)/FIXED_RATE:(curr?Number(curr.user.balance||0)/FIXED_RATE:Number(old?.balance||0)),balanceSource:(matched||curr)?'current-account':'legacy-snapshot',legacyUserId:legacyId||null,hasCurrentAccount:!!(matched||curr),email:matched?.email||curr?.email||old?.email||''});
+      g.orderCount++;if(o.legacyHistory)g.legacyOrderCount++;else g.newOrderCount++;if(curr||matched){const account=matched||curr;g.name=String(account.user.name||account.user.fullName||g.name);g.balanceUsd=Number(account.user.balance||0)/FIXED_RATE;g.balanceSource='current-account';g.hasCurrentAccount=true;}
     }
-    const q=String(urlObj.searchParams.get('q')||'').trim().toLowerCase();const limit=Math.min(100,Math.max(5,Number(urlObj.searchParams.get('limit')||50)));const rows=[...groups.values()].filter(x=>x.orderCount>0&&(!q||[x.name,x.username,x.legacyUserId].some(v=>String(v||'').toLowerCase().includes(q)))).sort((a,b)=>b.orderCount-a.orderCount||a.name.localeCompare(b.name,'ar')).slice(0,limit);return json(res,200,{ok:true,users:rows,total:groups.size,orders:dedup.size,firebaseAvailable});
+    const q=String(urlObj.searchParams.get('q')||'').trim().toLowerCase();const limit=Math.min(1000,Math.max(5,Number(urlObj.searchParams.get('limit')||100)));const rows=[...groups.values()].filter(x=>!q||[x.name,x.username,x.email,x.legacyUserId].some(v=>String(v||'').toLowerCase().includes(q))).sort((a,b)=>b.orderCount-a.orderCount||a.name.localeCompare(b.name,'ar')).slice(0,limit);return json(res,200,{ok:true,users:rows,total:groups.size,orders:dedup.size,currentUsers:directory.users.length,legacyUsers:(Array.isArray(oldUsers)?oldUsers.length:0),firebaseAvailable,source:oldUsers.length?'firebase-users+legacy-snapshot':'firebase-users-only'});
   }
 
   // -------------------- Public API key management --------------------
@@ -1917,24 +1987,51 @@ async function routeAPI(req,res,urlObj){
     const orderMap=new Map();const add=o=>{if(!o||o.event||String(o.user||o.username||'')!==username)return;const id=String(o.legacyHistory?'legacy:'+o.legacyImportKey:(o.id||o.siteOrderId||o.orderId||o.order_id||o.providerOrderId||o.createdAt||''));if(id)orderMap.set(id,{...(orderMap.get(id)||{}),...o});};for(const o of readJSON('orders.json',[]))add(o);try{const rem=await firebaseGetJson('orders',9000);for(const [,o] of collectionEntries(rem))add(o);}catch(_){}
     const orders=[...orderMap.values()];const ledger=readJSON('balance_ledger.json',[]).filter(x=>String(x.user||'')===username);const deposits=ledger.filter(x=>['charge','deposit'].includes(String(x.type||''))).reduce((a,x)=>a+Number(x.amountUSD||Number(x.amountIQD||0)/FIXED_RATE||0),0);const spent=orders.reduce((a,o)=>a+Number(o.chargeUsd??Number(o.total||0)/FIXED_RATE),0);return json(res,200,{ok:true,user:{username,name:String(u.name||username),balanceUsd:Number((Number(u.balance||0)/FIXED_RATE).toFixed(6)),totalDepositsUsd:Number(deposits.toFixed(6)),totalSpentUsd:Number(spent.toFixed(6)),totalOrders:orders.length,legacyOrders:orders.filter(o=>o.legacyHistory).length,discountPct:Number(u.discountPct||0)}});
   }
-  if(p==='/api/admin/telegram' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const cfg=telegramConfig();const storedCfg=readJSON('settings.json',{}).telegram||{};return json(res,200,{ok:true,telegram:{enabled:cfg.enabled,tokenSet:!!cfg.token,encryptionReady:telegramEncryptionReady(),durableStorage:DATA_IS_EXTERNAL,tokenFromEnvironment:!!String(process.env.TELEGRAM_BOT_TOKEN||'').trim(),tokenStoredEncrypted:!!storedCfg.tokenEncrypted,chat:cfg.chat||'',activationChat:cfg.activationChat||'',overdueChat:cfg.overdueChat||'',activationEnvLocked:cfg.activationEnvLocked,overdueEnvLocked:cfg.overdueEnvLocked,extraChatsCount:(cfg.extraChats||[]).length}});}
+  if(p==='/api/admin/telegram' && req.method==='GET'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
+    const cfg=telegramConfig(),storedCfg=readJSON('settings.json',{}).telegram||{};
+    return json(res,200,{ok:true,telegram:{enabled:cfg.enabled,tokenSet:!!cfg.token,tokenSource:cfg.tokenSource,tokenProblem:cfg.tokenEncryptionError?'التوكن المحفوظ مشفّر لكن تعذّر فك تشفيره. تحقق من ثبات SADA_ENCRYPTION_KEY أو SESSION_SECRET نفسه المستخدم عند الحفظ.':'',encryptionReady:telegramEncryptionReady(),durableStorage:DATA_IS_EXTERNAL,tokenFromEnvironment:!!String(process.env.TELEGRAM_BOT_TOKEN||'').trim(),tokenStoredEncrypted:!!storedCfg.tokenEncrypted,chat:cfg.chat||'',activationChat:cfg.activationChat||'',overdueChat:cfg.overdueChat||'',adminChat:cfg.adminChat||'',activationEnvLocked:cfg.activationEnvLocked,overdueEnvLocked:cfg.overdueEnvLocked,adminEnvLocked:cfg.adminEnvLocked,extraChatsCount:(cfg.extraChats||[]).length}});
+  }
   if(p==='/api/admin/telegram' && req.method==='POST'){
-    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const cfg=readJSON('settings.json',{});const tg=cfg.telegram||{};
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
+    const b=await bodyJSON(req),cfg=readJSON('settings.json',{}),tg=cfg.telegram||{};
     if(b.enabled!==undefined)tg.enabled=!!b.enabled;
-    const newToken=String(b.token||'').trim();if(newToken&&!telegramEncryptionReady())return json(res,503,{ok:false,error:'لم يُحفظ التوكن لحمايته. افتح Railway > مشروعك > Variables وأضف SESSION_SECRET بقيمة عشوائية ثابتة لا تقل عن 32 حرفاً (يفضل 64)، ثم أعد النشر. أو اربط Volume دائمًا واجعل SADA_DATA_DIR=/data. لا تضع التوكن داخل الكود ولا ترسله في المحادثة.'});if(newToken){tg.tokenEncrypted=encryptSecret(newToken);delete tg.token;}
-    if(b.chat!==undefined&&!telegramConfig().activationEnvLocked){tg.chat=String(b.chat||'').trim();tg.activationChat=tg.chat;}if(b.activationChat!==undefined&&!telegramConfig().activationEnvLocked){tg.activationChat=String(b.activationChat||'').trim();tg.chat=tg.activationChat||tg.chat||'';}if(b.overdueChat!==undefined&&!telegramConfig().overdueEnvLocked)tg.overdueChat=String(b.overdueChat||'').trim();
-    // Migrate any legacy cleartext token before saving, never expose it in the response.
-    if(tg.token&&!tg.tokenEncrypted){tg.tokenEncrypted=encryptSecret(tg.token);delete tg.token;}cfg.telegram=tg;writeJSON('settings.json',cfg);
-    let firebaseChannelsSaved=false,firebaseSecretSaved=false;try{const channelData={activationChat:tg.activationChat||tg.chat||'',overdueChat:tg.overdueChat||'',enabled:tg.enabled!==false,updatedAt:nowISO()};await firebaseWriteJson('config/telegramChannels',channelData,6000);TELEGRAM_CHANNELS_REMOTE=channelData;firebaseChannelsSaved=true;}catch(e){console.warn('Telegram channel persistence Firebase failed:',String(e.message||e).slice(0,100));}
+    const newToken=String(b.token||'').trim();let verifiedBot=null;
+    if(newToken){
+      if(!validTelegramBotToken(newToken))return json(res,422,{ok:false,error:'صيغة التوكن غير صحيحة. أنشئ توكناً جديداً من BotFather ولا تستخدم التوكن المكشوف سابقاً.'});
+      if(!telegramEncryptionReady())return json(res,503,{ok:false,error:'لم يُحفظ التوكن لحمايته. اضبط SADA_ENCRYPTION_KEY أو SESSION_SECRET ثابتاً قوياً في Railway، أو اربط Volume دائماً، ثم أعد النشر.'});
+      const check=await telegramApiRequest(newToken,'getMe',{},7000);
+      if(!check.ok){const status=Number(check.status||0);return json(res,status===401||status===404?422:503,{ok:false,error:status===401||status===404?'Telegram رفض التوكن. ألغِ التوكن المكشوف وأنشئ توكناً جديداً من BotFather.':'تعذر التحقق من التوكن عبر Telegram؛ لم يتم حفظه. '+String(check.description||check.error||'تحقق من اتصال الخادم وحاول مجدداً.'),telegramStatus:status||null});}
+      verifiedBot=check.resultInfo||null;tg.tokenEncrypted=encryptSecret(newToken);delete tg.token;
+    }
+    const chatUpdates=[['adminChat','adminEnvLocked'],['activationChat','activationEnvLocked'],['overdueChat','overdueEnvLocked']];
+    if(b.chat!==undefined&&!telegramConfig().activationEnvLocked){const v=String(b.chat||'').trim();if(!validTelegramChatTarget(v))return json(res,422,{ok:false,error:'معرّف الوجهة غير صالح. استخدم @اسم_قناة أو رقم Chat ID.'});tg.chat=v;tg.activationChat=v;}
+    for(const [field,lock] of chatUpdates){if(b[field]===undefined)continue;const current=telegramConfig();if(current[lock])continue;const value=String(b[field]||'').trim();if(!validTelegramChatTarget(value))return json(res,422,{ok:false,error:field==='adminChat'?'معرّف حساب الأدمن غير صالح.':'معرّف القناة غير صالح. استخدم @اسم_قناة أو رقم Chat ID.'});tg[field]=value;if(field==='activationChat')tg.chat=value;}
+    if(tg.token&&!tg.tokenEncrypted){if(!telegramEncryptionReady())return json(res,503,{ok:false,error:'التوكن القديم لم يمكن تشفيره بأمان. اضبط مفتاح تشفير ثابتاً في Railway قبل الحفظ.'});tg.tokenEncrypted=encryptSecret(tg.token);delete tg.token;}
+    cfg.telegram=tg;writeJSON('settings.json',cfg);
+    let firebaseChannelsSaved=false,firebaseSecretSaved=false;
+    try{const channelData={activationChat:tg.activationChat||tg.chat||'',overdueChat:tg.overdueChat||'',adminChat:tg.adminChat||'',enabled:tg.enabled!==false,updatedAt:nowISO()};await firebaseWriteJson('config/telegramChannels',channelData,6000);TELEGRAM_CHANNELS_REMOTE=channelData;firebaseChannelsSaved=true;}catch(e){console.warn('Telegram channel persistence Firebase failed:',String(e.message||e).slice(0,100));}
     if(tg.tokenEncrypted){try{await firebaseWriteJson('config/telegramSecret',{tokenEncrypted:tg.tokenEncrypted,updatedAt:nowISO()},6000);firebaseSecretSaved=true;}catch(e){console.warn('Encrypted Telegram secret Firebase persistence failed:',String(e.message||e).slice(0,100));}}
     const durable=DATA_IS_EXTERNAL||firebaseChannelsSaved&&(!tg.tokenEncrypted||firebaseSecretSaved);
-    if(!durable)return json(res,503,{ok:false,error:'تمت محاولة حفظ الإعدادات محلياً فقط، لكن لم يتأكد الحفظ الدائم. افتح Railway Variables وأضف SESSION_SECRET ثابتاً قوياً، أو اربط Volume دائماً على /data مع SADA_DATA_DIR=/data. وتأكد من صلاحية الكتابة في Firebase ثم أعد الحفظ؛ لم نعتبر الإعدادات محفوظة.',persistent:false});
-    return json(res,200,{ok:true,persistent:true,storageMode:firebaseChannelsSaved?'firebase+local':'external-volume',warning:tg.tokenEncrypted&&!firebaseSecretSaved?'تم حفظ الإعدادات على مساحة التخزين الدائمة، لكن نسخة Firebase المشفرة لم تتحدث.':undefined,telegram:{enabled:tg.enabled!==false,tokenSet:!!(process.env.TELEGRAM_BOT_TOKEN||tg.tokenEncrypted),chat:tg.activationChat||tg.chat||'',activationChat:tg.activationChat||tg.chat||'',overdueChat:tg.overdueChat||''}});
+    if(!durable)return json(res,503,{ok:false,error:'لم يتأكد الحفظ الدائم. تم رفض اعتبار الإعدادات محفوظة؛ اربط Railway Volume على /data مع SADA_DATA_DIR=/data أو أصلح صلاحيات الكتابة في Firebase ثم أعد الحفظ.',persistent:false});
+    return json(res,200,{ok:true,persistent:true,storageMode:firebaseChannelsSaved?'firebase+local':'external-volume',verifiedBot,warning:tg.tokenEncrypted&&!firebaseSecretSaved?'تم تشفير التوكن وحفظه على مساحة دائمة، لكن النسخة المشفرة في Firebase لم تتحدث.':undefined,telegram:{enabled:tg.enabled!==false,tokenSet:!!(tg.tokenEncrypted||process.env.TELEGRAM_BOT_TOKEN),tokenSource:tg.tokenEncrypted?'admin-panel':process.env.TELEGRAM_BOT_TOKEN?'railway-variable':'none',chat:tg.activationChat||tg.chat||'',activationChat:tg.activationChat||tg.chat||'',adminChat:tg.adminChat||'',overdueChat:tg.overdueChat||''}});
   }
-  if(p==='/api/admin/telegram/test' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const r=await sendTelegramDetailed(String(b.text||'✅ اختبار إشعارات صدى العراق'),{kind:'manual_test'});return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'تم إرسال اختبار Telegram':(r.description||r.error||'فشل إرسال اختبار Telegram'),status:r.status||null,messageId:r.messageId||null});}
-  if(p==='/api/admin/telegram/test-connection' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const r=await telegramTestConnection();return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'اتصال Telegram ناجح':(r.description||r.error||'فشل الاتصال بـ Telegram'),status:r.status||null});}
-  if(p==='/api/admin/telegram/test-order' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const sample='🧪 اختبار إشعار طلب\n🆔 رقم طلب صدى العراق: #TEST-001\n👤 المستخدم: اختبار\n📦 الخدمة: خدمة تجريبية\n🔗 الرابط: https://example.com\n🔢 الكمية: 1,000\n💰 السعر: $0.50\n📊 الحالة: Pending\n🕐 الوقت: '+new Date().toLocaleString('en-GB',{hour12:false});const r=await sendTelegramDetailed(sample,{kind:'test_order',orderId:'TEST-001'});return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'تم إرسال إشعار طلب تجريبي':(r.description||r.error||'فشل إرسال إشعار الطلب'),status:r.status||null,messageId:r.messageId||null});}
-  if(p==='/api/admin/telegram/test-channel' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const channel=b.channel==='overdue'?'overdue':'activation';const r=await notifyTelegramRecipients(String(b.text||('🧪 اختبار قناة '+(channel==='overdue'?'الطلبات المتأخرة':'التفعيلات')+' — صدى العراق')),{channel,kind:'manual_channel_test'});return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'تم إرسال الاختبار إلى القناة المحددة':(r.description||r.error||'تعذر الإرسال'),results:r.results||[]});}
+  if(p==='/api/admin/telegram/test' && req.method==='POST'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const r=await sendTelegramDetailed(String(b.text||'✅ اختبار إشعارات صدى العراق'),{kind:'manual_test'});
+    return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'أكد Telegram إرسال رسالة الاختبار':(r.description||r.error||'فشل إرسال اختبار Telegram'),status:r.status||null,messageId:r.messageId||null,chat:r.resultInfo?.chat||null});
+  }
+  if(p==='/api/admin/telegram/test-connection' && req.method==='POST'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const r=await telegramTestConnection();
+    return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'تم التحقق من هوية البوت عبر Telegram':'فشل التحقق من Telegram: '+(r.description||r.error||'خطأ غير معروف'),status:r.status||null,bot:r.resultInfo||null});
+  }
+  if(p==='/api/admin/telegram/test-order' && req.method==='POST'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const sample='🧪 اختبار إشعار طلب\n🆔 رقم طلب صدى العراق: #TEST-001\n👤 المستخدم: اختبار\n📦 الخدمة: خدمة تجريبية\n🔗 الرابط: https://example.com\n🔢 الكمية: 1,000\n💰 السعر: $0.50\n📊 الحالة: Pending\n🕐 الوقت: '+new Date().toLocaleString('en-GB',{hour12:false});const r=await sendTelegramDetailed(sample,{kind:'test_order',orderId:'TEST-001'});
+    return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'أكد Telegram إرسال إشعار الطلب التجريبي':(r.description||r.error||'فشل إرسال إشعار الطلب'),status:r.status||null,messageId:r.messageId||null,chat:r.resultInfo?.chat||null});
+  }
+  if(p==='/api/admin/telegram/test-channel' && req.method==='POST'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const channel=['overdue','admin'].includes(b.channel)?b.channel:'activation';const r=await notifyTelegramRecipients(String(b.text||('🧪 اختبار '+(channel==='overdue'?'قناة الطلبات المتأخرة':channel==='admin'?'حساب مدير صدى العراق':'قناة التفعيلات')+' — صدى العراق')),{channel,kind:'manual_channel_test'});
+    const perTarget=(r.results||[]).map(x=>(x.ok?'نجح ':'فشل ')+String(x.chatId||'وجهة')+(x.error?' — '+String(x.error):'')).join(' | ');return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'أكد Telegram إرسال رسالة الاختبار إلى الوجهة الأساسية':((r.description||r.error||'تعذر الإرسال')+(perTarget?' | النتائج: '+perTarget:'')),results:r.results||[]});
+  }
   if(p==='/api/admin/telegram/logs' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});return json(res,200,{ok:true,logs:readJSON('telegram_notifications.json',[]).slice(-50).reverse()});}
 
   if(p==='/api/welcome-settings' && req.method==='GET'){

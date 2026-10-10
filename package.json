@@ -1,15 +1,15 @@
 {
   "name": "sadairaq-railway",
-  "version": "1.5.79",
+  "version": "1.5.81",
   "private": true,
-  "description": "صدى العراق - Railway deployment",
+  "description": "صدى العراق — حفظ دائم لمستخدمي Base44 وأرقام طلبات قصيرة",
   "scripts": {
     "start": "node server.js"
   },
   "engines": {
     "node": ">=20"
   },
-  "buildId": "SADA-1.5.79-ACCOUNT-PROFILE-SERVICE-NAMES-20261010",
+  "buildId": "SADA-1.5.81-PERSISTENT-USERS-SHORT-ORDER-NUMBERS-20261010",
   "dependencies": {
     "google-auth-library": "^11.2.0"
   }
