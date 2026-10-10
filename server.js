@@ -13,8 +13,8 @@ const LEGACY_DATA = path.join(ROOT, 'data');
 const DATA = path.resolve(process.env.SADA_DATA_DIR || process.env.DATA_DIR || (process.env.RAILWAY_VOLUME_MOUNT_PATH ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sada-data') : LEGACY_DATA));
 const DATA_IS_EXTERNAL = path.resolve(DATA) !== path.resolve(LEGACY_DATA);
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.72';
-const BUILD_ID = 'SADA-1.5.72-EMAIL-RECOVERY-PERSISTENT-DATA-EARNINGS-SECURE-SECRETS-20261010';
+const APP_VERSION = '1.5.73';
+const BUILD_ID = 'SADA-1.5.73-AUTH-EMAIL-FALLBACK-RESPONSIVE-STATS-20261010';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 // Restored the default administrator login from the supplied original release. Set ADMIN_PASSWORD in Railway to override it.
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2');
@@ -1730,7 +1730,20 @@ async function routeAPI(req,res,urlObj){
       if(!String(b.emailCode||'')){
         const emailWait=rateLimit(req,'email');if(emailWait)return json(res,429,{ok:false,error:'طلبات البريد كثيرة؛ أعد المحاولة بعد '+emailWait+' ثانية'},{'Retry-After':String(emailWait)});
         try{await beginEmailChallenge(email,'register',u,'تأكيد البريد الإلكتروني');return json(res,200,{ok:true,verificationRequired:true,message:'أرسلنا رمز تحقق حقيقياً إلى بريدك. أدخله لإكمال إنشاء الحساب.'});}
-        catch(e){return json(res,Number(e.statusCode)||502,{ok:false,error:String(e.message||'تعذر إرسال بريد التحقق').slice(0,260)});}
+        catch(e){
+          // Requested fallback: if real email delivery is not available, allow an explicitly unverified account.
+          // Never label it verified; password recovery remains unavailable until the address is verified later.
+          const sendError=String(e.message||'تعذر إرسال رمز البريد').slice(0,220);
+          const now=nowISO();
+          console.warn('Registration email verification unavailable; using unverified fallback:',sendError);
+          const user={username:u,name:u,email,emailVerified:false,passwordHash:hashPassword(pw),balance:0,level:'مبتدئ',telegram:'',phone:'',joined:now,totalSpent:0,totalOrders:0,role:'user'};
+          store.users[u]=user;writeJSON('users.json',store);
+          let firebaseSaved=false;
+          try{await firebaseWriteJson('users/'+firebaseSafeKey(u),user,5000);firebaseSaved=true;}catch(remoteErr){console.warn('Unverified registration Firebase mirror unavailable:',String(remoteErr.message||remoteErr).slice(0,120));}
+          if(!firebaseSaved&&!DATA_IS_EXTERNAL){delete store.users[u];writeJSON('users.json',store);return json(res,503,{ok:false,error:'تعذر حفظ الحساب في قاعدة بيانات دائمة. لم نكمل التسجيل حتى لا يضيع حسابك؛ راجع إعداد التخزين الدائم.'});}
+          const sessionToken=setSession(res,{role:'user',username:u});const clean={...user};delete clean.password;delete clean.passwordHash;
+          return json(res,200,{ok:true,role:'user',username:u,user:clean,sessionToken,emailVerified:false,emailVerificationAvailable:false,emailFallback:true,message:'تم إنشاء الحساب، لكن تعذر إرسال رمز تحقق الآن. البريد غير موثّق؛ يمكنك استخدام الحساب والتحقق من بريدك لاحقاً من إعدادات الحساب.'});
+        }
       }
       const verified=consumeEmailChallenge(email,'register',String(b.emailCode||''),u);if(!verified.ok)return json(res,422,{ok:false,error:verified.error});
       const now=nowISO();const user={username:u,name:u,email,emailVerified:true,emailVerifiedAt:now,passwordHash:hashPassword(pw),balance:0,level:'مبتدئ',telegram:String(b.telegram||''),phone:String(b.phone||''),joined:now,totalSpent:0,totalOrders:0,role:'user'};
