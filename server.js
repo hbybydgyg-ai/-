@@ -14,8 +14,8 @@ const LEGACY_DATA = path.join(ROOT, 'data');
 const DATA = path.resolve(process.env.SADA_DATA_DIR || process.env.DATA_DIR || (process.env.RAILWAY_VOLUME_MOUNT_PATH ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sada-data') : LEGACY_DATA));
 const DATA_IS_EXTERNAL = path.resolve(DATA) !== path.resolve(LEGACY_DATA);
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.78';
-const BUILD_ID = 'SADA-1.5.78-USERS-IMPORT-ACCOUNT-PANEL-20261010';
+const APP_VERSION = '1.5.79';
+const BUILD_ID = 'SADA-1.5.79-ACCOUNT-PROFILE-SERVICE-NAMES-20261010';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 // Restored the default administrator login from the supplied original release. Set ADMIN_PASSWORD in Railway to override it.
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2');
@@ -247,6 +247,14 @@ async function findRemoteUserByUsername(username){
   try{const all=await firebaseGetJson('users',5000);if(all&&typeof all==='object'&&!Array.isArray(all)){const found=Object.entries(all).find(([key,v])=>v&&typeof v==='object'&&(String(v.username||'').trim().toLowerCase()===wanted.toLowerCase()||decodeFirebaseSafeKey(key).trim().toLowerCase()===wanted.toLowerCase()||String(key).trim().toLowerCase()===wanted.toLowerCase()));if(found)return {username:String(found[1].username||decodeFirebaseSafeKey(found[0])||wanted),user:found[1],firebasePath:'users/'+found[0]};}return null;}catch(e){lastError=e;}
   if(lastError)throw lastError;return null;
 }
+function recordSuccessfulUserLogin(username){
+  const who=String(username||'').trim();if(!who)return '';
+  const at=nowISO();
+  try{const store=readJSON('users.json',{users:{}});const users=store.users&&typeof store.users==='object'?store.users:{};const key=Object.keys(users).find(k=>k===who)||Object.keys(users).find(k=>k.toLowerCase()===who.toLowerCase());if(key){users[key]={...users[key],lastLoginAt:at};store.users=users;writeJSON('users.json',store);}}catch(e){console.warn('Could not update local last-login timestamp:',String(e.message||e).slice(0,80));}
+  setImmediate(async()=>{try{const record=await findRemoteUserByUsername(who);const pathName=record?.firebasePath||('users/'+firebaseSafeKey(who));await firebasePatchJson(pathName,{lastLoginAt:at},3500);}catch(e){console.warn('Remote last-login timestamp could not be synced:',String(e.message||e).slice(0,80));}});
+  return at;
+}
+
 async function findAccountByEmail(email){
   const normalized=normalizeEmail(email),store=readJSON('users.json',{users:{}}),users=store.users||{};
   const local=Object.entries(users).find(([key,u])=>u&&normalizeEmail(u.email||u.mail||u.emailAddress)===normalized);
@@ -386,17 +394,30 @@ function normalizeProviderCurrency(d){
   return String(d?.currency||d?.data?.currency||d?.result?.currency||d?.account?.currency||'USD').toUpperCase();
 }
 
+function providerOriginalServiceName(row={}){
+  const candidates=[row.name,row.service_name,row.serviceName,row.title,row.service_title,row.serviceTitle,row.description,row.desc,row.label,row.serviceDescription];
+  const generic=/^(?:service|خدمة|service\s*#?\s*\d*|خدمة\s*#?\s*\d*|unknown service|خدمة غير مسماة)$/i;
+  for(const value of candidates){const name=String(value??'').trim().replace(/\s+/g,' ');if(name&&name.length>1&&!generic.test(name))return name.slice(0,240);}
+  return '';
+}
+function providerServiceName(row={},id=''){
+  return providerOriginalServiceName(row)||(id?('خدمة رقم '+String(id).slice(0,60)):'خدمة غير مسماة');
+}
 function normalizeProviderServices(d){
-  if(Array.isArray(d)) return d;
-  if(Array.isArray(d?.services)) return d.services;
-  if(Array.isArray(d?.data)) return d.data;
-  if(Array.isArray(d?.result)) return d.result;
-  if(Array.isArray(d?.items)) return d.items;
-  for(const key of ['services','data','result','items']){
-    const obj=d?.[key];
-    if(obj && typeof obj==='object' && !Array.isArray(obj)) return Object.entries(obj).map(([service,v])=>({service,...(v&&typeof v==='object'?v:{value:v})}));
-  }
-  return [];
+  let rows=[];
+  if(Array.isArray(d))rows=d;
+  else if(Array.isArray(d?.services))rows=d.services;
+  else if(Array.isArray(d?.data))rows=d.data;
+  else if(Array.isArray(d?.result))rows=d.result;
+  else if(Array.isArray(d?.items))rows=d.items;
+  else for(const key of ['services','data','result','items']){const obj=d?.[key];if(obj&&typeof obj==='object'&&!Array.isArray(obj)){rows=Object.entries(obj).map(([service,v])=>({service,...(v&&typeof v==='object'?v:{value:v})}));break;}}
+  return rows.filter(x=>x&&typeof x==='object').map(x=>{
+    const id=String(x.service??x.service_id??x.serviceId??x.id??x.sid??x.serviceID??'').trim();
+    const name=providerServiceName(x,id);
+    const rate=x.rate??x.price??x.cost??x.service_rate??x.serviceRate??0;
+    return {...x,service:id||String(x.service||''),name,rate:Number.isFinite(Number(rate))?Number(rate):0,
+      ...(x.description===undefined&&x.desc!==undefined?{description:String(x.desc)}:{})};
+  }).filter(x=>String(x.service||'').trim()!=='');
 }
 
 function providerActionSucceeded(action,d,orderId=''){
@@ -693,6 +714,7 @@ async function apiSmm(req,res,urlObj){
       if(balance===null) return json(res,502,{error:'المزود لم يرجع رصيداً رقمياً صالحاً',providerId,providerName:prov.name||providerId});
       return json(res,200,{ok:true,balance,currency:normalizeProviderCurrency(d),providerId,providerName:prov.name||providerId,checkedAt:new Date().toISOString()});
     }
+    if(action==='services')return json(res,200,normalizeProviderServices(d));
     return json(res,200,d);
   }catch(e){return json(res,502,{error:e.name==='AbortError'?'انتهت مهلة الاتصال بالمزود':String(e.message||'تعذر الاتصال بالمزود'),providerId,providerName:prov.name||providerId});}
 }
@@ -1186,15 +1208,32 @@ async function runProviderPriceSync(options={}){
         if(!raw.length)throw new Error('المزود لم يرجع قائمة خدمات');
         const byId=new Map();for(const r of raw){const id=String(r?.service??r?.service_id??r?.serviceId??r?.id??r?.serviceID??'').trim();if(id)byId.set(id,r)}
         let pUpdated=0;
-        for(const [key,svc] of rows){if(String(svc.providerId||'')!==pid)continue;const sid=providerServiceKey(svc);if(!sid){result.skipped++;continue}const latest=byId.get(sid);if(!latest){result.skipped++;continue}const base=providerServiceRate(latest);if(base===null){result.skipped++;continue}const oldBase=catalogRate(svc);if(base===0&&oldBase!==null&&oldBase>0){result.skipped++;result.providerErrors.push(pid+' الخدمة '+sid+': تجاهلنا سعراً صفرياً غير متوقع حتى لا تتحول خدمة مدفوعة إلى مجانية');continue}const priced=pricedPatch(svc,base,pct);appendServicePricePatch(allPatches,key,priced);pUpdated++;result.updated++;
-          for(const a of localServices){if(String(a.providerId||'')===pid&&String(a.providerServiceId||a.id||'')===sid){Object.assign(a,priced,{rateUsd:priced.sellingUsd,rate:priced.sellingUsd});localUpdated++}}
+        for(const [key,svc] of rows){
+          if(String(svc.providerId||'')!==pid)continue;
+          const sid=providerServiceKey(svc);if(!sid){result.skipped++;continue}
+          const latest=byId.get(sid);if(!latest){result.skipped++;continue}
+          // Repair only generic/empty saved labels when the provider supplies a real name.
+          // Never overwrite a meaningful custom name already saved by the site owner.
+          const originalProviderName=providerOriginalServiceName(latest);
+          const currentName=String(svc.name||'').trim();
+          const genericCurrentName=!currentName||/^(?:service|خدمة|service\s*#?\s*\d*|خدمة\s*#?\s*\d*|unknown service|خدمة غير مسماة)$/i.test(currentName);
+          if(originalProviderName&&genericCurrentName){appendServicePricePatch(allPatches,key,{name:originalProviderName});result.namesFixed=(result.namesFixed||0)+1;}
+          const base=providerServiceRate(latest);if(base===null){result.skipped++;continue}
+          const oldBase=catalogRate(svc);if(base===0&&oldBase!==null&&oldBase>0){result.skipped++;result.providerErrors.push(pid+' الخدمة '+sid+': تجاهلنا سعراً صفرياً غير متوقع حتى لا تتحول خدمة مدفوعة إلى مجانية');continue}
+          const priced=pricedPatch(svc,base,pct);appendServicePricePatch(allPatches,key,priced);pUpdated++;result.updated++;
+          for(const a of localServices){
+            if(String(a.providerId||'')===pid&&String(a.providerServiceId||a.id||'')===sid){
+              if(originalProviderName&&(!String(a.name||'').trim()||/^(?:service|خدمة|service\s*#?\s*\d*|خدمة\s*#?\s*\d*|unknown service|خدمة غير مسماة)$/i.test(String(a.name||'').trim())))a.name=originalProviderName;
+              Object.assign(a,priced,{rateUsd:priced.sellingUsd,rate:priced.sellingUsd});localUpdated++;
+            }
+          }
         }
         result.providers++;if(!pUpdated)result.providerErrors.push(pid+': لم تتم مطابقة معرّفات الخدمات');
       }catch(e){result.ok=false;result.providerErrors.push(pid+': '+String(e.message||e).slice(0,160))}
     }
     if(Object.keys(allPatches).length)await firebasePatchJson('services',allPatches,24000);
     if(localUpdated)writeJSON('api_services.json',localServices);result.localUpdated=localUpdated;
-    cfg=localGlobalPricing();cfg.lastAttemptAt=nowISO();cfg.lastResult={updated:result.updated,skipped:result.skipped,providers:result.providers,localUpdated:result.localUpdated};cfg.lastError=result.providerErrors.join(' | ').slice(0,700);if(result.updated>0){cfg.lastSuccessAt=nowISO();}else if(!result.providerErrors.length){cfg.lastError='لم يتم العثور على خدمات مطابقة للتحديث'};
+    cfg=localGlobalPricing();cfg.lastAttemptAt=nowISO();cfg.lastResult={updated:result.updated,skipped:result.skipped,providers:result.providers,localUpdated:result.localUpdated,namesFixed:Number(result.namesFixed||0)};cfg.lastError=result.providerErrors.join(' | ').slice(0,700);if(result.updated>0){cfg.lastSuccessAt=nowISO();}else if(!result.providerErrors.length){cfg.lastError='لم يتم العثور على خدمات مطابقة للتحديث'};
     const st=readJSON('settings.json',{});st.pricing=cfg;writeJSON('settings.json',st);try{await firebaseWriteJson('config/pricing',cfg,7000)}catch(_){}
     result.pricing=cfg;return result;
   }catch(e){result.ok=false;result.providerErrors.push(String(e.message||e).slice(0,180));const st=readJSON('settings.json',{});const p=cleanGlobalPricing(st.pricing||{});p.lastAttemptAt=nowISO();p.lastError=result.providerErrors.join(' | ').slice(0,700);st.pricing=p;writeJSON('settings.json',st);try{await firebaseWriteJson('config/pricing',p,5000)}catch(_){}return result;
@@ -1618,7 +1657,7 @@ async function routeAPI(req,res,urlObj){
     const q=String(urlObj.searchParams.get('q')||'').trim().toLowerCase();
     const filtered=result.filter(u=>!q||[u.username,u.name,u.email,u.legacyUserId].some(v=>String(v||'').toLowerCase().includes(q)));
     filtered.sort((a,b)=>Number(b.totalOrders||0)-Number(a.totalOrders||0)||String(b.joined||'').localeCompare(String(a.joined||''))||String(a.name||'').localeCompare(String(b.name||''),'ar'));
-    return json(res,200,{ok:true,users:filtered,total:result.length,currentUsers:directory.users.length,legacyUsers:legacyUsers.length,matchedLegacyUsers,legacyOnlyUsers,ordersAvailable,source:ordersAvailable?'firebase+server-ledger':'firebase-users-only',warning});
+    return json(res,200,{ok:true,users:filtered,total:result.length,currentUsers:directory.users.length,legacyUsers:legacyUsers.length,matchedLegacyUsers,legacyOnlyUsers,ordersAvailable,storageDurable:DATA_IS_EXTERNAL,source:ordersAvailable?'firebase+server-ledger':'firebase-users-only',warning:warning||(!DATA_IS_EXTERNAL?'قاعدة بيانات Base44 الخاصة محفوظة في مجلد التشغيل الحالي فقط. قبل الاعتماد عليها عبر عمليات النشر، اربط Railway Volume واجعل SADA_DATA_DIR=/data.':'')});
   }
 
   // Administrator-only legacy database workflow. Uploaded archive is validated and stored
@@ -1633,7 +1672,7 @@ async function routeAPI(req,res,urlObj){
     const privateUsers=users.map(legacyUserPrivateRow);const privateOrders=orders.map(legacyOrderPrivateRow);
     const stage={version:1,uploadedAt:nowISO(),sourceFile:'SadaIraq_Database_Export.zip',sourceZipBytes:bytes.length,users:privateUsers,orders:privateOrders,transactionCount:transactions.length,counts:{users:users.length,orders:orders.length,transactions:transactions.length}};
     writeJSON(LEGACY_STAGE_FILE,stage);
-    return json(res,200,{ok:true,uploaded:true,zipBytes:bytes.length,counts:stage.counts,linkedOrders,checks:{sqliteHeader:true,zipCrcsValid:true,userIdsUnique:userIds.size===users.length,orderIdsUnique:orderIds.size===orders.length,transactionIdsUnique:transactionIds.size===transactions.length,allOrdersLinkedToUsers:linkedOrders===orders.length},message:'تم فحص الملف وتخزين بيانات الترحيل بشكل خاص. لم يتم تعديل قاعدة Firebase بعد.'});
+    return json(res,200,{ok:true,uploaded:true,zipBytes:bytes.length,counts:stage.counts,linkedOrders,checks:{sqliteHeader:true,zipCrcsValid:true,userIdsUnique:userIds.size===users.length,orderIdsUnique:orderIds.size===orders.length,transactionIdsUnique:transactionIds.size===transactions.length,allOrdersLinkedToUsers:linkedOrders===orders.length},storageDurable:DATA_IS_EXTERNAL,storageWarning:DATA_IS_EXTERNAL?'تم حفظ الملف في مجلد بيانات دائم.':'تحذير: تم حفظ الملف في مجلد التشغيل الحالي فقط، وقد يضيع بعد إعادة النشر. اربط Railway Volume واجعل SADA_DATA_DIR=/data قبل الاعتماد على الترحيل.',message:'تم فحص الملف وتخزين بيانات الترحيل بشكل خاص. لم يتم تعديل قاعدة Firebase بعد.'});
   }
   if(p==='/api/admin/legacy-import/preview'&&req.method==='GET'){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const stage=await readLegacyStage();if(!stage)return json(res,404,{ok:false,error:'لم يتم رفع ملف قاعدة البيانات بعد. اختر ملف ZIP أولاً.'});
@@ -1667,7 +1706,7 @@ async function routeAPI(req,res,urlObj){
     return json(res,200,{ok:true,report:finalReport,warning:(balanceWriteErrors||orderCounterWriteErrors)?'تم حفظ الطلبات القديمة، لكن تعذر تحديث بعض الأرصدة أو عدادات الطلبات. ملف الترحيل محفوظ؛ أعد الفحص والدمج بعد التأكد من الاتصال.':(plan.unmatchedUsers?'بعض حسابات القاعدة القديمة لا تطابق بريداً في المشروع الجديد؛ طلباتها محفوظة باسم سجل قديم، ولن يستطيع صاحبها رؤيتها بحسابه حتى يوجد حساب مطابق بالبريد ثم تعيد رفع ZIP وتضغط دمج مرة أخرى.':'تم ربط الطلبات بالحسابات المطابقة، ومزامنة عدد الطلبات التاريخية لكل حساب. كل طلب جديد سيزيد الإجمالي تلقائياً بمقدار واحد.')});
   }
   if(p==='/api/admin/legacy-import/status'&&req.method==='GET'){
-    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const stage=await readLegacyStage(),report=readJSON(LEGACY_IMPORT_STATE_FILE,null);return json(res,200,{ok:true,uploaded:!!stage,stagedCounts:stage?.counts||null,lastImport:report||null});
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const stage=await readLegacyStage(),report=readJSON(LEGACY_IMPORT_STATE_FILE,null);return json(res,200,{ok:true,uploaded:!!stage,stagedCounts:stage?.counts||null,lastImport:report||null,storageDurable:DATA_IS_EXTERNAL,storageWarning:DATA_IS_EXTERNAL?'':'مجلد بيانات الترحيل ليس تخزيناً دائماً؛ اربط Railway Volume واجعل SADA_DATA_DIR=/data.'});
   }
   if(p==='/api/admin/user-order-stats'&&req.method==='GET'){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});let remoteUsers={},remoteOrders={};let firebaseAvailable=true;try{[remoteUsers,remoteOrders]=await Promise.all([firebaseGetJson('users',12000),firebaseGetJson('orders',15000)]);remoteUsers=remoteUsers||{};remoteOrders=remoteOrders||{};}catch(e){firebaseAvailable=false;return json(res,503,{ok:false,error:'تعذر قراءة المستخدمين والطلبات من Firebase: '+String(e.message||e).slice(0,140)});}
@@ -1965,7 +2004,7 @@ async function routeAPI(req,res,urlObj){
     const wait=rateLimit(req,'auth');if(wait)return json(res,429,{ok:false,error:'محاولات كثيرة، أعد المحاولة بعد '+wait+' ثانية'},{'Retry-After':String(wait)});
     const b=await bodyJSON(req);const cap=consumeMathCaptcha(req,b);if(cap)return json(res,422,{ok:false,error:cap,captchaFailed:true});
     if(!String(b.credential||''))return json(res,422,{ok:false,error:'رمز Google مفقود.'});
-    try{const out=await googleAuthLogin(String(b.credential));const role='user';const sessionToken=setSession(res,{role,username:out.username});const safe=cleanGoogleUser(out.user);return json(res,200,{ok:true,role,username:out.username,user:safe,sessionToken,authProvider:'google',firebaseSaved:out.firebaseSaved});}
+    try{const out=await googleAuthLogin(String(b.credential));const role='user';const lastLoginAt=recordSuccessfulUserLogin(out.username);const sessionToken=setSession(res,{role,username:out.username});const safe={...cleanGoogleUser(out.user),lastLoginAt};return json(res,200,{ok:true,role,username:out.username,user:safe,sessionToken,authProvider:'google',firebaseSaved:out.firebaseSaved});}
     catch(e){const code=Number(e.statusCode)||(/invalid|token|audience|expired|signature/i.test(String(e.message||''))?401:502);return json(res,code,{ok:false,error:code===502?'تعذر الاتصال بخدمة التحقق من Google؛ حاول مرة أخرى.':String(e.message||'فشل التحقق من Google')});}
   }
   if(p==='/api/auth' && req.method==='POST'){
@@ -1985,7 +2024,7 @@ async function routeAPI(req,res,urlObj){
       let emailAccount;try{emailAccount=await findAccountByEmail(email);}catch(e){return json(res,503,{ok:false,error:'تعذر التحقق من البريد في قاعدة البيانات؛ لم ننشئ حساباً جديداً.'});}
       if(emailAccount)return json(res,409,{ok:false,error:'هذا البريد مرتبط بحساب موجود بالفعل. سجّل الدخول باستخدامه أو باسم المستخدم.'});
       const now=nowISO();
-      const user={username:u,name,email,emailVerified:false,passwordHash:hashPassword(pw),balance:0,level:'مبتدئ',telegram:'',phone:'',joined:now,totalSpent:0,totalOrders:0,role:'user'};
+      const user={username:u,name,email,emailVerified:false,passwordHash:hashPassword(pw),balance:0,level:'مبتدئ',telegram:'',phone:'',joined:now,lastLoginAt:now,totalSpent:0,totalOrders:0,role:'user'};
       store.users[u]=user;writeJSON('users.json',store);
       let firebaseSaved=false;
       try{await firebaseWriteJson('users/'+firebaseSafeKey(u),user,5000);firebaseSaved=true;}
@@ -2008,7 +2047,8 @@ async function routeAPI(req,res,urlObj){
       if(!store.users[actualUsername]||!String(user.passwordHash||'').startsWith('scrypt$')){const upgraded={...(store.users[actualUsername]||user),...user,username:actualUsername};if(!String(user.passwordHash||'').startsWith('scrypt$'))upgraded.passwordHash=hashPassword(pw);delete upgraded.password;delete upgraded.pass;delete upgraded.passHash;store.users[actualUsername]=upgraded;writeJSON('users.json',store);
         if(remoteRecord&&remoteRecord.firebasePath&&!String(user.passwordHash||'').startsWith('scrypt$')){try{await firebasePatchJson(remoteRecord.firebasePath,{passwordHash:upgraded.passwordHash,password:null,pass:null,passHash:null,passwordUpdatedAt:nowISO()},5000);}catch(e){console.warn('Legacy password hash remote migration skipped:',String(e.message||e).slice(0,100));}}
       }
-      const localUser=readJSON('users.json',{users:{}}).users?.[actualUsername]||user;
+      const lastLoginAt=recordSuccessfulUserLogin(actualUsername);
+      const localUser={...(readJSON('users.json',{users:{}}).users?.[actualUsername]||user),lastLoginAt};
       const sessionToken=setSession(res,{role:localUser.role==='admin'?'admin':'user',username:actualUsername});const clean={...localUser};delete clean.password;delete clean.passwordHash;delete clean.pass;delete clean.passHash;
       return json(res,200,{ok:true,role:localUser.role==='admin'?'admin':'user',username:actualUsername,user:clean,sessionToken,legacyAccountRecovered:!Boolean(store.users?.[u])});
     }
@@ -2132,13 +2172,14 @@ async function routeAPI(req,res,urlObj){
     const uname=String(s.username||'');
     const localOrders=readJSON('orders.json',[]).filter(x=>x&&!x.event&&String(x.user||x.username||'')===uname);
     const orderMap=new Map();
-    const addSummaryOrder=(o,sourceKey='')=>{const id=String(o.id||o.siteOrderId||o.localId||o.orderId||o.order_id||o.providerOrderId||o.smmpartyOrderId||sourceKey||o.createdAt||'');if(!id)return;const key=uname+'|'+id;const prior=orderMap.get(key)||{};const usdRaw=o.chargeUsd??o.totalUsd??o.priceUsd??o.amountUsd;const usd=Number(usdRaw);const iqRaw=o.totalIQD??o.total??o.amountIQD??o.chargeIqd;const iq=Number(iqRaw);const amountUsd=Number.isFinite(usd)&&usd>=0?usd:prior.amountUsd;const totalIQD=Number.isFinite(iq)&&iq>0?iq:(Number.isFinite(amountUsd)&&amountUsd>=0?Number((amountUsd*FIXED_RATE).toFixed(4)):prior.totalIQD||0);orderMap.set(key,{...prior,id,user:uname,totalIQD,amountUsd});};
+    const addSummaryOrder=(o,sourceKey='')=>{const id=String(o.id||o.siteOrderId||o.localId||o.orderId||o.order_id||o.providerOrderId||o.smmpartyOrderId||sourceKey||o.createdAt||'');if(!id)return;const key=uname+'|'+id;const prior=orderMap.get(key)||{};const usdRaw=o.chargeUsd??o.totalUsd??o.priceUsd??o.amountUsd;const usd=Number(usdRaw);const iqRaw=o.totalIQD??o.total??o.amountIQD??o.chargeIqd;const iq=Number(iqRaw);const amountUsd=Number.isFinite(usd)&&usd>=0?usd:prior.amountUsd;const totalIQD=Number.isFinite(iq)&&iq>0?iq:(Number.isFinite(amountUsd)&&amountUsd>=0?Number((amountUsd*FIXED_RATE).toFixed(4)):prior.totalIQD||0);orderMap.set(key,{...prior,id,user:uname,totalIQD,amountUsd,status:String(o.status||prior.status||'pending').toLowerCase(),createdAt:String(o.createdAt||o.created_date||prior.createdAt||''),legacyHistory:!!(o.legacyHistory||prior.legacyHistory)});};
     for(const o of localOrders)addSummaryOrder(o);
     try{const fbOrders=await firebaseGetJson('orders',4500);if(fbOrders&&typeof fbOrders==='object'){const entries=Array.isArray(fbOrders)?fbOrders.map((v,i)=>[String(i),v]):Object.entries(fbOrders);for(const [key,o] of entries){if(!o||typeof o!=='object'||o.event||String(o.user||o.username||o.userName||'')!==uname)continue;addSummaryOrder(o,key);}}}catch(e){console.warn('user summary remote orders unavailable:',String(e.message||e).slice(0,100))}
     const orders=[...orderMap.values()];const spentIQD=orders.reduce((a,o)=>a+Math.max(0,Number(o.totalIQD||((Number(o.amountUsd)||0)*FIXED_RATE))||0),0);
     const refs=readJSON('refunds.json',[]).filter(x=>String(x.user||'')===uname);let refundedIQD=refs.reduce((a,r)=>a+Math.max(0,Number(r.amountIQD||0)),0);let remoteUser=null;try{remoteUser=await firebaseGetJson('users/'+firebaseSafeKey(uname),3500)}catch(_){}if(remoteUser?.sadaRefunds&&typeof remoteUser.sadaRefunds==='object'){const remoteRefunded=Object.values(remoteUser.sadaRefunds).reduce((a,r)=>a+Math.max(0,Number(r?.totalIQD||0)),0);refundedIQD=Math.max(refundedIQD,remoteRefunded)}
-    const er=readJSON('earn_requests.json',[]).filter(x=>String(x.user||'')===uname&&x.status==='approved');const rewardsUSD=Math.max(Number(remoteUser?.sadaEarnTotalUSD||0),er.reduce((a,r)=>a+Math.max(0,Number(r.rewardUSD||0)),0));const localProfile=readJSON('users.json',{users:{}}).users?.[uname]||{};const localBalance=localProfile.balance;const balanceIQD=Number(remoteUser?.balance??localBalance??s.balance??0);const profile={username:uname,name:String(remoteUser?.name||remoteUser?.fullName||localProfile.name||localProfile.fullName||uname),email:String(remoteUser?.email||remoteUser?.mail||localProfile.email||''),phone:String(remoteUser?.phone||localProfile.phone||''),joined:String(remoteUser?.joined||remoteUser?.createdAt||localProfile.joined||localProfile.createdAt||''),level:String(remoteUser?.level||localProfile.level||'مبتدئ')};
-    return json(res,200,{ok:true,profile,orders:orders.length,spentIQD:Number(spentIQD.toFixed(4)),refundedIQD:Number(refundedIQD.toFixed(4)),rewardsUSD:Number(rewardsUSD.toFixed(6)),balanceIQD,currency:'IQD',checkedAt:nowISO()});
+    const er=readJSON('earn_requests.json',[]).filter(x=>String(x.user||'')===uname&&x.status==='approved');const rewardsUSD=Math.max(Number(remoteUser?.sadaEarnTotalUSD||0),er.reduce((a,r)=>a+Math.max(0,Number(r.rewardUSD||0)),0));const localProfile=readJSON('users.json',{users:{}}).users?.[uname]||{};const localBalance=localProfile.balance;const balanceIQD=Number(remoteUser?.balance??localBalance??s.balance??0);const email=String(remoteUser?.email||remoteUser?.mail||localProfile.email||'');const verifiedRaw=remoteUser?.emailVerified??localProfile.emailVerified;const emailVerified=verifiedRaw===true||String(verifiedRaw||'').toLowerCase()==='true';const profile={username:uname,name:String(remoteUser?.name||remoteUser?.fullName||localProfile.name||localProfile.fullName||uname),email,emailVerified,phone:String(remoteUser?.phone||localProfile.phone||''),joined:String(remoteUser?.joined||remoteUser?.createdAt||localProfile.joined||localProfile.createdAt||''),createdAt:String(remoteUser?.createdAt||localProfile.createdAt||localProfile.joined||''),lastLoginAt:String(remoteUser?.lastLoginAt||localProfile.lastLoginAt||''),level:String(remoteUser?.level||localProfile.level||'مبتدئ')};
+    const completedStates=new Set(['completed','complete','success','successful','done']);const activeStates=new Set(['pending','processing','in_progress','in progress','queued','awaiting']);const completedOrders=orders.filter(o=>completedStates.has(String(o.status||'').toLowerCase())).length;const activeOrders=orders.filter(o=>activeStates.has(String(o.status||'').toLowerCase())).length;const lastOrderAt=orders.map(o=>o.createdAt).filter(Boolean).sort((a,b)=>(Date.parse(b)||0)-(Date.parse(a)||0))[0]||'';
+    return json(res,200,{ok:true,profile,orders:orders.length,completedOrders,activeOrders,lastOrderAt,spentIQD:Number(spentIQD.toFixed(4)),refundedIQD:Number(refundedIQD.toFixed(4)),rewardsUSD:Number(rewardsUSD.toFixed(6)),balanceIQD,currency:'IQD',checkedAt:nowISO()});
   }
   if(p==='/api/earn/requests' && req.method==='GET'){
     const s=session(req);if(!s||s.role!=='user')return json(res,401,{ok:false,error:'يجب تسجيل الدخول'});const rows=readJSON('earn_requests.json',[]).filter(x=>String(x.user||'')===String(s.username));let remote=[];try{const v=await firebaseGetJson('earnRequestsByUser/'+firebaseSafeKey(s.username),4000);if(v&&typeof v==='object')remote=(Array.isArray(v)?v:Object.values(v)).filter(x=>x&&typeof x==='object')}catch(_){}const m=new Map();for(const r of [...remote,...rows])if(r.id)m.set(String(r.id),{...m.get(String(r.id)),...r});return json(res,200,{ok:true,requests:[...m.values()].sort((a,b)=>(Date.parse(b.createdAt)||0)-(Date.parse(a.createdAt)||0)).slice(0,100),maxRewardUSD:50});
