@@ -13,18 +13,18 @@ const LEGACY_DATA = path.join(ROOT, 'data');
 const DATA = path.resolve(process.env.SADA_DATA_DIR || process.env.DATA_DIR || (process.env.RAILWAY_VOLUME_MOUNT_PATH ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sada-data') : LEGACY_DATA));
 const DATA_IS_EXTERNAL = path.resolve(DATA) !== path.resolve(LEGACY_DATA);
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.69';
-const BUILD_ID = 'SADA-1.5.69-SECURITY-PARTIAL-REFUND-AUTO-STATUS-20261010';
+const APP_VERSION = '1.5.70';
+const BUILD_ID = 'SADA-1.5.70-CONSOLIDATED-NOTIFICATIONS-SUPPORT-ACCOUNT-UI-20261010';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
-// Security: never ship a usable default administrator password. Configure ADMIN_PASSWORD or ADMIN_PASSWORD_HASH in the host environment.
-const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || '');
+// Restored the default administrator login from the supplied original release. Set ADMIN_PASSWORD in Railway to override it.
+const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2');
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
 const FIXED_RATE = 1250; // 1 USD = 1,250 IQD
 // v1.5.40: signed stateless sessions survive Railway restarts/instance changes.
 const sessions = new Map(); // legacy sessions kept only during rolling deployments
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
-// A random fallback avoids a known signing key, but SESSION_SECRET must be configured consistently for persistent/multi-instance sessions.
-const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || crypto.randomBytes(32).toString('hex'));
+// Legacy fallback retained for compatibility with the supplied original release; configure a strong SESSION_SECRET in production.
+const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || 'sadairaq-session-secret-change-me');
 const SESSION_COOKIE = 'sadairaq_sid';
 const SESSION_TOKEN_HEADER = 'x-sada-session';
 const RATE_BUCKETS = new Map();
@@ -1675,6 +1675,15 @@ async function routeAPI(req,res,urlObj){
     if(!out.connection.ok) out.connection={ok:false,error:out.balance.error||out.services.error||'فشل الاتصال بالمزود'};
     return json(res,200,{ok:out.connection.ok&&out.balance.ok&&out.services.ok,diagnostics:out});
   }
+  if(p==='/api/admin/support-notify' && req.method==='POST'){
+    if(!isAdmin(req)) return json(res,403,{ok:false,error:'غير مصرح'});
+    const wait=rateLimit(req,'api'); if(wait)return json(res,429,{ok:false,error:'طلبات الإشعارات كثيرة، أعد المحاولة لاحقاً'},{'Retry-After':String(wait)});
+    const b=await bodyJSON(req);const username=String(b.username||'').trim().slice(0,150);const message=String(b.message||'').trim().slice(0,1200);const chatMessageId=String(b.chatMessageId||'').trim().slice(0,180);
+    if(!username||!message||!chatMessageId)return json(res,422,{ok:false,error:'اسم المستخدم والرسالة ومعرف الرسالة مطلوبة'});
+    const id='SUP'+sha256(username+'|'+chatMessageId).slice(0,24);
+    const notification=createUserNotification(username,{id,type:'support_reply',title:'رد جديد من الدعم الفني',message:message.slice(0,380),meta:{chatMessageId}});
+    return json(res,200,{ok:true,notificationId:notification?.id||id});
+  }
   if(p==='/api/admin/notifications' && req.method==='GET'){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'}); return json(res,200,{ok:true,notifications:readNotifications().map(sanitizeNotification)});
   }
@@ -2141,7 +2150,7 @@ const server=http.createServer(async (req,res)=>{
 });
 server.listen(PORT,'0.0.0.0',()=>{
   console.log(`${APP_NAME} v${APP_VERSION} build ${BUILD_ID} running on port ${PORT}`);
-  if(!process.env.ADMIN_PASSWORD && !String(process.env.ADMIN_PASSWORD_HASH||'').startsWith('scrypt$')) console.warn('SECURITY WARNING: admin login disabled until ADMIN_PASSWORD or a scrypt ADMIN_PASSWORD_HASH is configured.');
+  if(!process.env.ADMIN_PASSWORD) console.warn('SECURITY WARNING: the legacy default admin password is enabled; set ADMIN_PASSWORD in production.');
   if(!process.env.SESSION_SECRET) console.warn('SECURITY WARNING: configure a long random SESSION_SECRET for stable, multi-instance signed sessions.');
   if(!process.env.SADA_ENCRYPTION_KEY) console.warn('SECURITY WARNING: configure SADA_ENCRYPTION_KEY to protect provider credentials at rest; legacy encrypted values remain readable during rotation.');
   // Bind HTTP before any remote Firebase hydration so saved sessions respond immediately.
