@@ -1,6 +1,6 @@
 {
   "name": "sadairaq-railway",
-  "version": "1.5.75",
+  "version": "1.5.76",
   "private": true,
   "description": "صدى العراق - Railway deployment",
   "scripts": {
@@ -9,7 +9,7 @@
   "engines": {
     "node": ">=20"
   },
-  "buildId": "SADA-1.5.75-LEGACY-ORDERS-USER-STATS-20261010",
+  "buildId": "SADA-1.5.76-HOME-ORDERS-ADMIN-TELEGRAM-PERSISTENCE-20261010",
   "dependencies": {
     "google-auth-library": "^11.2.0"
   }

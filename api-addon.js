@@ -1,2 +1,2 @@
-// صدى العراق v1.5.75 — live API state bridge
-window.SadaIraqAPI = window.SadaIraqAPI || {version:'1.5.75',buildId:'SADA-1.5.75-LEGACY-ORDERS-USER-STATS-20261010'};
+// صدى العراق v1.5.76 — live API state bridge
+window.SadaIraqAPI = window.SadaIraqAPI || {version:'1.5.76',buildId:'SADA-1.5.76-HOME-ORDERS-ADMIN-TELEGRAM-PERSISTENCE-20261010'};

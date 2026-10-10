@@ -14,8 +14,8 @@ const LEGACY_DATA = path.join(ROOT, 'data');
 const DATA = path.resolve(process.env.SADA_DATA_DIR || process.env.DATA_DIR || (process.env.RAILWAY_VOLUME_MOUNT_PATH ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sada-data') : LEGACY_DATA));
 const DATA_IS_EXTERNAL = path.resolve(DATA) !== path.resolve(LEGACY_DATA);
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.75';
-const BUILD_ID = 'SADA-1.5.75-LEGACY-ORDERS-USER-STATS-20261010';
+const APP_VERSION = '1.5.76';
+const BUILD_ID = 'SADA-1.5.76-HOME-ORDERS-ADMIN-TELEGRAM-PERSISTENCE-20261010';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 // Restored the default administrator login from the supplied original release. Set ADMIN_PASSWORD in Railway to override it.
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2');
@@ -752,9 +752,14 @@ function persistentEncryptionSecret(){
   }catch(e){console.warn('Persistent encryption key unavailable:',String(e.message||e).slice(0,100));return '';}
 }
 function preferredEncryptionSecret(){
-  const dedicated=String(process.env.SADA_ENCRYPTION_KEY||'').trim();if(dedicated)return dedicated;
+  const dedicated=String(process.env.SADA_ENCRYPTION_KEY||'').trim();
+  if(dedicated.length>=32)return dedicated;
   const sessionSecret=String(process.env.SESSION_SECRET||'').trim();
   if(sessionSecret.length>=32 && sessionSecret!=='sadairaq-session-secret-change-me')return sessionSecret;
+  // A deliberately configured strong admin password is stable across deploys too. Never
+  // use the built-in legacy default as an encryption key.
+  const adminSecret=String(process.env.ADMIN_PASSWORD||'').trim();
+  if(adminSecret.length>=32 && adminSecret!=='SrIraq!9vQ#4mL7@xK2')return adminSecret;
   return persistentEncryptionSecret();
 }
 function telegramEncryptionReady(){return !!preferredEncryptionSecret();}
@@ -872,6 +877,7 @@ function auditNormalizeRecord(order={},source='firebase',sourceKey=''){
     cancelReason:String(o.cancelReason||o.cancellationReason||o.failureReason||o.reason||''),
     remains:o.remains??null,startCount:o.startCount??o.start_count??null,refundState:String(o.refundState||''),refundAmountIQD:Number(o.refundAmountIQD||0),
     source, firebaseKey:source==='firebase'?String(sourceKey||''):'',
+    legacyHistory:!!o.legacyHistory, readOnly:!!o.readOnly,
     siteLocalId:source==='server'?String(id||''):'',
     amountUsd:Number(o.chargeUsd??o.totalUsd??o.priceUsd??NaN),
     sourceTimestamp:createdMs||0
@@ -913,7 +919,7 @@ async function loadOrderAuditSnapshot(force=false){
 }
 function auditPublicRecord(row,now=Date.now(),delayHours=3){
   const createdMs=Number(row.createdMs||auditOrderTime(row)||0)||null;const ageMs=createdMs?Math.max(0,now-createdMs):null;const status=auditStatus(row.status||row.rawStatus);
-  return {id:String(row.id||''),siteOrderId:String(row.siteOrderId||row.id||''),publicOrderNo:String(row.publicOrderNo||row.id||''),user:String(row.user||''),userName:String(row.userName||row.user||'—'),email:String(row.email||''),serviceName:String(row.serviceName||'خدمة'),serviceId:String(row.serviceId||''),platform:String(row.platform||auditPlatform(row)),serviceApp:String(row.serviceApp||''),link:String(row.link||''),quantity:Number(row.quantity||0),status,rawStatus:String(row.rawStatus||status),createdAt:row.createdAt||null,createdMs,ageMs,overdue:!!(ageMs!==null&&ageMs>delayHours*3600000&&!auditTerminalStatus(status)),providerName:String(row.providerName||'—'),providerId:String(row.providerId||''),providerOrderId:String(row.providerOrderId||''),lastCheckedAt:row.lastCheckedAt||null,updatedAt:row.updatedAt||null,completedAt:row.completedAt||null,cancelledAt:row.cancelledAt||null,cancelReason:String(row.cancelReason||''),remains:row.remains??null,startCount:row.startCount??null,amountUsd:Number.isFinite(row.amountUsd)?row.amountUsd:null,source:String(row.source||''),sourceKey:String(row._firebaseKey||row.firebaseKey||''),sources:Array.isArray(row._auditSources)?row._auditSources:[row.source].filter(Boolean)};
+  return {id:String(row.id||''),siteOrderId:String(row.siteOrderId||row.id||''),publicOrderNo:String(row.publicOrderNo||row.id||''),user:String(row.user||''),userName:String(row.userName||row.user||'—'),email:String(row.email||''),serviceName:String(row.serviceName||'خدمة'),serviceId:String(row.serviceId||''),platform:String(row.platform||auditPlatform(row)),serviceApp:String(row.serviceApp||''),link:String(row.link||''),quantity:Number(row.quantity||0),status,rawStatus:String(row.rawStatus||status),createdAt:row.createdAt||null,createdMs,ageMs,overdue:!row.legacyHistory&&!!(ageMs!==null&&ageMs>delayHours*3600000&&!auditTerminalStatus(status)),providerName:String(row.providerName||'—'),providerId:String(row.providerId||''),providerOrderId:String(row.providerOrderId||''),lastCheckedAt:row.lastCheckedAt||null,updatedAt:row.updatedAt||null,completedAt:row.completedAt||null,cancelledAt:row.cancelledAt||null,cancelReason:String(row.cancelReason||''),remains:row.remains??null,startCount:row.startCount??null,amountUsd:Number.isFinite(row.amountUsd)?row.amountUsd:null,source:String(row.source||''),sourceKey:String(row._firebaseKey||row.firebaseKey||''),legacyHistory:!!row.legacyHistory,readOnly:!!row.legacyHistory||!!row.readOnly,sources:Array.isArray(row._auditSources)?row._auditSources:[row.source].filter(Boolean)};
 }
 function auditPageFilter(rows,params,settings){
   const now=Date.now(),delayMs=settings.delayHours*3600000;
@@ -922,8 +928,8 @@ function auditPageFilter(rows,params,settings){
   const rangeMs=range==='today'?86400000:range==='7d'?7*86400000:range==='30d'?30*86400000:Infinity;const cutoff=rangeMs===Infinity?0:now-rangeMs;
   const records=rows.map(r=>auditPublicRecord(r,now,settings.delayHours));
   const inSelectedRange=r=>rangeMs===Infinity?true:(r.createdMs!==null&&r.createdMs>=cutoff);
-  const overdue=records.filter(r=>r.overdue), completed=records.filter(r=>r.status==='completed'&&inSelectedRange(r)),cancelled=records.filter(r=>r.status==='cancelled'&&inSelectedRange(r));
-  const openWithAge=records.filter(r=>r.ageMs!==null&&!auditTerminalStatus(r.status));const stats={overdue:overdue.length,over6:openWithAge.filter(r=>r.ageMs>=6*3600000).length,over12:openWithAge.filter(r=>r.ageMs>=12*3600000).length,completed:completed.length,cancelled:cancelled.length};
+  const overdue=records.filter(r=>!r.legacyHistory&&r.overdue), completed=records.filter(r=>r.status==='completed'&&inSelectedRange(r)),cancelled=records.filter(r=>r.status==='cancelled'&&inSelectedRange(r));
+  const openWithAge=records.filter(r=>!r.legacyHistory&&r.ageMs!==null&&!auditTerminalStatus(r.status));const stats={overdue:overdue.length,over6:openWithAge.filter(r=>r.ageMs>=6*3600000).length,over12:openWithAge.filter(r=>r.ageMs>=12*3600000).length,completed:completed.length,cancelled:cancelled.length};
   let list=records.filter(r=>{
     if(view==='lookup'&&!q)return false;
     if(view==='overdue'&&!r.overdue)return false;
@@ -975,7 +981,7 @@ async function runOrderAuditMonitor(){
     const snap=await loadOrderAuditSnapshot(true);if(!snap.firebaseAvailable)return;
     const now=Date.now(),state=await getOrderAuditState(),alerts={...(state.alerts||{})};let changed=false;
     // Escalation levels are fixed at 3/6/12 hours; the dashboard's configurable filter remains separate.
-    const rows=snap.rows.map(r=>auditPublicRecord(r,now,cfg.delayHours)).filter(r=>Number(r.ageMs||0)>=3*3600000&&!auditTerminalStatus(r.status)).sort((a,b)=>b.ageMs-a.ageMs).slice(0,150);
+    const rows=snap.rows.map(r=>auditPublicRecord(r,now,cfg.delayHours)).filter(r=>!r.legacyHistory&&Number(r.ageMs||0)>=3*3600000&&!auditTerminalStatus(r.status)).sort((a,b)=>b.ageMs-a.ageMs).slice(0,150);
     const levels=[{h:3,label:'🟠 إنذار أول — تأخير 3 ساعات',kind:'warning'},{h:6,label:'🔴 إنذار مرتفع — تأخير 6 ساعات',kind:'danger'},{h:12,label:'🚨 خطر حرج — تأخير 12 ساعة',kind:'critical'}];
     const work=[];
     for(const o of rows){const key=String(o.siteOrderId||o.id||o.providerOrderId||'');if(!key)continue;const old=alerts[key];const known={...(old&&typeof old==='object'?old:{}),levels:{...(old?.levels||{})}};if(old?.sentAt&&!known.levels['3'])known.levels['3']={sentAt:old.sentAt,status:old.status||''};for(const level of levels){if(Number(o.ageMs||0)>=level.h*3600000&&!known.levels[String(level.h)])work.push({o,key,level});}}
@@ -1346,13 +1352,13 @@ async function runTelegramNewOrdersMonitor(){
     if(!st.initialized){
       // Prevent an old-order flood on the first deploy, but don't silently skip orders created just now.
       const recent=[];
-      for(const row of (snap.rows||[])){const key=auditIdentity(row);if(!key)continue;const age=Number(row.createdMs||0)>0?now-Number(row.createdMs):Infinity;if(age<=10*60*1000&&!seen[key])recent.push(row);else seen[key]=seen[key]||{baselineAt:nowISO()};}
+      for(const row of (snap.rows||[])){const key=auditIdentity(row);if(!key)continue;if(row.legacyHistory){seen[key]=seen[key]||{baselineAt:nowISO(),source:'legacy-history'};continue;}const age=Number(row.createdMs||0)>0?now-Number(row.createdMs):Infinity;if(age<=10*60*1000&&!seen[key])recent.push(row);else seen[key]=seen[key]||{baselineAt:nowISO()};}
       await persistTelegramOrderState({initialized:true,seen});
       for(const row of recent.slice(0,25)){const key=auditIdentity(row);const r=await notifyTelegramNewOrder({...row,id:row.siteOrderId||row.id||'',_firebaseKey:row._firebaseKey||row.firebaseKey||'',source:row.source||''},{source:'monitor-first-scan'});if(r.ok)seen[key]={sentAt:nowISO(),source:'monitor-first-scan'};}
       if(recent.length)await persistTelegramOrderState({initialized:true,seen});
       return;
     }
-    const fresh=(snap.rows||[]).filter(row=>{const key=auditIdentity(row);return key&&!seen[key]}).sort((a,b)=>Number(a.createdMs||0)-Number(b.createdMs||0)).slice(0,25);
+    const fresh=(snap.rows||[]).filter(row=>{const key=auditIdentity(row);return !row.legacyHistory&&key&&!seen[key]}).sort((a,b)=>Number(a.createdMs||0)-Number(b.createdMs||0)).slice(0,25);
     for(const row of fresh){const key=auditIdentity(row);const siteId=String(row.siteOrderId||row.id||'');createUserNotification(row.user||row.username,{type:'order_created',orderId:siteId,status:String(row.status||'pending'),title:'تم استلام طلبك #'+siteId,message:'تم استلام طلب '+siteId+' لخدمة '+String(row.serviceName||'خدمة')+'، وسيتم تحديث الحالة هنا.',meta:{serviceName:String(row.serviceName||'خدمة'),quantity:Number(row.quantity||0),providerName:String(row.providerName||''),providerOrderId:String(row.providerOrderId||'')}});const r=await notifyTelegramNewOrder({...row,id:siteId,_firebaseKey:row._firebaseKey||row.firebaseKey||'',source:row.source||''},{source:'monitor'});if(r.ok)seen[key]={sentAt:nowISO(),source:'monitor'};}
     if(fresh.length&&Object.keys(seen).length)await persistTelegramOrderState({initialized:true,seen});
   }catch(e){console.warn('Telegram new-order monitor:',String(e.message||e).slice(0,180))}finally{TELEGRAM_ORDER_MONITOR_RUNNING=false;}
@@ -1431,6 +1437,25 @@ function statsSnapshot(range='all',ordersOverride=null){
   return {counts,...rangeMetrics,salesUsd:rangeMetrics.salesUsd,providerCostUsd:rangeMetrics.providerCostUsd,profitUsd:rangeMetrics.profitUsd,profitMarginPct:rangeMetrics.profitMarginPct,ordersToday:todayMetrics.orders,ordersWeek:weekMetrics.orders,salesTodayUsd:todayMetrics.salesUsd,salesWeekUsd:weekMetrics.salesUsd,costTodayUsd:todayMetrics.providerCostUsd,costWeekUsd:weekMetrics.providerCostUsd,profitTodayUsd:todayMetrics.profitUsd,profitWeekUsd:weekMetrics.profitUsd,highestOrderUsd:vals.length?Math.max(...vals):0,lowestOrderUsd:vals.length?Math.min(...vals):0,mostOrderedService:serviceMost?.[0]||null,mostOrderingUser:userMost?.[0]||null,highestProfitService:profitMost?{name:profitMost[0],profitUsd:Number(Number(profitMost[1]).toFixed(6))}:null,resetAt:reset||null,source:'local-or-merged',todayDate:todayKey,weekStartDate:weekStart};
 }
 
+function stableOrderCountIdentity(o,key=''){
+  if(!o||typeof o!=='object'||Array.isArray(o)||o.event)return '';
+  const user=String(o.user||o.username||o.userName||'').trim();
+  if(o.legacyHistory&&o.legacyImportKey!==undefined&&o.legacyImportKey!==null&&String(o.legacyImportKey).trim())return 'legacy:'+String(o.legacyImportKey).trim();
+  const id=String(o.id||o.siteOrderId||o.orderId||o.order_id||o.publicOrderNo||'').trim();
+  if(id)return 'order:'+user+':'+id;
+  const provider=String(o.providerOrderId||o.provider_order_id||o.smmpartyOrderId||'').trim();
+  if(provider)return 'provider:'+user+':'+String(o.providerId||o.provider_id||'')+':'+provider;
+  const stamp=String(o.createdAt||o.created_date||o.createdMs||'');
+  if(user&&(stamp||o.serviceId||o.serviceName))return 'fallback:'+user+':'+stamp+':'+String(o.serviceId||o.serviceName||'')+':'+String(o.quantity||'');
+  return key?'key:'+String(key):'';
+}
+function uniqueActualOrders(remoteOrders,localOrders=[]){
+  const map=new Map();
+  for(const [i,o] of collectionEntries(localOrders)){const id=stableOrderCountIdentity(o,'local-'+i);if(id)map.set(id,o);}
+  for(const [k,o] of collectionEntries(remoteOrders)){const id=stableOrderCountIdentity(o,k);if(id)map.set(id,{...(map.get(id)||{}),...o});}
+  return [...map.values()];
+}
+
 const MATH_CAPTCHA_CHALLENGES=new Map();
 function issueMathCaptcha(req){
   const now=Date.now();for(const [k,v] of MATH_CAPTCHA_CHALLENGES)if(v.expiresAt<now)MATH_CAPTCHA_CHALLENGES.delete(k);while(MATH_CAPTCHA_CHALLENGES.size>5000)MATH_CAPTCHA_CHALLENGES.delete(MATH_CAPTCHA_CHALLENGES.keys().next().value);
@@ -1466,14 +1491,14 @@ async function googleAuthLogin(credential){
 }
 
 
-// -------------------- Private legacy-database import (v1.5.75) --------------------
+// -------------------- Private legacy-database import (v1.5.76) --------------------
 // The ZIP is uploaded by an authenticated administrator. Personal data is staged only
 // under DATA (never in the public project folder or Git source), then orders are merged
 // with stable keys into the live Firebase orders node. Existing live orders are not replaced.
 const LEGACY_STAGE_FILE = 'legacy_import_staging.json';
 const LEGACY_USERS_PRIVATE_FILE = 'legacy_import_users_private.json';
 const LEGACY_IMPORT_STATE_FILE = 'legacy_import_state.json';
-const LEGACY_IMPORT_CONFIRM = 'IMPORT_LEGACY_DATABASE_1_5_75';
+const LEGACY_IMPORT_CONFIRM = 'IMPORT_LEGACY_DATABASE_1_5_76';
 const LEGACY_IMPORT_MAX_ZIP_BYTES = 18 * 1024 * 1024;
 const ZIP_CRC32_TABLE = (()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);t[n]=c>>>0;}return t;})();
 function zipCrc32(buffer){let c=0xFFFFFFFF;for(let i=0;i<buffer.length;i++)c=ZIP_CRC32_TABLE[(c^buffer[i])&0xFF]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
@@ -1551,6 +1576,50 @@ function legacyOrderResponseRecord(order,key){return {...order,source:order.lega
 
 async function routeAPI(req,res,urlObj){
   const p=normalizedPath(urlObj.pathname);
+
+  if(p==='/api/public/site-order-count'&&req.method==='GET'){
+    let remoteOrders;try{remoteOrders=await firebaseGetJson('orders',9000);}catch(e){return json(res,503,{ok:false,error:'تعذر قراءة عدّاد الطلبات الحقيقي من قاعدة الموقع. لم نعرض رقماً تخمينياً.',complete:false});}
+    const rows=uniqueActualOrders(remoteOrders,readJSON('orders.json',[]));
+    return json(res,200,{ok:true,count:rows.length,source:'firebase+server-ledger',complete:true,updatedAt:nowISO()});
+  }
+
+  if(p==='/api/admin/users-directory'&&req.method==='GET'){
+    if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
+    let remoteUsers={},remoteOrders={},ordersAvailable=true,warning='';
+    try{remoteUsers=await firebaseGetJson('users',12000);remoteUsers=remoteUsers||{};}catch(e){return json(res,503,{ok:false,error:'تعذر قراءة حسابات Firebase: '+String(e.message||e).slice(0,160)});}
+    try{remoteOrders=await firebaseGetJson('orders',15000);remoteOrders=remoteOrders||{};}catch(e){ordersAvailable=false;warning='تم تحميل المستخدمين، لكن تعذرت قراءة الطلبات الحقيقية: '+String(e.message||e).slice(0,120);}
+    const directory=normalizeCurrentUsers(remoteUsers);
+    const orders=ordersAvailable?uniqueActualOrders(remoteOrders,readJSON('orders.json',[])):[];
+    const countsByUser=new Map(),countsByLegacyId=new Map();
+    for(const o of orders){
+      const username=String(o.user||o.username||o.userName||'').trim();if(username)countsByUser.set(username,(countsByUser.get(username)||0)+1);
+      const legacyId=String(o.legacyUserId||'').trim();if(legacyId)countsByLegacyId.set(legacyId,(countsByLegacyId.get(legacyId)||0)+1);
+    }
+    const storedOld=readJSON(LEGACY_USERS_PRIVATE_FILE,[]);
+    const stage=await readLegacyStage();
+    const legacyUsers=Array.isArray(storedOld)&&storedOld.length?storedOld:(Array.isArray(stage?.users)?stage.users:[]);
+    const stageOrders=Array.isArray(stage?.orders)?stage.orders:[];
+    const legacyStageCounts=new Map();for(const o of stageOrders){const id=String(o.user_id||'');if(id)legacyStageCounts.set(id,(legacyStageCounts.get(id)||0)+1);}
+    const mapped=mapLegacyUsersToCurrent(legacyUsers,directory);
+    const result=directory.users.map(row=>{
+      const count=ordersAvailable?(countsByUser.get(row.username)||0):Number(row.user.totalOrders||0);
+      return {username:row.username,name:String(row.user.name||row.user.fullName||row.user.full_name||row.username),email:row.email||'',balance:Number(row.user.balance||0),totalOrders:count,storedTotalOrders:Number(row.user.totalOrders||0),level:String(row.user.level||'مبتدئ'),phone:String(row.user.phone||''),telegram:String(row.user.telegram||''),joined:String(row.user.joined||row.user.createdAt||''),role:String(row.user.role||'user'),readOnlyLegacy:false,hasCurrentAccount:true,legacyUserIds:[]};
+    });
+    const currentByKey=new Map(result.map((u,i)=>[directory.users[i].key,u]));
+    let matchedLegacyUsers=0,legacyOnlyUsers=0;
+    for(const old of legacyUsers){
+      const current=mapped.byLegacyId.get(String(old.id));
+      if(current){matchedLegacyUsers++;const row=currentByKey.get(current.key);if(row){row.legacyUserIds.push(String(old.id));if(ordersAvailable){const base=Math.max(countsByLegacyId.get(String(old.id))||0,0);if(base>0)row.totalOrders=Math.max(row.totalOrders,base);}}continue;}
+      legacyOnlyUsers++;
+      const id=String(old.id||'');
+      const count=ordersAvailable?(countsByLegacyId.get(id)||0):(legacyStageCounts.get(id)||0);
+      result.push({username:legacyAliasUser(id),name:String(old.arabic_name||old.full_name||old.fullName||('مستخدم قديم '+id.slice(0,8))),email:String(old.email||''),balance:Number((Number(old.balance||0)*FIXED_RATE).toFixed(4)),totalOrders:count,storedTotalOrders:count,level:'سجل قديم',phone:'',telegram:'',joined:String(old.created_date||''),role:'legacy',readOnlyLegacy:true,hasCurrentAccount:false,legacyUserId:id,legacyPending:!storedOld.length});
+    }
+    const q=String(urlObj.searchParams.get('q')||'').trim().toLowerCase();
+    const filtered=result.filter(u=>!q||[u.username,u.name,u.email,u.legacyUserId].some(v=>String(v||'').toLowerCase().includes(q)));
+    filtered.sort((a,b)=>Number(b.totalOrders||0)-Number(a.totalOrders||0)||String(b.joined||'').localeCompare(String(a.joined||''))||String(a.name||'').localeCompare(String(b.name||''),'ar'));
+    return json(res,200,{ok:true,users:filtered,total:result.length,currentUsers:directory.users.length,legacyUsers:legacyUsers.length,matchedLegacyUsers,legacyOnlyUsers,ordersAvailable,source:ordersAvailable?'firebase+server-ledger':'firebase-users-only',warning});
+  }
 
   // Administrator-only legacy database workflow. Uploaded archive is validated and stored
   // in the private DATA directory; database content is never served as static files.
@@ -1809,18 +1878,18 @@ async function routeAPI(req,res,urlObj){
     const orderMap=new Map();const add=o=>{if(!o||o.event||String(o.user||o.username||'')!==username)return;const id=String(o.legacyHistory?'legacy:'+o.legacyImportKey:(o.id||o.siteOrderId||o.orderId||o.order_id||o.providerOrderId||o.createdAt||''));if(id)orderMap.set(id,{...(orderMap.get(id)||{}),...o});};for(const o of readJSON('orders.json',[]))add(o);try{const rem=await firebaseGetJson('orders',9000);for(const [,o] of collectionEntries(rem))add(o);}catch(_){}
     const orders=[...orderMap.values()];const ledger=readJSON('balance_ledger.json',[]).filter(x=>String(x.user||'')===username);const deposits=ledger.filter(x=>['charge','deposit'].includes(String(x.type||''))).reduce((a,x)=>a+Number(x.amountUSD||Number(x.amountIQD||0)/FIXED_RATE||0),0);const spent=orders.reduce((a,o)=>a+Number(o.chargeUsd??Number(o.total||0)/FIXED_RATE),0);return json(res,200,{ok:true,user:{username,name:String(u.name||username),balanceUsd:Number((Number(u.balance||0)/FIXED_RATE).toFixed(6)),totalDepositsUsd:Number(deposits.toFixed(6)),totalSpentUsd:Number(spent.toFixed(6)),totalOrders:orders.length,legacyOrders:orders.filter(o=>o.legacyHistory).length,discountPct:Number(u.discountPct||0)}});
   }
-  if(p==='/api/admin/telegram' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const cfg=telegramConfig();return json(res,200,{ok:true,telegram:{enabled:cfg.enabled,tokenSet:!!cfg.token,chat:cfg.chat||'',activationChat:cfg.activationChat||'',overdueChat:cfg.overdueChat||'',activationEnvLocked:cfg.activationEnvLocked,overdueEnvLocked:cfg.overdueEnvLocked,extraChatsCount:(cfg.extraChats||[]).length}});}
+  if(p==='/api/admin/telegram' && req.method==='GET'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const cfg=telegramConfig();const storedCfg=readJSON('settings.json',{}).telegram||{};return json(res,200,{ok:true,telegram:{enabled:cfg.enabled,tokenSet:!!cfg.token,encryptionReady:telegramEncryptionReady(),durableStorage:DATA_IS_EXTERNAL,tokenFromEnvironment:!!String(process.env.TELEGRAM_BOT_TOKEN||'').trim(),tokenStoredEncrypted:!!storedCfg.tokenEncrypted,chat:cfg.chat||'',activationChat:cfg.activationChat||'',overdueChat:cfg.overdueChat||'',activationEnvLocked:cfg.activationEnvLocked,overdueEnvLocked:cfg.overdueEnvLocked,extraChatsCount:(cfg.extraChats||[]).length}});}
   if(p==='/api/admin/telegram' && req.method==='POST'){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const cfg=readJSON('settings.json',{});const tg=cfg.telegram||{};
     if(b.enabled!==undefined)tg.enabled=!!b.enabled;
-    const newToken=String(b.token||'').trim();if(newToken&&!telegramEncryptionReady())return json(res,503,{ok:false,error:'لا تتوفر وسيلة تشفير ثابتة للتوكن. استخدم SESSION_SECRET قويًا وثابتًا أو اربط Railway Volume دائمًا؛ لم يتم حفظ التوكن.'});if(newToken){tg.tokenEncrypted=encryptSecret(newToken);delete tg.token;}
+    const newToken=String(b.token||'').trim();if(newToken&&!telegramEncryptionReady())return json(res,503,{ok:false,error:'لم يُحفظ التوكن لحمايته. افتح Railway > مشروعك > Variables وأضف SESSION_SECRET بقيمة عشوائية ثابتة لا تقل عن 32 حرفاً (يفضل 64)، ثم أعد النشر. أو اربط Volume دائمًا واجعل SADA_DATA_DIR=/data. لا تضع التوكن داخل الكود ولا ترسله في المحادثة.'});if(newToken){tg.tokenEncrypted=encryptSecret(newToken);delete tg.token;}
     if(b.chat!==undefined)tg.chat=String(b.chat).trim();if(b.activationChat!==undefined&&!telegramConfig().activationEnvLocked){tg.activationChat=String(b.activationChat||'').trim();tg.chat=tg.activationChat||tg.chat||'';}if(b.overdueChat!==undefined&&!telegramConfig().overdueEnvLocked)tg.overdueChat=String(b.overdueChat||'').trim();
     // Migrate any legacy cleartext token before saving, never expose it in the response.
     if(tg.token&&!tg.tokenEncrypted){tg.tokenEncrypted=encryptSecret(tg.token);delete tg.token;}cfg.telegram=tg;writeJSON('settings.json',cfg);
     let firebaseChannelsSaved=false,firebaseSecretSaved=false;try{const channelData={activationChat:tg.activationChat||tg.chat||'',overdueChat:tg.overdueChat||'',enabled:tg.enabled!==false,updatedAt:nowISO()};await firebaseWriteJson('config/telegramChannels',channelData,6000);TELEGRAM_CHANNELS_REMOTE=channelData;firebaseChannelsSaved=true;}catch(e){console.warn('Telegram channel persistence Firebase failed:',String(e.message||e).slice(0,100));}
     if(tg.tokenEncrypted){try{await firebaseWriteJson('config/telegramSecret',{tokenEncrypted:tg.tokenEncrypted,updatedAt:nowISO()},6000);firebaseSecretSaved=true;}catch(e){console.warn('Encrypted Telegram secret Firebase persistence failed:',String(e.message||e).slice(0,100));}}
     const durable=DATA_IS_EXTERNAL||firebaseChannelsSaved&&(!tg.tokenEncrypted||firebaseSecretSaved);
-    if(!durable)return json(res,503,{ok:false,error:'حُفظت الإعدادات في المسار المحلي فقط لكن لم نتأكد من تخزين دائم. اربط Railway Volume بمسار /data أو أصلح صلاحية كتابة Firebase ثم أعد الحفظ.',persistent:false});
+    if(!durable)return json(res,503,{ok:false,error:'تمت محاولة حفظ الإعدادات محلياً فقط، لكن لم يتأكد الحفظ الدائم. افتح Railway Variables وأضف SESSION_SECRET ثابتاً قوياً، أو اربط Volume دائماً على /data مع SADA_DATA_DIR=/data. وتأكد من صلاحية الكتابة في Firebase ثم أعد الحفظ؛ لم نعتبر الإعدادات محفوظة.',persistent:false});
     return json(res,200,{ok:true,persistent:true,storageMode:firebaseChannelsSaved?'firebase+local':'external-volume',warning:tg.tokenEncrypted&&!firebaseSecretSaved?'تم حفظ الإعدادات على مساحة التخزين الدائمة، لكن نسخة Firebase المشفرة لم تتحدث.':undefined,telegram:{enabled:tg.enabled!==false,tokenSet:!!(process.env.TELEGRAM_BOT_TOKEN||tg.tokenEncrypted),chat:tg.activationChat||tg.chat||'',activationChat:tg.activationChat||tg.chat||'',overdueChat:tg.overdueChat||''}});
   }
   if(p==='/api/admin/telegram/test' && req.method==='POST'){if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const r=await sendTelegramDetailed(String(b.text||'✅ اختبار إشعارات صدى العراق'),{kind:'manual_test'});return json(res,r.ok?200:502,{ok:r.ok,error:r.ok?'تم إرسال اختبار Telegram':(r.description||r.error||'فشل إرسال اختبار Telegram'),status:r.status||null,messageId:r.messageId||null});}
@@ -1831,7 +1900,7 @@ async function routeAPI(req,res,urlObj){
 
   if(p==='/api/welcome-settings' && req.method==='GET'){
     const settings=readJSON('settings.json',{});let remote=null;try{remote=await firebaseGetJson('config/welcomePopup',3500)}catch(_){}
-    const v={...(settings.welcomePopup||{}),...(remote&&typeof remote==='object'?remote:{})};
+    const localWelcome=settings.welcomePopup&&typeof settings.welcomePopup==='object'?settings.welcomePopup:{};const remoteWelcome=remote&&typeof remote==='object'?remote:{};const v=(Date.parse(remoteWelcome.updatedAt||'')||0)>=(Date.parse(localWelcome.updatedAt||'')||0)?{...localWelcome,...remoteWelcome}:{...remoteWelcome,...localWelcome};
     const safeUrl=value=>{try{const u=new URL(String(value||''));return u.protocol==='https:'?u.toString():''}catch(_){return ''}};
     const cfg={welcome:{enabled:v.enabled!==false,showEveryEntry:v.showEveryEntry!==false,splashEnabled:v.splashEnabled!==false,title:String(v.title||'مرحباً بكم في صدى العراق!').slice(0,100),subtitle:String(v.subtitle||'مرحباً بك، يسعدنا حضورك. نحن إلى جانبك في كل وقت.').slice(0,240),tutorialTitle:String(v.tutorialTitle||'شرح التطبيق').slice(0,60),tutorialSubtitle:String(v.tutorialSubtitle||'شاهد شرح الاستخدام بالتفصيل').slice(0,100),tutorialUrl:safeUrl(v.tutorialUrl||settings.tutorialUrl||settings.youtubeUrl||''),whatsappTitle:String(v.whatsappTitle||'دعم الواتساب').slice(0,60),whatsappSubtitle:String(v.whatsappSubtitle||'تحدث معنا على واتساب').slice(0,100),whatsappUrl:safeUrl(v.whatsappUrl||settings.waUrl||settings.waNum||'https://wa.me/9647762267959')||normalizeWhatsAppUrl(settings.waUrl||settings.waNum||''),telegramTitle:String(v.telegramTitle||'قناة التليجرام').slice(0,60),telegramSubtitle:String(v.telegramSubtitle||'تابع آخر الأخبار والتحديثات').slice(0,100),telegramUrl:(()=>{const u=safeUrl(v.telegramUrl||settings.telegramChannelUrl||'https://t.me/jbhbhg58')||'https://t.me/jbhbhg58';return /^https:\/\/t\.me\/hddjh55\/?$/i.test(u)?'https://t.me/jbhbhg58':u})()}};
     return json(res,200,{ok:true,...cfg});
@@ -1839,7 +1908,7 @@ async function routeAPI(req,res,urlObj){
   if(p==='/api/admin/welcome-settings' && req.method==='GET'){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});
     const settings=readJSON('settings.json',{});let remote=null;try{remote=await firebaseGetJson('config/welcomePopup',5000)}catch(_){}
-    const welcome={...(settings.welcomePopup||{}),...(remote&&typeof remote==='object'?remote:{})};const tg=telegramConfig();
+    const localWelcome=settings.welcomePopup&&typeof settings.welcomePopup==='object'?settings.welcomePopup:{};const remoteWelcome=remote&&typeof remote==='object'?remote:{};const welcome=(Date.parse(remoteWelcome.updatedAt||'')||0)>=(Date.parse(localWelcome.updatedAt||'')||0)?{...localWelcome,...remoteWelcome}:{...remoteWelcome,...localWelcome};const tg=telegramConfig();
     return json(res,200,{ok:true,welcome:{enabled:welcome.enabled!==false,showEveryEntry:welcome.showEveryEntry!==false,splashEnabled:welcome.splashEnabled!==false,title:welcome.title||'مرحباً بكم في صدى العراق!',subtitle:welcome.subtitle||'مرحباً بك، يسعدنا حضورك. نحن إلى جانبك في كل وقت.',tutorialTitle:welcome.tutorialTitle||'شرح التطبيق',tutorialSubtitle:welcome.tutorialSubtitle||'شاهد شرح الاستخدام بالتفصيل',tutorialUrl:welcome.tutorialUrl||settings.tutorialUrl||settings.youtubeUrl||'',whatsappTitle:welcome.whatsappTitle||'دعم الواتساب',whatsappSubtitle:welcome.whatsappSubtitle||'تحدث معنا على واتساب',whatsappUrl:welcome.whatsappUrl||settings.waUrl||'https://wa.me/9647762267959',telegramTitle:welcome.telegramTitle||'قناة التليجرام',telegramSubtitle:welcome.telegramSubtitle||'تابع آخر الأخبار والتحديثات',telegramUrl:(()=>{const u=String(welcome.telegramUrl||'https://t.me/jbhbhg58');return /^https:\/\/t\.me\/hddjh55\/?$/i.test(u)?'https://t.me/jbhbhg58':u})()},channels:{activationChat:tg.activationChat||'',overdueChat:tg.overdueChat||'',activationEnvLocked:tg.activationEnvLocked,overdueEnvLocked:tg.overdueEnvLocked},telegram:{enabled:tg.enabled,tokenSet:!!tg.token}});
   }
   if(p==='/api/admin/welcome-settings' && req.method==='POST'){
@@ -1855,7 +1924,9 @@ async function routeAPI(req,res,urlObj){
     let firebaseWelcome=false,firebaseChannels=false,errors=[];
     try{await firebaseWriteJson('config/welcomePopup',welcome,7000);firebaseWelcome=true}catch(e){errors.push('welcome: '+String(e.message||e).slice(0,120))}
     try{const channelData={activationChat:tg.activationChat||'',overdueChat:tg.overdueChat||'',enabled:tg.enabled!==false,updatedAt:nowISO()};await firebaseWriteJson('config/telegramChannels',channelData,7000);TELEGRAM_CHANNELS_REMOTE=channelData;firebaseChannels=true}catch(e){errors.push('channels: '+String(e.message||e).slice(0,120))}
-    return json(res,200,{ok:true,welcome,channels:{activationChat:tg.activationChat||telegramConfig().activationChat||'',overdueChat:tg.overdueChat||telegramConfig().overdueChat||''},persisted:firebaseWelcome&&firebaseChannels||DATA_IS_EXTERNAL,firebaseWelcome,firebaseChannels,warning:firebaseWelcome&&firebaseChannels||DATA_IS_EXTERNAL?'':'حُفظت الإعدادات محلياً فقط؛ يلزم التأكد من Firebase أو تركيب تخزين Railway دائم.',errors});
+    const durable=(firebaseWelcome&&firebaseChannels)||DATA_IS_EXTERNAL;
+    if(!durable)return json(res,503,{ok:false,error:'لم يكتمل الحفظ الدائم. الخادم حفظ نسخة محلية مؤقتة فقط، لكن Firebase رفض حفظ الإعدادات ولا يوجد Railway Volume مؤكد. أصلح صلاحيات كتابة Firebase أو اربط Volume دائماً ثم أعد الحفظ.',welcome,channels:{activationChat:tg.activationChat||telegramConfig().activationChat||'',overdueChat:tg.overdueChat||telegramConfig().overdueChat||''},persisted:false,firebaseWelcome,firebaseChannels,errors});
+    return json(res,200,{ok:true,welcome,channels:{activationChat:tg.activationChat||telegramConfig().activationChat||'',overdueChat:tg.overdueChat||telegramConfig().overdueChat||''},persisted:true,firebaseWelcome,firebaseChannels,warning:!firebaseWelcome||!firebaseChannels?'تم الحفظ في مساحة دائمة لكن إحدى نسخ Firebase لم تتحدث. راجع التفاصيل قبل مغادرة الصفحة.':'',errors});
   }
   if(p==='/api/user/refunds' && req.method==='GET'){
     const username=userFromSession(req);if(!username)return json(res,401,{ok:false,error:'يجب تسجيل الدخول لعرض عمليات الاسترداد'});
