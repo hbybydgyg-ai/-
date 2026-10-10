@@ -13,16 +13,18 @@ const LEGACY_DATA = path.join(ROOT, 'data');
 const DATA = path.resolve(process.env.SADA_DATA_DIR || process.env.DATA_DIR || (process.env.RAILWAY_VOLUME_MOUNT_PATH ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sada-data') : LEGACY_DATA));
 const DATA_IS_EXTERNAL = path.resolve(DATA) !== path.resolve(LEGACY_DATA);
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.68';
-const BUILD_ID = 'SADA-1.5.68-HOME-STATS-MOTION-API-SPLASH-20261010';
+const APP_VERSION = '1.5.69';
+const BUILD_ID = 'SADA-1.5.69-SECURITY-PARTIAL-REFUND-AUTO-STATUS-20261010';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2';
+// Security: never ship a usable default administrator password. Configure ADMIN_PASSWORD or ADMIN_PASSWORD_HASH in the host environment.
+const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || '');
 const FIXED_RECEIVER = process.env.ASIACELL_RECEIVER || '07763308188';
 const FIXED_RATE = 1250; // 1 USD = 1,250 IQD
 // v1.5.40: signed stateless sessions survive Railway restarts/instance changes.
 const sessions = new Map(); // legacy sessions kept only during rolling deployments
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
-const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || 'sadairaq-session-secret-change-me');
+// A random fallback avoids a known signing key, but SESSION_SECRET must be configured consistently for persistent/multi-instance sessions.
+const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || crypto.randomBytes(32).toString('hex'));
 const SESSION_COOKIE = 'sadairaq_sid';
 const SESSION_TOKEN_HEADER = 'x-sada-session';
 const RATE_BUCKETS = new Map();
@@ -184,7 +186,7 @@ function isAdmin(req){ return session(req)?.role === 'admin'; }
 function safeEqual(a,b){ const aa=Buffer.from(String(a||'')); const bb=Buffer.from(String(b||'')); if(aa.length!==bb.length) return false; return crypto.timingSafeEqual(aa,bb); }
 function hashPassword(password){ const salt=crypto.randomBytes(16).toString('hex'); const hash=crypto.scryptSync(String(password),salt,64).toString('hex'); return `scrypt$${salt}$${hash}`; }
 function verifyPassword(password,stored){ const v=String(stored||''); if(!v.startsWith('scrypt$')) return safeEqual(password,v); const parts=v.split('$'); if(parts.length!==3) return false; try{return safeEqual(crypto.scryptSync(String(password),parts[1],64).toString('hex'),parts[2]);}catch(_){return false;} }
-function adminPasswordValid(password){ return process.env.ADMIN_PASSWORD_HASH ? verifyPassword(password,process.env.ADMIN_PASSWORD_HASH) : safeEqual(password,ADMIN_PASSWORD); }
+function adminPasswordValid(password){ if(String(process.env.ADMIN_PASSWORD_HASH||'').startsWith('scrypt$')) return verifyPassword(password,process.env.ADMIN_PASSWORD_HASH); return !!ADMIN_PASSWORD && safeEqual(password,ADMIN_PASSWORD); }
 function envProvider(){
   const id=String(process.env.SMM_PROVIDER_ID||process.env.PROVIDER_ID||'').trim();
   const name=String(process.env.SMM_PROVIDER_NAME||process.env.PROVIDER_NAME||'').trim() || id;
@@ -658,7 +660,10 @@ function ownedProviderOrder(username,providerId,providerOrderId){
 
 function nowISO(){ return new Date().toISOString(); }
 function sha256(v){ return crypto.createHash('sha256').update(String(v||'')).digest('hex'); }
-function apiCipherKey(){ return crypto.createHash('sha256').update(String(SESSION_SECRET)).digest(); }
+// Provider secrets use a dedicated key when configured. Legacy decrypt fallback preserves
+// provider credentials saved by older releases while the operator rotates to SADA_ENCRYPTION_KEY.
+const LEGACY_PROVIDER_ENCRYPTION_SECRET='sadairaq-session-secret-change-me';
+function apiCipherKey(secret=String(process.env.SADA_ENCRYPTION_KEY || process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || LEGACY_PROVIDER_ENCRYPTION_SECRET)){ return crypto.createHash('sha256').update(secret).digest(); }
 function encryptSecret(plain){
   const iv=crypto.randomBytes(12), c=crypto.createCipheriv('aes-256-gcm',apiCipherKey(),iv);
   const enc=Buffer.concat([c.update(String(plain||''),'utf8'),c.final()]);
@@ -666,12 +671,12 @@ function encryptSecret(plain){
   return Buffer.concat([iv,tag,enc]).toString('base64url');
 }
 function decryptSecret(blob){
-  try{
-    const b=Buffer.from(String(blob||''),'base64url'); if(b.length<28)return '';
-    const iv=b.subarray(0,12),tag=b.subarray(12,28),enc=b.subarray(28);
-    const d=crypto.createDecipheriv('aes-256-gcm',apiCipherKey(),iv);d.setAuthTag(tag);
-    return Buffer.concat([d.update(enc),d.final()]).toString('utf8');
-  }catch(_){ return ''; }
+  const b=Buffer.from(String(blob||''),'base64url'); if(b.length<28)return '';
+  const iv=b.subarray(0,12),tag=b.subarray(12,28),enc=b.subarray(28);
+  const candidates=[apiCipherKey()];
+  for(const secret of [process.env.SESSION_SECRET,process.env.ADMIN_PASSWORD,LEGACY_PROVIDER_ENCRYPTION_SECRET].filter(Boolean)){const key=apiCipherKey(String(secret));if(!candidates.some(existing=>existing.equals(key)))candidates.push(key);}
+  for(const key of candidates){try{const d=crypto.createDecipheriv('aes-256-gcm',key,iv);d.setAuthTag(tag);return Buffer.concat([d.update(enc),d.final()]).toString('utf8')}catch(_){}}
+  return '';
 }
 function newApiKey(){ return 'sr_'+crypto.randomBytes(32).toString('base64url'); }
 const API_USER_LOCKS=new Map();
@@ -958,8 +963,14 @@ async function applyVerifiedOrderRefund(inputOrder={},providerData={},normalized
     const quantity=Number(order.quantity||order.qty||0);
     const remainsVal=providerData.remains??providerData.remaining??order.remains;
     const remains=Number(remainsVal);
-    if(!Number.isFinite(quantity)||quantity<=0||remainsVal===undefined||remainsVal===null||String(remainsVal).trim()===''||!Number.isFinite(remains)||remains<0)return {ok:true,credited:false,state:'pending',reason:'partial-status-without-reliable-remains'};
-    if(remains===0)return {ok:true,credited:false,state:'no-refund-due',reason:'provider-reports-zero-undelivered-quantity'};
+    if(!Number.isFinite(quantity)||quantity<=0||remainsVal===undefined||remainsVal===null||String(remainsVal).trim()===''||!Number.isFinite(remains)||remains<0||remains>quantity)return {ok:true,credited:false,state:'pending',reason:'partial-status-without-reliable-remains'};
+    if(remains===0){
+      const rows=readJSON('orders.json',[]);let changed=false;
+      if(Array.isArray(rows)){for(let i=0;i<rows.length;i++){const x=rows[i];if(!x||x.event)continue;const sameId=String(order.id||order.siteOrderId||'')&&String(x.id||x.localId||'')===String(order.id||order.siteOrderId||'')&&String(x.user||'')===user;const sameProvider=String(order.providerOrderId||order.smmpartyOrderId||'')&&String(x.providerOrderId||x.smmpartyOrderId||'')===String(order.providerOrderId||order.smmpartyOrderId||'')&&String(x.user||'')===user;if(sameId||sameProvider){rows[i]={...x,refundState:'no_refund_due',refundLastUpdatedAt:nowISO()};changed=true;}}}
+      if(changed)writeJSON('orders.json',rows);
+      const fbKey=String(order._firebaseKey||order.firebaseKey||'');if(fbKey){try{await firebasePatchJson('orders/'+fbKey,{refundState:'no_refund_due',refundLastUpdatedAt:nowISO()},5000)}catch(_){}}
+      return {ok:true,credited:false,state:'no-refund-due',reason:'provider-reports-zero-undelivered-quantity'};
+    }
     target=Math.round(charged*Math.max(0,Math.min(1,remains/quantity))*10000)/10000;
   }
   const key=refundIdentity(order);const userPath='users/'+firebaseSafeKey(user);let transaction;
@@ -1006,7 +1017,7 @@ async function runRefundReconciliationMonitor(){
   if(runRefundReconciliationMonitor.running)return;runRefundReconciliationMonitor.running=true;
   try{
     const snapshot=await loadOrderAuditSnapshot(true);if(!snapshot.rows?.length)return;const now=Date.now();let examined=0;
-    const candidates=snapshot.rows.filter(r=>r.providerId&&r.providerOrderId&&(['pending','processing'].includes(r.status)||(['cancelled','partial'].includes(r.status)&&r.refundState!=='credited'))&&(!r.lastCheckedAt||now-(auditTimestamp(r.lastCheckedAt)||0)>180000)).sort((a,b)=>Number(a.createdMs||0)-Number(b.createdMs||0)).slice(0,12);
+    const candidates=snapshot.rows.filter(r=>r.providerId&&r.providerOrderId&&(['pending','processing'].includes(r.status)||(['cancelled','partial'].includes(r.status)&&!['credited','no_refund_due'].includes(String(r.refundState||''))))&&(!r.lastCheckedAt||now-(auditTimestamp(r.lastCheckedAt)||0)>180000)).sort((a,b)=>Number(a.createdMs||0)-Number(b.createdMs||0)).slice(0,12);
     for(const row of candidates){if(examined++>=12)break;try{const full=await resolveFinancialOrder(row);await ensureProviderRuntime(row.providerId);const prov=getProviderById(row.providerId,{allowSingleFallback:false}).prov;if(!prov?.url||!prov?.key)continue;const d=await providerRequest(prov,{action:'status',order:String(row.providerOrderId)},15000);const normalized=normalizeProviderStatus(d?.status??d?.data?.status??d?.result?.status??'');if(normalized==='unknown')continue;await syncVerifiedOrderStatus(full,d,normalized);}catch(e){console.warn('refund/order status monitor:',String(e.message||e).slice(0,120));}}
   }catch(e){console.warn('refund reconciliation monitor:',String(e.message||e).slice(0,160));}finally{runRefundReconciliationMonitor.running=false;}
 }
@@ -1745,28 +1756,64 @@ async function routeAPI(req,res,urlObj){
     const serviceRate=Number(svc.sellingUsd??svc.rateUsd??0); const localUser=readJSON('users.json',{users:{}}).users?.[username]||{}; const userDiscount=Math.max(0,Math.min(100,Number(localUser.discountPct??orderSession?.discountPct??0)||0)); const chargeUsd=Number((Math.max(0,quantity/1000*serviceRate*(1-userDiscount/100))).toFixed(6)); const chargeIqd=Number((chargeUsd*FIXED_RATE).toFixed(4));
     await ensureProviderRuntime(providerId); const {prov}=getProviderById(providerId); if(!prov)return json(res,404,{ok:false,error:'المزود المرتبط بالخدمة غير موجود',stage:'provider_lookup'});
     const result=await withApiUserLock(username,async()=>{
-      // The website wallet is Firebase; use a single transaction as the authoritative reservation.
+      // The server, not the browser, is authoritative for provider-order wallet reservations.
+      const reservationId=sha256(String(localId||'')+'|'+username).slice(0,40);
       let reserved=false,before=0,after=0;
+      async function markReservation(state){
+        if(isAdminSession||chargeIqd<=0)return;
+        try{await firebaseTransaction('users/'+firebaseSafeKey(username),current=>{
+          if(!current||typeof current!=='object'||Array.isArray(current))return {write:false,result:{error:'user-record-not-found'}};
+          const map=current.sadaOrderReservations&&typeof current.sadaOrderReservations==='object'?{...current.sadaOrderReservations}:{};
+          if(!map[reservationId])return {write:false,result:{missing:true}};
+          if(state==='complete'){delete map[reservationId];current.sadaOrderReservations=map;current.updatedAt=nowISO();return {write:true,value:current,result:{completed:true}};}
+          if(state==='release'){
+            const amount=Math.max(0,Number(map[reservationId].amountIQD||chargeIqd));
+            current.balance=Number((Number(current.balance||0)+amount).toFixed(4));delete map[reservationId];
+            current.sadaOrderReservations=map;current.updatedAt=nowISO();
+            return {write:true,value:current,result:{released:true,amountIQD:amount,balanceIQD:current.balance}};
+          }
+          map[reservationId]={...map[reservationId],state,updatedAt:nowISO()};current.sadaOrderReservations=map;current.updatedAt=nowISO();
+          return {write:true,value:current,result:{marked:true}};
+        },10000,8)}catch(e){console.warn('order reservation reconciliation:',String(e.message||e).slice(0,140))}
+      }
       if(chargeIqd>0 && !isAdminSession){
-        // Regular users must have sufficient synchronized wallet balance.
-        // Admin sessions are allowed to use the user order flow for testing/operations.
-        const localWallet=readJSON('users.json',{users:{}}).users?.[username];
-        const startBal=Number(localWallet?.balance||0); before=startBal;
-        if(localWallet && startBal<chargeIqd)return {insufficient:true,balanceUsd:Number((startBal/FIXED_RATE).toFixed(6))};
+        if(!localId||localId.length>100)return {walletUnavailable:true,error:'رقم تتبع الطلب مطلوب لإجراء حجز آمن'};
+        let tx;try{tx=await firebaseTransaction('users/'+firebaseSafeKey(username),current=>{
+          if(!current||typeof current!=='object'||Array.isArray(current))return {write:false,result:{error:'user-record-not-found'}};
+          const map=current.sadaOrderReservations&&typeof current.sadaOrderReservations==='object'?{...current.sadaOrderReservations}:{};
+          if(map[reservationId])return {write:false,result:{duplicateReservation:true,state:String(map[reservationId].state||'reserved')}};
+          const bal=Number(current.balance||0);if(!Number.isFinite(bal)||bal<chargeIqd)return {write:false,result:{insufficient:true,balanceIQD:Math.max(0,Number.isFinite(bal)?bal:0)}};
+          before=bal;after=Number((bal-chargeIqd).toFixed(4));current.balance=after;
+          map[reservationId]={localId,amountIQD:chargeIqd,state:'reserved',createdAt:nowISO(),providerId,serviceId};current.sadaOrderReservations=map;current.updatedAt=nowISO();
+          return {write:true,value:current,result:{reserved:true,beforeIQD:before,afterIQD:after}};
+        },10000,8)}catch(e){return {walletUnavailable:true,error:'تعذر حجز الرصيد بأمان في قاعدة البيانات: '+String(e.message||e).slice(0,100)}}
+        if(tx.result?.error)return {walletUnavailable:true,error:'لم يتم العثور على سجل رصيد موثوق للمستخدم في Firebase'};
+        if(tx.result?.insufficient)return {insufficient:true,balanceUsd:Number((Number(tx.result.balanceIQD||0)/FIXED_RATE).toFixed(6))};
+        if(tx.result?.duplicateReservation)return {duplicateReservation:true,state:tx.result.state};
+        reserved=!!tx.result?.reserved;before=Number(tx.result?.beforeIQD||0);after=Number(tx.result?.afterIQD||0);
+        if(!reserved)return {walletUnavailable:true,error:'تعذر تأكيد حجز الرصيد؛ لم يتم إرسال الطلب إلى المزود'};
+        appendJsonLedger('balance_ledger.json',{user:username,type:'order_reservation',amountUSD:Number((chargeIqd/FIXED_RATE).toFixed(6)),amountIQD:chargeIqd,beforeIQD:before,afterIQD:after,reason:'حجز رصيد قبل إرسال الطلب إلى المزود',admin:'system',reference:localId,createdAt:nowISO()});
       }
       try{
         const d=await providerRequest(prov,{action:'add',service:String(svc.providerServiceId||serviceId),link,quantity});
         const providerOrderId=normalizeProviderOrderId(d);
-        if(!providerOrderId){appendJsonLedger('provider_failures.json',{stage:'provider_response',uncertain:true,user:username,providerId,serviceId,link,quantity,error:'المزود لم يرجع رقم طلب واضح',providerResponse:safeProviderResponse(d),createdAt:nowISO()});return {error:'المزود لم يرجع رقم طلب واضح بعد عملية الإرسال',uncertain:true};}
+        if(!providerOrderId){await markReservation('uncertain');appendJsonLedger('provider_failures.json',{stage:'provider_response',uncertain:true,user:username,providerId,serviceId,localId,link,quantity,error:'المزود لم يرجع رقم طلب واضح',providerResponse:safeProviderResponse(d),createdAt:nowISO()});return {error:'المزود لم يرجع رقم طلب واضح بعد عملية الإرسال؛ تم تعليق الحجز لحين المراجعة لتجنب تكرار الطلب',uncertain:true};}
         const createdAt=nowISO(); const siteOrderId=String(localId||('EXT_'+Date.now()));
         const providerTrackingToken=issueProviderOrderTrackingToken({username,providerId,providerOrderId,siteOrderId});
         const platformFields=canonicalServicePlatform(svc);const ord={id:siteOrderId,localId:siteOrderId,user:username,providerId,providerName:prov.name||providerId,providerOrderId,serviceId,serviceName:String(svc.name||'خدمة'),serviceApp:platformFields.serviceApp,image:platformFields.image,platformIcon:platformFields.platformIcon,link,quantity,unitSellingUsd:serviceRate,discountPct:userDiscount,chargeUsd,total:chargeIqd,status:'pending',billingMode:isAdminSession?'admin-test':'user',providerRaw:safeProviderResponse(d),createdAt}; appendJsonLedger('orders.json',ord);
+        await markReservation('complete');
         return {ok:true,order:ord,providerTrackingToken};
       }catch(e){
-        const rejected=!!e.providerRejected; const authFail=providerAuthErrorText(e.message); appendJsonLedger('provider_failures.json',{stage:'website_provider_add',uncertain:!rejected,authFailure:authFail,user:username,providerId,serviceId,link,quantity,error:String(e.message||e),createdAt:nowISO()}); return {error:authFail?'مفتاح API للمزود مرفوض أو منتهي':String(e.message||e),uncertain:!rejected,authFailure:authFail};
+        const rejected=!!e.providerRejected; const authFail=providerAuthErrorText(e.message);
+        if(reserved&&rejected){
+          try{const refundTx=await firebaseTransaction('users/'+firebaseSafeKey(username),current=>{if(!current||typeof current!=='object'||Array.isArray(current))return {write:false,result:{error:'user-record-not-found'}};const map=current.sadaOrderReservations&&typeof current.sadaOrderReservations==='object'?{...current.sadaOrderReservations}:{};const rec=map[reservationId];if(!rec)return {write:false,result:{alreadyReleased:true}};const amount=Math.max(0,Number(rec.amountIQD||chargeIqd)),bal=Number(current.balance||0);current.balance=Number((bal+amount).toFixed(4));delete map[reservationId];current.sadaOrderReservations=map;current.updatedAt=nowISO();return {write:true,value:current,result:{released:true,beforeIQD:bal,afterIQD:current.balance,amountIQD:amount}}},10000,8);if(refundTx.result?.released)appendJsonLedger('balance_ledger.json',{user:username,type:'refund',amountUSD:Number((Number(refundTx.result.amountIQD||chargeIqd)/FIXED_RATE).toFixed(6)),amountIQD:Number(refundTx.result.amountIQD||chargeIqd),beforeIQD:refundTx.result.beforeIQD,afterIQD:refundTx.result.afterIQD,reason:'استرداد حجز بعد رفض المزود للطلب بشكل مؤكد',admin:'system-provider-rejection',reference:localId,createdAt:nowISO()});}catch(refundError){console.error('Failed to release rejected provider reservation:',String(refundError.message||refundError).slice(0,160))}
+        }else if(reserved){await markReservation('uncertain')}
+        appendJsonLedger('provider_failures.json',{stage:'website_provider_add',uncertain:!rejected,authFailure:authFail,user:username,providerId,serviceId,localId,link,quantity,error:String(e.message||e),createdAt:nowISO()}); return {error:authFail?'مفتاح API للمزود مرفوض أو منتهي':String(e.message||e),uncertain:!rejected,authFailure:authFail};
       }
     });
     if(result?.insufficient)return json(res,402,{ok:false,error:'رصيد المستخدم غير كافٍ',balanceUsd:result.balanceUsd});
+    if(result?.walletUnavailable)return json(res,503,{ok:false,error:result.error||'تعذر حجز الرصيد بأمان؛ لم يتم إرسال الطلب'});
+    if(result?.duplicateReservation)return json(res,409,{ok:false,error:'يوجد حجز سابق لهذا الطلب قيد التحقق؛ لم نرسل طلباً مكرراً.',uncertain:true,state:result.state});
     if(result?.error)return json(res,502,{ok:false,error:result.error,uncertain:!!result.uncertain,authFailure:!!result.authFailure});
     if(result?.ok){const siteId=String(result.order.id||localId||'');createUserNotification(username,{type:'order_created',orderId:siteId,status:'pending',title:'تم استلام طلبك #'+siteId,message:'تم استلام طلب '+siteId+' لخدمة '+String(result.order.serviceName||'خدمة')+'، وسيتم تحديث حالته هنا.',meta:{serviceName:String(result.order.serviceName||'خدمة'),quantity:Number(result.order.quantity||0),providerName:String(result.order.providerName||''),providerOrderId:String(result.order.providerOrderId||'')}});notifyTelegramNewOrder(result.order,{source:'backend'}).catch(()=>{});return json(res,200,{ok:true,siteOrderId:siteId,providerId,providerName:prov.name||providerId,providerOrderId:String(result.order.providerOrderId),providerTrackingToken:String(result.providerTrackingToken||''),providerRaw:result.order.providerRaw,providerBalanceBefore:null,chargeUsd,totalIQD:chargeIqd,discountPct:userDiscount,createdAt:result.order.createdAt});}
     return json(res,500,{ok:false,error:'تعذر إنشاء الطلب'});
@@ -2006,8 +2053,9 @@ function serveStatic(req,res,urlObj){
   const baseName=path.posix.basename(p).toLowerCase();
   const blockedFiles=new Set(['server.js','package.json','config.json','authproviders.json','login.json','noauth.json','cookies.txt']);
   if(blockedFiles.has(baseName) || /^\/data(?:\/|$)/i.test(p) || /(?:^|\/)\.(?:env|git|npmrc)/i.test(p)) return json(res,403,{error:'Forbidden'});
-  const file=path.normalize(path.join(ROOT,p));
-  if(!file.startsWith(ROOT)) return json(res,403,{error:'Forbidden'});
+  const file=path.resolve(ROOT,'.'+p);
+  const relative=path.relative(ROOT,file);
+  if(relative==='..'||relative.startsWith('..'+path.sep)||path.isAbsolute(relative)) return json(res,403,{error:'Forbidden'});
   fs.stat(file,(err,st)=>{
     if(err||!st.isFile()) return json(res,404,{error:'Not found'});
     const ext=path.extname(file).toLowerCase();
@@ -2093,6 +2141,9 @@ const server=http.createServer(async (req,res)=>{
 });
 server.listen(PORT,'0.0.0.0',()=>{
   console.log(`${APP_NAME} v${APP_VERSION} build ${BUILD_ID} running on port ${PORT}`);
+  if(!process.env.ADMIN_PASSWORD && !String(process.env.ADMIN_PASSWORD_HASH||'').startsWith('scrypt$')) console.warn('SECURITY WARNING: admin login disabled until ADMIN_PASSWORD or a scrypt ADMIN_PASSWORD_HASH is configured.');
+  if(!process.env.SESSION_SECRET) console.warn('SECURITY WARNING: configure a long random SESSION_SECRET for stable, multi-instance signed sessions.');
+  if(!process.env.SADA_ENCRYPTION_KEY) console.warn('SECURITY WARNING: configure SADA_ENCRYPTION_KEY to protect provider credentials at rest; legacy encrypted values remain readable during rotation.');
   // Bind HTTP before any remote Firebase hydration so saved sessions respond immediately.
   Promise.allSettled([hydrateProviderRuntimeFromFirebase(),hydrateTelegramChannelsFromFirebase()]).then(()=>{
     setTimeout(()=>{runOrderAuditMonitor().catch(()=>{});runTelegramNewOrdersMonitor().catch(()=>{});runRefundReconciliationMonitor().catch(()=>{});},15000).unref();

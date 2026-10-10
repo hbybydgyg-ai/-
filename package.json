@@ -1,6 +1,6 @@
 {
   "name": "sadairaq-railway",
-  "version": "1.5.68",
+  "version": "1.5.69",
   "private": true,
   "description": "صدى العراق - Railway deployment",
   "scripts": {
@@ -9,7 +9,7 @@
   "engines": {
     "node": ">=20"
   },
-  "buildId": "SADA-1.5.68-HOME-STATS-MOTION-API-SPLASH-20261010",
+  "buildId": "SADA-1.5.69-SECURITY-PARTIAL-REFUND-AUTO-STATUS-20261010",
   "dependencies": {
     "google-auth-library": "^11.2.0"
   }
