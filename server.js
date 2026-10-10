@@ -14,8 +14,8 @@ const LEGACY_DATA = path.join(ROOT, 'data');
 const DATA = path.resolve(process.env.SADA_DATA_DIR || process.env.DATA_DIR || (process.env.RAILWAY_VOLUME_MOUNT_PATH ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sada-data') : LEGACY_DATA));
 const DATA_IS_EXTERNAL = path.resolve(DATA) !== path.resolve(LEGACY_DATA);
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.76';
-const BUILD_ID = 'SADA-1.5.76-HOME-ORDERS-ADMIN-TELEGRAM-PERSISTENCE-20261010';
+const APP_VERSION = '1.5.77';
+const BUILD_ID = 'SADA-1.5.77-ORDER-PAGE-ACCOUNT-STATS-TELEGRAM-DIAGNOSTICS-20261010';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 // Restored the default administrator login from the supplied original release. Set ADMIN_PASSWORD in Railway to override it.
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2');
@@ -1883,7 +1883,7 @@ async function routeAPI(req,res,urlObj){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const cfg=readJSON('settings.json',{});const tg=cfg.telegram||{};
     if(b.enabled!==undefined)tg.enabled=!!b.enabled;
     const newToken=String(b.token||'').trim();if(newToken&&!telegramEncryptionReady())return json(res,503,{ok:false,error:'لم يُحفظ التوكن لحمايته. افتح Railway > مشروعك > Variables وأضف SESSION_SECRET بقيمة عشوائية ثابتة لا تقل عن 32 حرفاً (يفضل 64)، ثم أعد النشر. أو اربط Volume دائمًا واجعل SADA_DATA_DIR=/data. لا تضع التوكن داخل الكود ولا ترسله في المحادثة.'});if(newToken){tg.tokenEncrypted=encryptSecret(newToken);delete tg.token;}
-    if(b.chat!==undefined)tg.chat=String(b.chat).trim();if(b.activationChat!==undefined&&!telegramConfig().activationEnvLocked){tg.activationChat=String(b.activationChat||'').trim();tg.chat=tg.activationChat||tg.chat||'';}if(b.overdueChat!==undefined&&!telegramConfig().overdueEnvLocked)tg.overdueChat=String(b.overdueChat||'').trim();
+    if(b.chat!==undefined&&!telegramConfig().activationEnvLocked){tg.chat=String(b.chat||'').trim();tg.activationChat=tg.chat;}if(b.activationChat!==undefined&&!telegramConfig().activationEnvLocked){tg.activationChat=String(b.activationChat||'').trim();tg.chat=tg.activationChat||tg.chat||'';}if(b.overdueChat!==undefined&&!telegramConfig().overdueEnvLocked)tg.overdueChat=String(b.overdueChat||'').trim();
     // Migrate any legacy cleartext token before saving, never expose it in the response.
     if(tg.token&&!tg.tokenEncrypted){tg.tokenEncrypted=encryptSecret(tg.token);delete tg.token;}cfg.telegram=tg;writeJSON('settings.json',cfg);
     let firebaseChannelsSaved=false,firebaseSecretSaved=false;try{const channelData={activationChat:tg.activationChat||tg.chat||'',overdueChat:tg.overdueChat||'',enabled:tg.enabled!==false,updatedAt:nowISO()};await firebaseWriteJson('config/telegramChannels',channelData,6000);TELEGRAM_CHANNELS_REMOTE=channelData;firebaseChannelsSaved=true;}catch(e){console.warn('Telegram channel persistence Firebase failed:',String(e.message||e).slice(0,100));}

@@ -1,4 +1,4 @@
-تقرير فحص الإصدار 1.5.76 — صدى العراق
+تقرير فحص الإصدار 1.5.77 — صدى العراق
 =====================================
 
 التحديثات
@@ -13,7 +13,7 @@
 - منع استبدال الأرصدة الحالية ذات النشاط؛ الرصيد التاريخي لا يستعاد تلقائياً إلا في الحالات الآمنة، والباقي يظهر للمراجعة.
 - إصلاح اختيار إعداد الترحيب الأحدث عبر updatedAt، وجعل الخادم يرجع فشلاً واضحاً إذا لم يتأكد التخزين الدائم.
 - تحسين تشخيص إعدادات Telegram وحفظ التوكن مشفراً، مع رفض الحفظ عندما لا يتوفر مفتاح تشفير ثابت موثوق بدلاً من حفظ التوكن مكشوفاً.
-- توحيد وسم الإصدار وBuild ID إلى 1.5.76، بما في ذلك ترويسة استيراد قاعدة البيانات.
+- توحيد وسم الإصدار وBuild ID إلى 1.5.77، بما في ذلك ترويسة استيراد قاعدة البيانات.
 
 الاختبارات المنفذة
 ------------------
@@ -37,4 +37,12 @@
 - لا تُكتب بيانات قاعدة التصدير داخل مجلد عام أو داخل الأرشيف البرمجي. بعد نشر هذا الإصدار، ارفع SadaIraq_Database_Export.zip من لوحة الإدارة > الأرباح > ربط قاعدة البيانات القديمة، راجع المعاينة، ثم اضغط تأكيد الدمج.
 - يجب الحفاظ على قاعدة Firebase الحالية وRailway Volume ومسار DATA الحالي. لا تربط التطبيق بمجلد بيانات جديد أو فارغ.
 - لحفظ Telegram بأمان عبر واجهة الإدارة، عيّن SESSION_SECRET عشوائياً وثابتاً وطويلاً (يفضل 64 محرفاً)، أو SADA_ENCRYPTION_KEY عشوائياً وثابتاً، أو استخدم Railway Volume فعلياً ودائماً. لا ترسل هذه القيم أو Bot Token في المحادثة.
-- إنشاء ZIP لا ينشر الإصدار إلى Railway تلقائياً؛ يلزم رفعه إلى GitHub/وسيلة النشر الحالية، ثم التأكد من أن Build ID المعروض في /api/health هو SADA-1.5.76-HOME-ORDERS-ADMIN-TELEGRAM-PERSISTENCE-20261010.
+- إنشاء ZIP لا ينشر الإصدار إلى Railway تلقائياً؛ يلزم رفعه إلى GitHub/وسيلة النشر الحالية، ثم التأكد من أن Build ID المعروض في /api/health هو SADA-1.5.77-HOME-ORDERS-ADMIN-TELEGRAM-PERSISTENCE-20261010.
+
+
+## v1.5.77 checks
+- JavaScript bundle changed to place site-wide total-order card at the bottom of pg-order and open standard-user sessions there by default.
+- Account modal augmented with data from /api/user/summary only; errors do not substitute example numbers.
+- Telegram API errors now distinguish a missing token from a missing chat target and add human-readable guidance for chat-not-found, rights, and invalid-token errors.
+- Telegram configuration save runs getMe after persistence. A successful token check is not equivalent to channel delivery; channel test remains required.
+- Not tested against production Railway/Firebase/Telegram credentials in this artifact build.
