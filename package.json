@@ -1,6 +1,6 @@
 {
   "name": "sadairaq-railway",
-  "version": "1.5.73",
+  "version": "1.5.74",
   "private": true,
   "description": "صدى العراق - Railway deployment",
   "scripts": {
@@ -9,7 +9,7 @@
   "engines": {
     "node": ">=20"
   },
-  "buildId": "SADA-1.5.73-AUTH-EMAIL-FALLBACK-RESPONSIVE-STATS-20261010",
+  "buildId": "SADA-1.5.74-REGISTER-EMAIL-LOGIN-ASIACELL-TELEGRAM-ORDERS-20261010",
   "dependencies": {
     "google-auth-library": "^11.2.0"
   }

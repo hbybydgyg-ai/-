@@ -13,8 +13,8 @@ const LEGACY_DATA = path.join(ROOT, 'data');
 const DATA = path.resolve(process.env.SADA_DATA_DIR || process.env.DATA_DIR || (process.env.RAILWAY_VOLUME_MOUNT_PATH ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sada-data') : LEGACY_DATA));
 const DATA_IS_EXTERNAL = path.resolve(DATA) !== path.resolve(LEGACY_DATA);
 const APP_NAME = 'صدى العراق';
-const APP_VERSION = '1.5.73';
-const BUILD_ID = 'SADA-1.5.73-AUTH-EMAIL-FALLBACK-RESPONSIVE-STATS-20261010';
+const APP_VERSION = '1.5.74';
+const BUILD_ID = 'SADA-1.5.74-REGISTER-EMAIL-LOGIN-ASIACELL-TELEGRAM-ORDERS-20261010';
 const ADMIN_USER = process.env.ADMIN_EMAIL || 'hsydgyg5@gmail.com';
 // Restored the default administrator login from the supplied original release. Set ADMIN_PASSWORD in Railway to override it.
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'SrIraq!9vQ#4mL7@xK2');
@@ -28,6 +28,11 @@ const SESSION_SECRET = String(process.env.SESSION_SECRET || process.env.ADMIN_PA
 const SESSION_COOKIE = 'sadairaq_sid';
 const SESSION_TOKEN_HEADER = 'x-sada-session';
 const RATE_BUCKETS = new Map();
+// AsiaCell OTP state must persist across separate stateless-cookie API requests.
+// Keep access tokens server-side, keyed by a hash of the site's session token; never put them in the cookie.
+const ASIACELL_SESSIONS = new Map();
+const ASIACELL_SESSION_TTL_MS = 20 * 60 * 1000;
+setInterval(()=>{const now=Date.now();for(const [k,v] of ASIACELL_SESSIONS){if(now-Number(v.updatedAt||v.createdAt||0)>ASIACELL_SESSION_TTL_MS)ASIACELL_SESSIONS.delete(k);}if(ASIACELL_SESSIONS.size>5000){for(const [k,v] of ASIACELL_SESSIONS){if(now-Number(v.updatedAt||v.createdAt||0)>ASIACELL_SESSION_TTL_MS)ASIACELL_SESSIONS.delete(k);}}},60_000).unref();
 const RATE_RULES = { auth:{window:60_000,max:12}, captcha:{window:60_000,max:30}, email:{window:10*60_000,max:5}, provider:{window:60_000,max:20}, order:{window:60_000,max:20}, api:{window:60_000,max:60}, general:{window:60_000,max:60} };
 function clientIp(req){ return String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim(); }
 function rateLimit(req,bucket='general'){ const r=RATE_RULES[bucket]||RATE_RULES.general; const key=clientIp(req)+'|'+bucket; const now=Date.now(); let x=RATE_BUCKETS.get(key); if(!x||now-x.started>r.window)x={started:now,count:0}; x.count++; RATE_BUCKETS.set(key,x); if(x.count>r.max){ return Math.ceil((x.started+r.window-now)/1000); } return 0; }
@@ -571,8 +576,14 @@ function cleanPhone(v){
 
 async function apiAsiacell(req,res){
   const inBody=await bodyJSON(req); const action=String(inBody.action||'');
-  let s=session(req)?.asiacell;
-  if(action==='reset'){ const ss=session(req); if(ss) delete ss.asiacell; return json(res,200,{ok:true}); }
+  const webSession=session(req), rawSid=String(sid(req)||'').trim();
+  if(!webSession||!rawSid) return json(res,401,{error:'سجّل الدخول إلى حساب صدى العراق أولاً ثم أعد عملية الشحن.'});
+  const stateKey=sha256(rawSid);
+  let s=ASIACELL_SESSIONS.get(stateKey);
+  if(s&&(s.owner!==String(webSession.username||'')||Date.now()-Number(s.updatedAt||s.createdAt||0)>ASIACELL_SESSION_TTL_MS)){
+    ASIACELL_SESSIONS.delete(stateKey);s=null;
+  }
+  if(action==='reset'){ASIACELL_SESSIONS.delete(stateKey);return json(res,200,{ok:true});}
   if(action==='login'){
     const phone=cleanPhone(inBody.phone); if(!phone) return json(res,422,{error:'رقم آسياسيل غير صحيح. استخدم 077xxxxxxxx'});
     const headers=acHeaders();
@@ -580,41 +591,40 @@ async function apiAsiacell(req,res){
       const d=await acPost('https://odpapp.asiacell.com/api/v1/login?lang=en',headers,{captchaCode:'',username:phone});
       const next=String(d.nextUrl||''); const m=next.match(/PID=([a-f0-9-]+)/i);
       if(!m) throw new Error(d.message || 'فشل إرسال رمز SMS');
-      const ses=session(req); if(!ses) return json(res,401,{error:'جلسة الموقع منتهية، أعد المحاولة'});
-      ses.asiacell={phone,headers,pid:m[1],step:'sms',createdAt:Date.now()};
+      ASIACELL_SESSIONS.set(stateKey,{owner:String(webSession.username),phone,headers,pid:m[1],step:'sms',createdAt:Date.now(),updatedAt:Date.now()});
       return json(res,200,{ok:true,message:'تم إرسال رمز SMS إلى الرقم.'});
     }catch(e){ return json(res,502,{error:e.message}); }
   }
-  if(!s) return json(res,409,{error:'جلسة آسياسيل منتهية، ابدأ من جديد'});
+  if(!s) return json(res,409,{error:'انتهت جلسة آسياسيل أو أعيد تشغيل الخادم. ابدأ بخطوة إرسال رمز SMS من جديد.'});
   if(action==='verify_sms'){
-    if(s.step!=='sms') return json(res,409,{error:'الخطوة غير الصحيحة'});
+    if(s.step!=='sms') return json(res,409,{error:'خطوة التحقق غير متاحة؛ أعد إرسال رمز SMS.'});
     const code=String(inBody.passcode||'').trim(); if(!/^\d{4,8}$/.test(code)) return json(res,422,{error:'رمز SMS غير صحيح'});
     try{
       const d=await acPost('https://odpapp.asiacell.com/api/v1/smsvalidation?lang=en',s.headers,{PID:s.pid,passcode:code,token:''});
       if(!d.success || !d.access_token) throw new Error(d.message || 'رمز SMS غير صحيح');
-      s.headers.Authorization='Bearer '+d.access_token; s.step='amount';
+      s.headers.Authorization='Bearer '+d.access_token; s.step='amount'; s.updatedAt=Date.now();
       return json(res,200,{ok:true,message:'تم التحقق من الرقم بنجاح.'});
     }catch(e){ return json(res,502,{error:e.message}); }
   }
   if(action==='start_transfer'){
-    if(s.step!=='amount') return json(res,409,{error:'تحقق من الرقم أولاً'});
+    if(s.step!=='amount') return json(res,409,{error:'تحقق من رقم آسياسيل أولاً.'});
     const amount=Number(inBody.amount||0);
     if(!Number.isInteger(amount) || amount<1000 || amount>10000 || amount%1000!==0) return json(res,422,{error:'المبلغ يجب أن يكون بين 1,000 و10,000 د.ع وبمضاعفات 1,000'});
     try{
       const d=await acPost('https://odpapp.asiacell.com/api/v1/credit-transfer/start?lang=ar',s.headers,{amount,receiverMsisdn:FIXED_RECEIVER});
       if(!d.PID) throw new Error(d.message || 'فشل بدء التحويل');
-      s.pid_transfer=String(d.PID); s.amount=amount; s.step='transfer_sms';
+      s.pid_transfer=String(d.PID); s.amount=amount; s.step='transfer_sms'; s.updatedAt=Date.now();
       return json(res,200,{ok:true,message:'تم إرسال رمز تأكيد التحويل.',usd:amount/FIXED_RATE,transferPid:s.pid_transfer});
     }catch(e){ return json(res,502,{error:e.message}); }
   }
   if(action==='confirm_transfer'){
-    if(s.step!=='transfer_sms') return json(res,409,{error:'لا توجد عملية تحويل بانتظار التأكيد'});
+    if(s.step!=='transfer_sms') return json(res,409,{error:'لا توجد عملية تحويل بانتظار التأكيد أو سبق تأكيدها.'});
     const code=String(inBody.passcode||'').trim(); if(!/^\d{4,8}$/.test(code)) return json(res,422,{error:'رمز التأكيد غير صحيح'});
     try{
       const d=await acPost('https://odpapp.asiacell.com/api/v1/credit-transfer/do-transfer?lang=ar',s.headers,{PID:s.pid_transfer,passcode:code});
       if(!d.success) throw new Error(d.message || 'فشل التحويل');
-      s.step='completed';
-      const amount=Number(s.amount); return json(res,200,{ok:true,message:'تم التحويل بنجاح',usd:amount/FIXED_RATE,amountIQD:amount,phone:s.phone||'',transferPid:s.pid_transfer});
+      s.step='completed'; s.updatedAt=Date.now();
+      const amount=Number(s.amount); return json(res,200,{ok:true,message:'تم تأكيد التحويل بنجاح من آسياسيل.',usd:amount/FIXED_RATE,amountIQD:amount,phone:s.phone||'',transferPid:s.pid_transfer});
     }catch(e){ return json(res,502,{error:e.message}); }
   }
   return json(res,422,{error:'عملية غير معروفة'});
@@ -724,7 +734,33 @@ function sha256(v){ return crypto.createHash('sha256').update(String(v||'')).dig
 // Provider secrets use a dedicated key when configured. Legacy decrypt fallback preserves
 // provider credentials saved by older releases while the operator rotates to SADA_ENCRYPTION_KEY.
 const LEGACY_PROVIDER_ENCRYPTION_SECRET='sadairaq-session-secret-change-me';
-function apiCipherKey(secret=String(process.env.SADA_ENCRYPTION_KEY || process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || LEGACY_PROVIDER_ENCRYPTION_SECRET)){ return crypto.createHash('sha256').update(secret).digest(); }
+function persistentEncryptionSecret(){
+  // A random key is safe as a fallback only when DATA is on durable storage; never claim a
+  // release-local key will survive redeployment or encrypt remotely persisted secrets with it.
+  if(!DATA_IS_EXTERNAL)return '';
+  const file=path.join(DATA,'.sada-encryption-key');
+  try{
+    fs.mkdirSync(DATA,{recursive:true});
+    const existing=String(fs.readFileSync(file,'utf8')||'').trim();
+    if(existing.length>=32)return existing;
+  }catch(_){}
+  try{
+    const value=crypto.randomBytes(48).toString('base64url');
+    try{fs.writeFileSync(file,value,{encoding:'utf8',flag:'wx',mode:0o600});return value;}
+    catch(e){if(e&&e.code==='EEXIST'){const existing=String(fs.readFileSync(file,'utf8')||'').trim();if(existing.length>=32)return existing;}throw e;}
+  }catch(e){console.warn('Persistent encryption key unavailable:',String(e.message||e).slice(0,100));return '';}
+}
+function preferredEncryptionSecret(){
+  const dedicated=String(process.env.SADA_ENCRYPTION_KEY||'').trim();if(dedicated)return dedicated;
+  const sessionSecret=String(process.env.SESSION_SECRET||'').trim();
+  if(sessionSecret.length>=32 && sessionSecret!=='sadairaq-session-secret-change-me')return sessionSecret;
+  return persistentEncryptionSecret();
+}
+function telegramEncryptionReady(){return !!preferredEncryptionSecret();}
+function apiCipherKey(secret){
+  const chosen=arguments.length?String(secret||''):String(preferredEncryptionSecret()||process.env.SESSION_SECRET||process.env.ADMIN_PASSWORD||LEGACY_PROVIDER_ENCRYPTION_SECRET);
+  return crypto.createHash('sha256').update(chosen).digest();
+}
 function encryptSecret(plain){
   const iv=crypto.randomBytes(12), c=crypto.createCipheriv('aes-256-gcm',apiCipherKey(),iv);
   const enc=Buffer.concat([c.update(String(plain||''),'utf8'),c.final()]);
@@ -735,7 +771,7 @@ function decryptSecret(blob){
   const b=Buffer.from(String(blob||''),'base64url'); if(b.length<28)return '';
   const iv=b.subarray(0,12),tag=b.subarray(12,28),enc=b.subarray(28);
   const candidates=[apiCipherKey()];
-  for(const secret of [process.env.SESSION_SECRET,process.env.ADMIN_PASSWORD,LEGACY_PROVIDER_ENCRYPTION_SECRET].filter(Boolean)){const key=apiCipherKey(String(secret));if(!candidates.some(existing=>existing.equals(key)))candidates.push(key);}
+  for(const secret of [process.env.SESSION_SECRET,process.env.ADMIN_PASSWORD,LEGACY_PROVIDER_ENCRYPTION_SECRET,persistentEncryptionSecret()].filter(Boolean)){const key=apiCipherKey(String(secret));if(!candidates.some(existing=>existing.equals(key)))candidates.push(key);}
   for(const key of candidates){try{const d=crypto.createDecipheriv('aes-256-gcm',key,iv);d.setAuthTag(tag);return Buffer.concat([d.update(enc),d.final()]).toString('utf8')}catch(_){}}
   return '';
 }
@@ -1195,10 +1231,9 @@ function providerAuthErrorText(t){ return /invalid|incorrect|wrong|unauthori[sz]
 let TELEGRAM_CHANNELS_REMOTE={};
 function readTelegramStoredSecret(settings){
   const tg=settings?.telegram&&typeof settings.telegram==='object'?settings.telegram:{};
-  if(tg.tokenEncrypted){if(!String(process.env.SADA_ENCRYPTION_KEY||'').trim()&&!String(process.env.TELEGRAM_BOT_TOKEN||'').trim()){console.warn('Stored Telegram token is paused until SADA_ENCRYPTION_KEY is configured.');return '';}const plain=decryptSecret(tg.tokenEncrypted);if(plain)return plain;}
-  // Migrate legacy plaintext only after a dedicated encryption key is configured. Keep the original
-  // on disk for recovery, but fail closed rather than sending with an exposed legacy token.
-  if(tg.token){if(!String(process.env.SADA_ENCRYPTION_KEY||'').trim()){console.warn('Legacy Telegram token is paused until SADA_ENCRYPTION_KEY is configured.');return '';}try{tg.tokenEncrypted=encryptSecret(String(tg.token));delete tg.token;settings.telegram=tg;writeJSON('settings.json',settings);return decryptSecret(tg.tokenEncrypted)||'';}catch(e){console.warn('Telegram token migration failed:',String(e.message||e).slice(0,100));}}
+  if(tg.tokenEncrypted){if(!telegramEncryptionReady()&&!String(process.env.TELEGRAM_BOT_TOKEN||'').trim()){console.warn('Stored Telegram token is paused because a local encryption key could not be read or created.');return '';}const plain=decryptSecret(tg.tokenEncrypted);if(plain)return plain;}
+  // Migrate legacy plaintext only when a stable key can protect it at rest.
+  if(tg.token){if(!telegramEncryptionReady()){console.warn('Legacy Telegram token migration paused because an encryption key could not be read or created.');return '';}try{tg.tokenEncrypted=encryptSecret(String(tg.token));delete tg.token;settings.telegram=tg;writeJSON('settings.json',settings);return decryptSecret(tg.tokenEncrypted)||'';}catch(e){console.warn('Telegram token migration failed:',String(e.message||e).slice(0,100));}}
   return '';
 }
 function telegramConfig(){
@@ -1629,7 +1664,7 @@ async function routeAPI(req,res,urlObj){
   if(p==='/api/admin/telegram' && req.method==='POST'){
     if(!isAdmin(req))return json(res,403,{ok:false,error:'غير مصرح'});const b=await bodyJSON(req);const cfg=readJSON('settings.json',{});const tg=cfg.telegram||{};
     if(b.enabled!==undefined)tg.enabled=!!b.enabled;
-    const newToken=String(b.token||'').trim();if(newToken&&!String(process.env.SADA_ENCRYPTION_KEY||'').trim())return json(res,503,{ok:false,error:'لا يمكن حفظ Bot Token بأمان قبل ضبط SADA_ENCRYPTION_KEY في Railway Variables؛ لم يتم حفظ التوكن.'});if(newToken){tg.tokenEncrypted=encryptSecret(newToken);delete tg.token;}
+    const newToken=String(b.token||'').trim();if(newToken&&!telegramEncryptionReady())return json(res,503,{ok:false,error:'لا تتوفر وسيلة تشفير ثابتة للتوكن. استخدم SESSION_SECRET قويًا وثابتًا أو اربط Railway Volume دائمًا؛ لم يتم حفظ التوكن.'});if(newToken){tg.tokenEncrypted=encryptSecret(newToken);delete tg.token;}
     if(b.chat!==undefined)tg.chat=String(b.chat).trim();if(b.activationChat!==undefined&&!telegramConfig().activationEnvLocked){tg.activationChat=String(b.activationChat||'').trim();tg.chat=tg.activationChat||tg.chat||'';}if(b.overdueChat!==undefined&&!telegramConfig().overdueEnvLocked)tg.overdueChat=String(b.overdueChat||'').trim();
     // Migrate any legacy cleartext token before saving, never expose it in the response.
     if(tg.token&&!tg.tokenEncrypted){tg.tokenEncrypted=encryptSecret(tg.token);delete tg.token;}cfg.telegram=tg;writeJSON('settings.json',cfg);
@@ -1718,45 +1753,36 @@ async function routeAPI(req,res,urlObj){
     const b=await bodyJSON(req);const captchaError=consumeMathCaptcha(req,b);if(captchaError)return json(res,422,{ok:false,error:captchaError,captchaFailed:true});
     const u=String(b.username||'').trim(),pw=String(b.password||'');
     if(String(b.action||'')==='register'){
-      if(!/^[a-zA-Z0-9_]+$/.test(u)) return json(res,422,{ok:false,error:'اسم المستخدم يجب أن يكون بالإنجليزية والأرقام فقط'});
+      const name=String(b.name||'').trim().replace(/\s+/g,' ');
+      if(!/^[a-zA-Z0-9]{5,32}$/.test(u)) return json(res,422,{ok:false,error:'اسم المستخدم يجب أن يكون 5 أحرف أو أرقام إنجليزية على الأقل، من دون مسافات.'});
+      if(name.length<3||name.length>80||!/\p{Script=Arabic}/u.test(name))return json(res,422,{ok:false,error:'اكتب اسمك الكامل باللغة العربية.'});
       if(pw.length<8) return json(res,422,{ok:false,error:'كلمة المرور يجب أن تكون 8 أحرف على الأقل'});
-      const email=normalizeEmail(b.email);if(!validEmail(email))return json(res,422,{ok:false,error:'أدخل بريدك الإلكتروني الصحيح حتى نرسل رمز التحقق.'});
+      const email=normalizeEmail(b.email);if(!validEmail(email))return json(res,422,{ok:false,error:'أدخل بريدك الإلكتروني الصحيح.'});
       if(u.toLowerCase()===ADMIN_USER.toLowerCase()) return json(res,409,{ok:false,error:'اسم المستخدم محجوز'});
       const store=readJSON('users.json',{users:{}});if(Object.keys(store.users||{}).some(k=>k.toLowerCase()===u.toLowerCase()))return json(res,409,{ok:false,error:'اسم المستخدم موجود مسبقاً'});
       let remoteCheck;try{remoteCheck=await findRemoteUserByUsername(u);}catch(e){return json(res,503,{ok:false,error:'تعذر التحقق من الحسابات القديمة في قاعدة البيانات. لم ننشئ حساباً مكرراً؛ أعد المحاولة بعد قليل.'});}
       if(remoteCheck)return json(res,409,{ok:false,error:'اسم المستخدم موجود مسبقاً في قاعدة الحسابات الحالية'});
       let emailAccount;try{emailAccount=await findAccountByEmail(email);}catch(e){return json(res,503,{ok:false,error:'تعذر التحقق من البريد في قاعدة البيانات؛ لم ننشئ حساباً جديداً.'});}
-      if(emailAccount)return json(res,409,{ok:false,error:'هذا البريد مرتبط بحساب موجود بالفعل. سجّل الدخول أو استخدم استعادة كلمة المرور.'});
-      if(!String(b.emailCode||'')){
-        const emailWait=rateLimit(req,'email');if(emailWait)return json(res,429,{ok:false,error:'طلبات البريد كثيرة؛ أعد المحاولة بعد '+emailWait+' ثانية'},{'Retry-After':String(emailWait)});
-        try{await beginEmailChallenge(email,'register',u,'تأكيد البريد الإلكتروني');return json(res,200,{ok:true,verificationRequired:true,message:'أرسلنا رمز تحقق حقيقياً إلى بريدك. أدخله لإكمال إنشاء الحساب.'});}
-        catch(e){
-          // Requested fallback: if real email delivery is not available, allow an explicitly unverified account.
-          // Never label it verified; password recovery remains unavailable until the address is verified later.
-          const sendError=String(e.message||'تعذر إرسال رمز البريد').slice(0,220);
-          const now=nowISO();
-          console.warn('Registration email verification unavailable; using unverified fallback:',sendError);
-          const user={username:u,name:u,email,emailVerified:false,passwordHash:hashPassword(pw),balance:0,level:'مبتدئ',telegram:'',phone:'',joined:now,totalSpent:0,totalOrders:0,role:'user'};
-          store.users[u]=user;writeJSON('users.json',store);
-          let firebaseSaved=false;
-          try{await firebaseWriteJson('users/'+firebaseSafeKey(u),user,5000);firebaseSaved=true;}catch(remoteErr){console.warn('Unverified registration Firebase mirror unavailable:',String(remoteErr.message||remoteErr).slice(0,120));}
-          if(!firebaseSaved&&!DATA_IS_EXTERNAL){delete store.users[u];writeJSON('users.json',store);return json(res,503,{ok:false,error:'تعذر حفظ الحساب في قاعدة بيانات دائمة. لم نكمل التسجيل حتى لا يضيع حسابك؛ راجع إعداد التخزين الدائم.'});}
-          const sessionToken=setSession(res,{role:'user',username:u});const clean={...user};delete clean.password;delete clean.passwordHash;
-          return json(res,200,{ok:true,role:'user',username:u,user:clean,sessionToken,emailVerified:false,emailVerificationAvailable:false,emailFallback:true,message:'تم إنشاء الحساب، لكن تعذر إرسال رمز تحقق الآن. البريد غير موثّق؛ يمكنك استخدام الحساب والتحقق من بريدك لاحقاً من إعدادات الحساب.'});
-        }
-      }
-      const verified=consumeEmailChallenge(email,'register',String(b.emailCode||''),u);if(!verified.ok)return json(res,422,{ok:false,error:verified.error});
-      const now=nowISO();const user={username:u,name:u,email,emailVerified:true,emailVerifiedAt:now,passwordHash:hashPassword(pw),balance:0,level:'مبتدئ',telegram:String(b.telegram||''),phone:String(b.phone||''),joined:now,totalSpent:0,totalOrders:0,role:'user'};
+      if(emailAccount)return json(res,409,{ok:false,error:'هذا البريد مرتبط بحساب موجود بالفعل. سجّل الدخول باستخدامه أو باسم المستخدم.'});
+      const now=nowISO();
+      const user={username:u,name,email,emailVerified:false,passwordHash:hashPassword(pw),balance:0,level:'مبتدئ',telegram:'',phone:'',joined:now,totalSpent:0,totalOrders:0,role:'user'};
       store.users[u]=user;writeJSON('users.json',store);
-      let firebaseSaved=false;try{await firebaseWriteJson('users/'+firebaseSafeKey(u),user,5000);firebaseSaved=true;}catch(e){console.warn('New user Firebase mirror unavailable:',String(e.message||e).slice(0,120));}
-      if(!firebaseSaved&&!DATA_IS_EXTERNAL){delete store.users[u];writeJSON('users.json',store);return json(res,503,{ok:false,error:'تم التحقق من البريد لكن التخزين الدائم غير مضبوط. لم يكتمل إنشاء الحساب ولم يتم تسجيل الدخول؛ اربط Railway Volume أو Firebase قبل إعادة المحاولة.'});}
-      const sessionToken=setSession(res,{role:'user',username:u});const clean={...user};delete clean.password;delete clean.passwordHash;return json(res,200,{ok:true,role:'user',username:u,user:clean,sessionToken,emailVerified:true});
+      let firebaseSaved=false;
+      try{await firebaseWriteJson('users/'+firebaseSafeKey(u),user,5000);firebaseSaved=true;}
+      catch(e){console.warn('New account Firebase mirror unavailable:',String(e.message||e).slice(0,120));}
+      if(!firebaseSaved&&!DATA_IS_EXTERNAL){delete store.users[u];writeJSON('users.json',store);return json(res,503,{ok:false,error:'تعذر التأكد من حفظ الحساب بشكل دائم. لم نكمل التسجيل حتى لا يضيع الحساب؛ أعد المحاولة بعد استقرار قاعدة البيانات.'});}
+      const sessionToken=setSession(res,{role:'user',username:u});const clean={...user};delete clean.password;delete clean.passwordHash;
+      return json(res,200,{ok:true,role:'user',username:u,user:clean,sessionToken,emailVerified:false,message:'تم إنشاء حسابك بنجاح. يمكنك الدخول باسم المستخدم أو البريد الإلكتروني.'});
     }
     if(u.toLowerCase()===ADMIN_USER.toLowerCase()&&adminPasswordValid(pw)){const sessionToken=setSession(res,{role:'admin',username:ADMIN_USER});return json(res,200,{ok:true,role:'admin',username:ADMIN_USER,sessionToken});}
     const store=readJSON('users.json',{users:{}});let actualUsername=u;let user=store.users?.[u]||null;
     if(!user){const found=Object.entries(store.users||{}).find(([key,val])=>key.toLowerCase()===u.toLowerCase()||String(val?.username||'').toLowerCase()===u.toLowerCase());if(found){actualUsername=found[0];user=found[1];}}
     let remoteRecord=null,remoteLookupFailed=false;
     if(!user){try{remoteRecord=await findRemoteUserByUsername(u);if(remoteRecord){actualUsername=remoteRecord.username||u;user=remoteRecord.user;}}catch(e){remoteLookupFailed=true;console.warn('Legacy Firebase login lookup failed:',String(e.message||e).slice(0,120));}}
+    if(!user&&validEmail(u)){
+      try{const foundByEmail=await findAccountByEmail(u);if(foundByEmail&&foundByEmail.source!=='admin'){actualUsername=String(foundByEmail.username||foundByEmail.user?.username||u);user=foundByEmail.user;remoteRecord={username:actualUsername,user,firebasePath:foundByEmail.firebasePath||('users/'+firebaseSafeKey(actualUsername))};}}
+      catch(e){remoteLookupFailed=true;console.warn('Email login lookup failed:',String(e.message||e).slice(0,120));}
+    }
     if(user&&verifyPassword(pw,user.passwordHash||user.password||user.passHash||user.pass||'')){
       // Mirror a remote-only legacy account locally without replacing its financial/order fields.
       if(!store.users[actualUsername]||!String(user.passwordHash||'').startsWith('scrypt$')){const upgraded={...(store.users[actualUsername]||user),...user,username:actualUsername};if(!String(user.passwordHash||'').startsWith('scrypt$'))upgraded.passwordHash=hashPassword(pw);delete upgraded.password;delete upgraded.pass;delete upgraded.passHash;store.users[actualUsername]=upgraded;writeJSON('users.json',store);
@@ -1775,7 +1801,7 @@ async function routeAPI(req,res,urlObj){
     const b=await bodyJSON(req),email=normalizeEmail(b.email);if(!validEmail(email))return json(res,422,{ok:false,error:'أدخل عنوان بريد إلكتروني صحيحاً.'});
     let account=null;try{account=await findAccountByEmail(email);}catch(e){return json(res,503,{ok:false,error:'تعذر فحص قاعدة الحسابات الآن. لم نغيّر أي حساب؛ أعد المحاولة بعد قليل.'});}
     // Same public response for existing and unknown emails to reduce account enumeration.
-    if(!account||account.source!=='admin'&&account.user?.emailVerified!==true)return json(res,200,{ok:true,message:'إذا كان البريد موثقاً ومرتبطاً بحساب، فستصلك رسالة استعادة.'});
+    if(!account)return json(res,200,{ok:true,message:'إذا كان البريد مرتبطاً بحساب، فستصلك رسالة استعادة.'});
     if(account.source==='admin'&&(process.env.ADMIN_PASSWORD||process.env.ADMIN_PASSWORD_HASH))return json(res,503,{ok:false,error:'كلمة مرور الإدارة مضبوطة من متغيرات الاستضافة؛ حدّث ADMIN_PASSWORD أو ADMIN_PASSWORD_HASH من Railway.'});
     try{await beginEmailChallenge(email,'reset',account.username,'استعادة كلمة المرور');return json(res,200,{ok:true,message:'إذا كان البريد مرتبطاً بحساب، فستصلك رسالة استعادة.'});}
     catch(e){return json(res,Number(e.statusCode)||502,{ok:false,error:String(e.message||'تعذر إرسال رسالة الاستعادة').slice(0,260)});}
@@ -2233,7 +2259,7 @@ async function routeAPI(req,res,urlObj){
     const deploymentConsistent=uiVersion===APP_VERSION && uiBuildId===BUILD_ID && versionFile===APP_VERSION && buildFile===BUILD_ID;
     const health={ok:true,app:APP_NAME,version:APP_VERSION,buildId:BUILD_ID,uiVersion,uiBuildId,versionFile,buildFile,deploymentConsistent,dataStorageMode:DATA_IS_EXTERNAL?'external-directory':'release-local',providerCount:Object.keys(providerStore().providers||{}).length,time:new Date().toISOString(),node:process.version};
     // Keep operational configuration details private; only an authenticated admin can inspect them.
-    if(isAdmin(req))health.securityConfig={sessionSecretConfigured:!!String(process.env.SESSION_SECRET||'').trim(),dedicatedEncryptionKeyConfigured:!!String(process.env.SADA_ENCRYPTION_KEY||'').trim(),firebaseConfigured:!!String(process.env.FIREBASE_DATABASE_URL||'').trim(),emailServiceConfigured:!!(String(process.env.RESEND_API_KEY||'').trim()&&String(process.env.RESEND_FROM_EMAIL||process.env.EMAIL_FROM||'').trim()),telegramTokenFromEnvironment:!!String(process.env.TELEGRAM_BOT_TOKEN||'').trim(),adminPasswordFromEnvironment:!!(String(process.env.ADMIN_PASSWORD||'').trim()||String(process.env.ADMIN_PASSWORD_HASH||'').trim())};
+    if(isAdmin(req))health.securityConfig={sessionSecretConfigured:!!String(process.env.SESSION_SECRET||'').trim(),dedicatedEncryptionKeyConfigured:!!String(process.env.SADA_ENCRYPTION_KEY||'').trim(),stableEncryptionAvailable:telegramEncryptionReady(),firebaseConfigured:!!String(process.env.FIREBASE_DATABASE_URL||'').trim(),emailServiceConfigured:!!(String(process.env.RESEND_API_KEY||'').trim()&&String(process.env.RESEND_FROM_EMAIL||process.env.EMAIL_FROM||'').trim()),telegramTokenFromEnvironment:!!String(process.env.TELEGRAM_BOT_TOKEN||'').trim(),adminPasswordFromEnvironment:!!(String(process.env.ADMIN_PASSWORD||'').trim()||String(process.env.ADMIN_PASSWORD_HASH||'').trim())};
     return json(res,200,health);
   }
   return json(res,404,{error:'API endpoint not found'});
@@ -2335,7 +2361,7 @@ server.listen(PORT,'0.0.0.0',()=>{
   console.log(`${APP_NAME} v${APP_VERSION} build ${BUILD_ID} running on port ${PORT}`);
   if(!process.env.ADMIN_PASSWORD) console.warn('SECURITY WARNING: the legacy default admin password is enabled; set ADMIN_PASSWORD in production.');
   if(!process.env.SESSION_SECRET) console.warn('SECURITY WARNING: configure a long random SESSION_SECRET for stable, multi-instance signed sessions.');
-  if(!process.env.SADA_ENCRYPTION_KEY) console.warn('SECURITY WARNING: configure SADA_ENCRYPTION_KEY to protect provider credentials at rest; legacy encrypted values remain readable during rotation.');
+  if(!process.env.SADA_ENCRYPTION_KEY && !telegramEncryptionReady()) console.warn('SECURITY WARNING: could not create a stable encryption key; set a strong fixed SESSION_SECRET or attach persistent Railway storage.');
   // Bind HTTP before any remote Firebase hydration so saved sessions respond immediately.
   Promise.allSettled([hydrateProviderRuntimeFromFirebase(),hydrateTelegramChannelsFromFirebase()]).then(()=>{
     setTimeout(()=>{runOrderAuditMonitor().catch(()=>{});runTelegramNewOrdersMonitor().catch(()=>{});runRefundReconciliationMonitor().catch(()=>{});},15000).unref();
